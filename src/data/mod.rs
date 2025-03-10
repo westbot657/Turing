@@ -1,2 +1,2 @@
-mod game_objects;
-mod types;
+pub mod game_objects;
+pub mod types;

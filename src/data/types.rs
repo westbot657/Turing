@@ -1,33 +1,7 @@
 
 
-#[repr("C")]
-#[derive(Copy, Clone)]
-pub struct Vec3 {
-    x: f32,
-    y: f32,
-    z: f32,
-}
-
-#[repr("C")]
-#[derive(Copy, Clone)]
-pub struct Vec4 {
-    x: f32,
-    y: f32,
-    z: f32,
-    w: f32,
-}
-
-#[repr("C")]
-#[derive(Copy, Clone)]
-pub struct Quat {
-    x: f32,
-    y: f32,
-    z: f32,
-    w: f32,
-}
-
-#[repr("C")]
-#[derive(Copy, Clone)]
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
 pub struct Color {
     r: f32,
     g: f32,
@@ -35,29 +9,21 @@ pub struct Color {
     a: f32,
 }
 
-
-impl Vec3 {
-    pub fn new(x: f32, y: f32, z: f32) -> Self {
-        Vec3 { x, y, z }
+impl Color {
+    pub fn new(r: f32, g: f32, b: f32, a: f32) -> Color {
+        Color { r, g, b, a }
     }
 
-    pub fn zero() -> Self {
-        Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+    pub fn zero() -> Color {
+        Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }
     }
 
-    pub fn splat(v: f32) -> Self {
-        Vec3 { x: v, y: v, z: v }
-    }
-}
-
-impl Quat {
-    pub fn new(x: f32, y: f32, z: f32, w: f32) -> Self {
-        Quat { x, y, z, w }
+    pub fn black() -> Color {
+        Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }
     }
 
-    pub fn identity() -> Self {
-        Quat { x: 0.0, y: 0.0, z: 0.0, w: 1.0 }
+    pub fn white() -> Color {
+        Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 }
     }
 }
-
 

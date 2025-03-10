@@ -1,9 +1,3 @@
+pub mod wasm_interpreter;
 
-struct WasmInterpreter {
-
-}
-
-impl WasmInterpreter {
-
-}
 
