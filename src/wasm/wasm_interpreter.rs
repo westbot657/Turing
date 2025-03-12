@@ -1,12 +1,22 @@
 use std::fs;
 use anyhow::{anyhow, Result};
-use serde_json::Value;
 use wasmi::*;
+use wasmi::core::UntypedVal;
 use wat;
+use crate::data::beatmap_types::Beatmap;
+use crate::data::game_objects::*;
+use crate::{add_color_note_to_beatmap, create_color_note, get_beatmap};
 
+struct HostState {
 
+}
 
-type HostState = u32; // idk what this is or what it means or how it's used
+impl HostState {
+    fn new() -> HostState {
+        HostState {}
+    }
+}
+
 pub struct WasmInterpreter {
     engine: Engine,
     store: Store<HostState>,
@@ -19,11 +29,12 @@ impl WasmInterpreter {
         let mut config = Config::default();
         config.enforced_limits(EnforcedLimits::strict());
         let engine = Engine::new(&config);
-        let mut store = Store::new(&engine, 0);
+        let mut store = Store::new(&engine, HostState::new());
         let mut linker = <Linker<HostState>>::new(&engine);
 
-        bind_data(&engine, &mut store, &mut linker);
-
+        unsafe {
+            bind_data(&engine, &mut store, &mut linker).expect("Failed to setup wasm environment");
+        }
         WasmInterpreter {
             engine,
             store,
@@ -32,7 +43,6 @@ impl WasmInterpreter {
         }
     }
 
-    /// TODO: make this method take in beatmap data and bind it for global use (and any other global data)
     pub fn load_script(&mut self, path: &str) -> Result<()> {
 
         let data = fs::read_to_string(path)?;
@@ -72,27 +82,69 @@ impl WasmInterpreter {
         self.call_void_method("update")
     }
 
-
-
-
 }
 
-fn bind_data(engine: &Engine, store: &mut Store<HostState>, linker: &mut Linker<HostState>) {
 
+macro_rules! unpack_ref {
+    ($store:ident, $var_in:ident => $var:ident : $typ:ty $body:block ) => {
+        if let Some(macro_ref) = $var_in {
+            if let Some(macro_any) = macro_ref.data($store) {
+                let $var = macro_any.downcast_ref::<$typ>().unwrap();
+                $body
+            }
+        }
+    };
+}
+
+unsafe fn bind_data(engine: &Engine, store: &mut Store<HostState>, linker: &mut Linker<HostState>) -> Result<()> {
+
+    // wasm names are prefixed with '_' so that languages
+    // can have abstraction layers to turn stuff into normal
+    // structures for the language, and use non-prefixed names
+
+    // GLOBAL VARIABLES
+    let beatmap: Beatmap = get_beatmap();
+    let global_beatmap = Global::new(store, Val::ExternRef(ExternRef::new(store, beatmap)), Mutability::Const);
+    linker.define("env", "_beatmap", global_beatmap)?;
+
+
+    // GLOBAL FUNCTIONS
+    let function_create_color_note = Func::wrap(store, |caller: Caller<'_, HostState>| {
+        let note = create_color_note();
+        Val::ExternRef(ExternRef::new(store, note))
+    });
+    linker.define("env", "_create_color_note", function_create_color_note)?;
+
+
+    // INSTANCE FUNCTIONS
+    let method_beatmap_add_note = Func::wrap(store, |caller: Caller<'_, HostState>, beatmap_opt: Option<ExternRef>, note_opt: Option<ExternRef>| {
+        unpack_ref!(store, beatmap_opt => beatmap: Beatmap {
+            unpack_ref!(store, note_opt => note: ColorNote {
+                add_color_note_to_beatmap(note);
+            })
+        });
+
+    });
+    linker.define("env", "_beatmap_add_color_note", method_beatmap_add_note)?;
+
+
+    Ok(())
 }
 
 #[cfg(test)]
 mod wasm_tests {
     use std::fs;
     use anyhow::Result;
+    use wasmprinter::print_bytes;
 
     #[test]
     fn test_wasm() -> Result<()> {
-        let data = fs::read_to_string(r"C:\Users\Westb\Desktop\turing_wasm\pkg\turing_wasm_bg.wasm")?;
+        let data = fs::read(r"C:\Users\Westb\Desktop\turing_wasm\target\wasm32-unknown-unknown\debug\turing_wasm.wasm")?;
 
-        let wasm = wat::parse_str(&data)?;
+        let wasm = wat::parse_bytes(&data)?;
 
-        println!("{:#?}", wasm);
+
+        println!("{:#}", print_bytes(&wasm)?);
 
         Ok(())
     }

@@ -2,8 +2,8 @@ mod wasm;
 mod data;
 
 use std::ffi::CString;
-use std::sync::{LazyLock, Mutex, RwLock};
 use data::game_objects::*;
+use crate::data::beatmap_types::Beatmap;
 use crate::wasm::wasm_interpreter::WasmInterpreter;
 
 static mut WASM_INTERPRETER: Option<WasmInterpreter> = None;
@@ -11,8 +11,13 @@ static mut WASM_INTERPRETER: Option<WasmInterpreter> = None;
 
 // Functions that rust calls, and are defined in c#/c++
 extern "C" { // function hooks to beat saber
+
+    // Mod systems
+    pub fn get_beatmap() -> Beatmap;
+    pub fn add_color_note_to_beatmap(note: ColorNote);
+
     // Vanilla systems
-    // ask beat saber to instantiate objects, and then modify their data
+    // ask beat saber to instantiate objects, and then rust modifies their data
     pub fn create_color_note() -> ColorNote;
     pub fn create_bomb() -> BombNote;
     pub fn create_wall() -> Wall;
