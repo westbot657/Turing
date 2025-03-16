@@ -3,9 +3,7 @@ use anyhow::{anyhow, Result};
 use wasmi::*;
 use wasmi::core::UntypedVal;
 use wat;
-use crate::data::beatmap_types::Beatmap;
 use crate::data::game_objects::*;
-use crate::{add_color_note_to_beatmap, create_color_note, get_beatmap};
 
 struct HostState {
 
@@ -103,29 +101,23 @@ unsafe fn bind_data(engine: &Engine, store: &mut Store<HostState>, linker: &mut 
     // structures for the language, and use non-prefixed names
 
     // GLOBAL VARIABLES
-    let beatmap: Beatmap = get_beatmap();
-    let global_beatmap = Global::new(store, Val::ExternRef(ExternRef::new(store, beatmap)), Mutability::Const);
-    linker.define("env", "_beatmap", global_beatmap)?;
 
 
     // GLOBAL FUNCTIONS
-    let function_create_color_note = Func::wrap(store, |caller: Caller<'_, HostState>| {
-        let note = create_color_note();
-        Val::ExternRef(ExternRef::new(store, note))
-    });
-    linker.define("env", "_create_color_note", function_create_color_note)?;
+    // let function_create_color_note = Func::wrap(store, |caller: Caller<'_, HostState>| {
+    //     let note = create_color_note();
+    //     Val::ExternRef(ExternRef::new(store, note))
+    // });
+    // linker.define("env", "_create_color_note", function_create_color_note)?;
 
 
     // INSTANCE FUNCTIONS
-    let method_beatmap_add_note = Func::wrap(store, |caller: Caller<'_, HostState>, beatmap_opt: Option<ExternRef>, note_opt: Option<ExternRef>| {
-        unpack_ref!(store, beatmap_opt => beatmap: Beatmap {
-            unpack_ref!(store, note_opt => note: ColorNote {
-                add_color_note_to_beatmap(note);
-            })
-        });
-
-    });
-    linker.define("env", "_beatmap_add_color_note", method_beatmap_add_note)?;
+    // let method_beatmap_add_note = Func::wrap(store, |caller: Caller<'_, HostState>, note_opt: Option<ExternRef>| {
+    //     unpack_ref!(store, note_opt => note: ColorNote {
+    //         add_color_note_to_beatmap(note);
+    //     });
+    // });
+    // linker.define("env", "_beatmap_add_color_note", method_beatmap_add_note)?;
 
 
     Ok(())
