@@ -3,6 +3,7 @@ use anyhow::{anyhow, Result};
 use wasmi::*;
 use wasmi::core::UntypedVal;
 use wat;
+use crate::*;
 use crate::data::game_objects::*;
 
 struct HostState {
@@ -104,20 +105,20 @@ unsafe fn bind_data(engine: &Engine, store: &mut Store<HostState>, linker: &mut 
 
 
     // GLOBAL FUNCTIONS
-    // let function_create_color_note = Func::wrap(store, |caller: Caller<'_, HostState>| {
-    //     let note = create_color_note();
-    //     Val::ExternRef(ExternRef::new(store, note))
-    // });
-    // linker.define("env", "_create_color_note", function_create_color_note)?;
+    let function_create_color_note = Func::wrap(store, |caller: Caller<'_, HostState>, beat: f32| {
+        let note = create_color_note(beat);
+        Val::ExternRef(ExternRef::new(store, note))
+    });
+    linker.define("env", "_create_color_note", function_create_color_note)?;
 
 
     // INSTANCE FUNCTIONS
-    // let method_beatmap_add_note = Func::wrap(store, |caller: Caller<'_, HostState>, note_opt: Option<ExternRef>| {
-    //     unpack_ref!(store, note_opt => note: ColorNote {
-    //         add_color_note_to_beatmap(note);
-    //     });
-    // });
-    // linker.define("env", "_beatmap_add_color_note", method_beatmap_add_note)?;
+    let method_beatmap_add_note = Func::wrap(store, |caller: Caller<'_, HostState>, note_opt: Option<ExternRef>| {
+        unpack_ref!(store, note_opt => note: *mut ColorNote {
+            beatmap_add_color_note(note);
+        });
+    });
+    linker.define("env", "_beatmap_add_color_note", method_beatmap_add_note)?;
 
 
     Ok(())

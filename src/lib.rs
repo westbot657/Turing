@@ -81,10 +81,32 @@ macro_rules! extern_fn {
             }
         }
     };
+    ( $name:ident ( $( $param:ident: $typ:ty ),* ) -> $ret:ty as $cname:tt : $ext_typ:ty $body:block $fallback:block ) => {
+        #[no_mangle]
+        pub fn $name( $( $param: $typ ),* ) -> $ret {
+            let map = FUNCTION_MAP.lock().unwrap();
+            if let Some(_macro_arc) = map.get(stringify!($cname)) {
+                let _macro_raw_ptr = _macro_arc.load(std::sync::atomic::Ordering::SeqCst);
+                // this is actually VERY unsafe, but as long as the C# code exposes the correct method with the correct argument count and correct types, then it should be fine.
+                let $cname: $ext_typ = unsafe { mem::transmute(_macro_raw_ptr) };
+                $body
+            } else {
+                $fallback
+            }
+        }
+    };
+}
+
+macro_rules! cs_unreachable {
+    () => {
+        unreachable!("This should not be reachable as long as C# defines everything correctly")
+    };
 }
 
 // Type aliases for the function pointers
 type FnStrPtrRetNull = extern "C" fn(*const c_char);
+type FnFloatRetNote = extern "C" fn(f32) -> *mut ColorNote;
+type FnNoteRetNull = extern "C" fn(*mut ColorNote);
 
 extern_fn!(print_out(message: &str) -> () as cs_print : FnStrPtrRetNull {
     let c_string = CString::new(message).unwrap();
@@ -92,6 +114,15 @@ extern_fn!(print_out(message: &str) -> () as cs_print : FnStrPtrRetNull {
     unsafe { cs_print(c_ptr) }
 });
 
+extern_fn!(create_color_note(beat: f32) -> *mut ColorNote as create_note : FnFloatRetNote {
+    create_note(beat)
+} {
+    cs_unreachable!()
+});
+
+extern_fn!(beatmap_add_color_note(note: *mut ColorNote) -> () as add_note_to_map : FnNoteRetNull {
+    add_note_to_map(note);
+});
 
 
 
