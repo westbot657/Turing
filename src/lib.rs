@@ -39,19 +39,10 @@ pub struct Note {
 }
 
 
-// Global mutable static to store the callback
-// static CS_PRINT_CALLBACK: Mutex<CsPrintFunc> = Mutex::new(None);
-
 lazy_static::lazy_static! {
     static ref FUNCTION_MAP: Mutex<HashMap<String, std::sync::Arc<AtomicPtr<c_void>>>> = Mutex::new(HashMap::new());
 }
 
-/// Sets the callback function for cs_print.
-// #[no_mangle]
-// pub extern "C" fn set_cs_print(func: CsPrintFunc) {
-//     let mut callback = CS_PRINT_CALLBACK.lock().unwrap();
-//     *callback = func;
-// }
 
 #[no_mangle]
 unsafe extern "C" fn register_function(function_name: *const c_char, func_ptr: *mut c_void) {
@@ -125,8 +116,10 @@ extern_fn!(beatmap_add_color_note(note: *mut ColorNote) -> () as add_note_to_map
 });
 
 
+//////////////////////////////////////////////////////
+// Functions that c#/c++ calls are defined here
 
-// Functions that c#/c++ calls and are defined here
+
 #[no_mangle]
 pub unsafe extern "C" fn initialize_wasm() {
     WASM_INTERPRETER = Some(WasmInterpreter::new());
@@ -154,6 +147,10 @@ pub unsafe extern "C" fn call_script_init() {
     }
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn bind_colornote(note: ColorNote) {
+
+}
 
 // end of c#/c++ -> rust defs
 
