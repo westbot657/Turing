@@ -1,5 +1,4 @@
 use glam::{Vec3, Quat};
-use crate::data::types::Color;
 
 pub trait GameObject {
     fn get_position(&self) -> Vec3;
@@ -8,82 +7,58 @@ pub trait GameObject {
 
 
 #[repr(C)]
-#[derive(Debug, Clone)]
-pub struct TransformData {
-    position: Vec3,
-    rotation: Quat,
-    scale: Vec3,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone)]
-pub struct BeatmapObjectData {
-    color: Color,
-    njs: f32
-}
-
-
-#[repr(C)]
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct ColorNote {
-    transform: TransformData,
-    data: BeatmapObjectData,
+    reference_id: i32
 }
 
 #[repr(C)]
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct BombNote {
-    transform: TransformData,
-    data: BeatmapObjectData,
+    reference_id: i32
 }
 
 #[repr(C)]
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct Arc {
-    transform: TransformData,
-    data: BeatmapObjectData,
+    reference_id: i32
 }
 
 #[repr(C)]
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct ChainHeadNote {
-    transform: TransformData,
-    data: BeatmapObjectData,
+    reference_id: i32
 }
 
 #[repr(C)]
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct ChainLinkNote {
-    transform: TransformData,
-    data: BeatmapObjectData,
+    reference_id: i32
 }
 
 #[repr(C)]
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct ChainNote {
-    transform: TransformData,
-    data: BeatmapObjectData,
+    reference_id: i32
 }
 
 #[repr(C)]
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct Wall {
-    transform: TransformData,
-    data: BeatmapObjectData,
+    reference_id: i32
 }
 
 
 
 #[repr(C)]
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct Saber {
-    transform: TransformData,
-    color: Color,
+    reference_id: i32
 }
 
 // "Player" as a *game object* refers to head position stuff
 #[repr(C)]
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct Player {
     transform: TransformData
 }
