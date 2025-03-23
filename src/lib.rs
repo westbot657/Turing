@@ -58,7 +58,8 @@ unsafe extern "C" fn register_function(function_name: *const c_char, func_ptr: *
     println!("bound function to name '{}'", name);
 }
 
-
+/// first function identifier is what *rust* calls, and the second is what C# registers the function as.
+/// The body of this function is intended for converting types
 macro_rules! extern_fn {
     ( $name:ident ( $( $param:ident: $typ:ty ),* ) -> $ret:ty as $cname:tt : $ext_typ:ty $body:block ) => {
         #[no_mangle]
@@ -94,10 +95,26 @@ macro_rules! cs_unreachable {
     };
 }
 
+/*
+Type map:
+
+    C# Type       | Rust Type
+    --------------+------------
+    int           | i32
+    uint          | u32
+    long          | i64
+    ulong         | u64
+    float         | f32
+    double        | f64
+    RustBool      | Boolean
+
+ */
+
+
 // Type aliases for the function pointers
 type FnStrPtrRetNull = extern "C" fn(*const c_char);
-type FnFloatRetNote = extern "C" fn(f32) -> *mut ColorNote;
-type FnNoteRetNull = extern "C" fn(*mut ColorNote);
+type FnFloatRetNote = extern "C" fn(f32) -> ColorNote;
+type FnNoteRetNull = extern "C" fn(ColorNote);
 
 extern_fn!(print_out(message: &str) -> () as cs_print : FnStrPtrRetNull {
     let c_string = CString::new(message).unwrap();
@@ -105,13 +122,13 @@ extern_fn!(print_out(message: &str) -> () as cs_print : FnStrPtrRetNull {
     unsafe { cs_print(c_ptr) }
 });
 
-extern_fn!(create_color_note(beat: f32) -> *mut ColorNote as create_note : FnFloatRetNote {
+extern_fn!(create_color_note(beat: f32) -> ColorNote as create_note : FnFloatRetNote {
     create_note(beat)
 } {
     cs_unreachable!()
 });
 
-extern_fn!(beatmap_add_color_note(note: *mut ColorNote) -> () as add_note_to_map : FnNoteRetNull {
+extern_fn!(beatmap_add_color_note(note: ColorNote) -> () as add_note_to_map : FnNoteRetNull {
     add_note_to_map(note);
 });
 
@@ -147,10 +164,11 @@ pub unsafe extern "C" fn call_script_init() {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn bind_colornote(note: ColorNote) {
-
-}
+// this function doesn't actually make sense to exist...
+// #[no_mangle]
+// pub unsafe extern "C" fn bind_colornote(note: ColorNote) {
+//
+// }
 
 // end of c#/c++ -> rust defs
 

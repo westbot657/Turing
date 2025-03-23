@@ -1,3 +1,4 @@
+use std::ffi::c_void;
 use glam::{Vec3, Quat};
 
 pub trait GameObject {
@@ -9,7 +10,7 @@ pub trait GameObject {
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct ColorNote {
-    reference_id: i32
+    ptr: *const c_void
 }
 
 #[repr(C)]
@@ -60,7 +61,7 @@ pub struct Saber {
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Player {
-    transform: TransformData
+    reference_id: i32
 }
 
 
