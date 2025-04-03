@@ -1,5 +1,6 @@
 mod wasm;
 mod data;
+mod interop;
 
 use std::collections::HashMap;
 use data::game_objects::*;
@@ -106,7 +107,6 @@ Type map:
     ulong         | u64
     float         | f32
     double        | f64
-    RustBool      | Boolean
 
  */
 
