@@ -125,23 +125,6 @@ unsafe impl CSharpConvertible for ColorNote {
 //
 // }
 
-#[repr(C)]
-pub struct CParam {
-    id: *const c_char,
-    data: *const c_void,
-}
-
-impl CParam {
-    pub fn new(id: *const c_char, data: *const c_void) -> Self {
-        CParam { id, data }
-    }
-}
-
-#[repr(C)]
-pub struct CParams {
-    param_count: u32,
-    param_ptr_array_ptr: *mut CParam,
-}
 
 pub enum Param {
     Int(i32),
@@ -150,6 +133,26 @@ pub enum Param {
     String(String),
     ColorNote(ColorNote),
     // Tuple(Vec<Box<Param>>)
+}
+
+
+#[repr(C)]
+pub struct CParam {
+    id: *const c_char,
+    data: *const c_void,
+}
+
+#[repr(C)]
+pub struct CParams {
+    param_count: u32,
+    param_ptr_array_ptr: *mut *mut CParam,
+}
+
+
+impl CParam {
+    pub fn new(id: *const c_char, data: *const c_void) -> Self {
+        CParam { id, data }
+    }
 }
 
 pub struct Parameters {
@@ -200,7 +203,8 @@ impl Parameters {
             let id = Self::get_id(param);
             let ptr = Self::get_ptr(param);
 
-            params.push(CParam::new(id, ptr));
+
+            params.push(Box::into_raw(Box::new(CParam::new(id, ptr))));
 
         }
 
