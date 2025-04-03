@@ -1,4 +1,5 @@
 use std::fs;
+use std::rc::Rc;
 use anyhow::{anyhow, Result};
 use wasmi::*;
 use wasmi::core::UntypedVal;
@@ -86,11 +87,9 @@ impl WasmInterpreter {
 
 macro_rules! unpack_ref {
     ($store:ident, $var_in:ident => $var:ident : $typ:ty $body:block ) => {
-        if let Some(macro_ref) = $var_in {
-            if let Some(macro_any) = macro_ref.data($store) {
-                let $var = macro_any.downcast_ref::<$typ>().unwrap();
-                $body
-            }
+        if let Some(macro_any) = $var_in.data(&$store) {
+            let $var = macro_any.downcast_ref::<$typ>().unwrap();
+            $body
         }
     };
 }
@@ -105,20 +104,21 @@ unsafe fn bind_data(engine: &Engine, store: &mut Store<HostState>, linker: &mut 
 
 
     // GLOBAL FUNCTIONS
-    let function_create_color_note = Func::wrap(store, |caller: Caller<'_, HostState>, beat: f32| {
+    linker.func_wrap("env", "_create_color_note", |caller: Caller<'_, HostState>, beat: f32| {
         let note = create_color_note(beat);
-        Val::ExternRef(ExternRef::new(store, note))
-    });
-    linker.define("env", "_create_color_note", function_create_color_note)?;
+        ExternRef::new(caller, note)
+    })?;
+    // linker.define("env", "_create_color_note", function_create_color_note)?;
 
 
     // INSTANCE FUNCTIONS
-    let method_beatmap_add_note = Func::wrap(store, |caller: Caller<'_, HostState>, note_opt: Option<ExternRef>| {
-        unpack_ref!(store, note_opt => note: *mut ColorNote {
-            beatmap_add_color_note(note);
+    linker.func_wrap("env", "_beatmap_add_color_note", |caller: Caller<'_, HostState>, note_opt: ExternRef| {
+        println!("wtf?");
+        unpack_ref!(caller, note_opt => note: ColorNote {
+            // beatmap_add_color_note(note.clone());
         });
-    });
-    linker.define("env", "_beatmap_add_color_note", method_beatmap_add_note)?;
+
+    })?;
 
 
     Ok(())

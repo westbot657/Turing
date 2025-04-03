@@ -32,13 +32,6 @@ macro_rules! print {
     }
 }
 
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct Note {
-    pub position: Vec3,
-    pub orientation: Quat,
-}
-
 
 lazy_static::lazy_static! {
     static ref FUNCTION_MAP: Mutex<HashMap<String, std::sync::Arc<AtomicPtr<c_void>>>> = Mutex::new(HashMap::new());
