@@ -6,6 +6,7 @@ unsafe trait CSharpConvertible {
     type Raw;
     fn into_cs(self) -> Self::Raw;
     unsafe fn from_cs(raw: Self::Raw) -> Self;
+    fn as_ptr(&self) -> *const c_void;
 }
 
 unsafe impl CSharpConvertible for String {
@@ -18,6 +19,11 @@ unsafe impl CSharpConvertible for String {
     unsafe fn from_cs(raw: Self::Raw) -> Self {
         CStr::from_ptr(raw).to_string_lossy().to_string()
     }
+
+    fn as_ptr(&self) -> *const c_void {
+        self.clone().into_cs() as *const c_void
+    }
+
 }
 
 unsafe impl CSharpConvertible for f32 {
@@ -30,6 +36,11 @@ unsafe impl CSharpConvertible for f32 {
     unsafe fn from_cs(raw: Self::Raw) -> Self {
         raw
     }
+
+    fn as_ptr(&self) -> *const c_void {
+        self.into_cs() as *const _ as *const c_void
+    }
+
 }
 
 unsafe impl CSharpConvertible for i32 {
@@ -42,6 +53,11 @@ unsafe impl CSharpConvertible for i32 {
     unsafe fn from_cs(raw: Self::Raw) -> Self {
         raw
     }
+
+    fn as_ptr(&self) -> *const c_void {
+        self.into_cs() as *const _ as *const c_void
+    }
+
 }
 
 unsafe impl CSharpConvertible for () {
@@ -54,6 +70,11 @@ unsafe impl CSharpConvertible for () {
     unsafe fn from_cs(raw: Self::Raw) -> Self {
         raw
     }
+
+    fn as_ptr(&self) -> *const c_void {
+        self.into_cs() as *const _ as *const c_void
+    }
+
 }
 
 unsafe impl CSharpConvertible for ColorNote {
@@ -66,6 +87,11 @@ unsafe impl CSharpConvertible for ColorNote {
     unsafe fn from_cs(raw: Self::Raw) -> Self {
         raw
     }
+
+    fn as_ptr(&self) -> *const c_void {
+        self.into_cs() as *const _ as *const c_void
+    }
+
 }
 
 unsafe impl CSharpConvertible for (f32, i32) {
@@ -78,6 +104,11 @@ unsafe impl CSharpConvertible for (f32, i32) {
     unsafe fn from_cs(raw: Self::Raw) -> Self {
         raw
     }
+
+    fn as_ptr(&self) -> *const c_void {
+        self.into_cs() as *const _ as *const c_void
+    }
+
 }
 
 
