@@ -1,6 +1,7 @@
 use std::any::Any;
 use std::ffi::{c_char, c_void, CStr, CString};
-use crate::data::game_objects::ColorNote;
+use crate::data::game_objects::*;
+use crate::interop::parameters::params::{get_type, get_value, Param, ParamData, ParamType};
 
 unsafe trait CSharpConvertible {
     type Raw;
@@ -9,137 +10,164 @@ unsafe trait CSharpConvertible {
     fn as_ptr(&self) -> *const c_void;
 }
 
-unsafe impl CSharpConvertible for String {
-    type Raw = *const c_char;
+macro_rules! convertible {
+    (
+        $strct:ty => $raw:ty;
+        to C: $self:tt => $to_cs:block
+        from C: $name:tt => $from_cs:block
+    ) => {
+        convertible!(
+            $strct => $raw;
+            to C: $self => $to_cs
+            from C: $name => $from_cs
+            to ptr: $self => {
+                Box::into_raw(Box::new($self.into_cs())) as *const c_void
+            }
+        );
+    };
+    (
+        $strct:ty => $raw:ty;
+        to C: $self:tt => $to_cs:block
+        from C: $name:tt => $from_cs:block
+        to ptr: $self2:tt => $to_ptr:block
+    ) => {
+        unsafe impl CSharpConvertible for $strct {
 
-    fn into_cs(self) -> Self::Raw {
+            type Raw = $raw;
+
+            fn into_cs($self) -> Self::Raw $to_cs
+
+            unsafe fn from_cs($name: Self::Raw) -> Self $from_cs
+
+            fn as_ptr(&$self2) -> *const c_void $to_ptr
+
+
+        }
+
+    };
+    ($strct:ty) => {
+        convertible!(
+            $strct => $strct;
+            to C: self => { self }
+            from C: raw => { raw }
+        );
+    }
+}
+
+
+convertible!(
+    String => *const c_char;
+    to C: self => {
         CString::new(self).unwrap().into_raw()
     }
-
-    unsafe fn from_cs(raw: Self::Raw) -> Self {
+    from C: raw => {
         CStr::from_ptr(raw).to_string_lossy().to_string()
     }
-
-    fn as_ptr(&self) -> *const c_void {
+    to ptr: self => {
         self.clone().into_cs() as *const c_void
     }
+);
 
+convertible!(i8);
+convertible!(i16);
+convertible!(i32);
+convertible!(i64);
+
+convertible!(u8);
+convertible!(u16);
+convertible!(u32);
+convertible!(u64);
+
+convertible!(f32);
+convertible!(f64);
+
+convertible!(bool);
+
+convertible!(ColorNote);
+convertible!(BombNote);
+convertible!(Arc);
+convertible!(ChainHeadNote);
+convertible!(ChainLinkNote);
+convertible!(ChainNote);
+convertible!(Wall);
+convertible!(Saber);
+convertible!(Player);
+
+/// a list of either of these patterns, which can be mixed:
+/// type_name type enum_constant
+/// or
+/// type_name type - data_name enum_constant
+macro_rules! param_def {
+    ( $( $ty:tt | $val:literal ),* $(,)? ) => {
+        mod params {
+            use crate::data::game_objects::*;
+            use crate::interop::parameters::CSharpConvertible;
+
+            #[allow(non_camel_case_types)]
+            #[repr(u32)]
+            #[derive(Debug, Copy, Clone)]
+            pub enum ParamType {
+                $( $ty = $val ),*
+            }
+
+            #[allow(non_snake_case)]
+            #[repr(C)]
+            #[derive(Clone, Copy)]
+            pub union ParamData {
+                $( $ty: <$ty as CSharpConvertible>::Raw ),*
+            }
+
+            #[allow(non_camel_case_types)]
+            pub enum Param {
+                $( $ty(ParamData) ),*
+            }
+
+            pub fn get_type(value: &Param) -> ParamType {
+                match value {
+                    $( Param::$ty(_) => ParamType::$ty, )*
+                }
+            }
+
+            pub fn get_value(value: &Param) -> Box<dyn std::any::Any> {
+                match value {
+                    $( Param::$ty(x) => Box::new(x.clone()), )*
+                }
+            }
+        }
+    };
 }
 
-unsafe impl CSharpConvertible for f32 {
-    type Raw = f32;
+param_def! {
 
-    fn into_cs(self) -> Self::Raw {
-        self
-    }
+    i8     | 0,
+    i16    | 1,
+    i32    | 2,
+    i64    | 3,
+    u8     | 4,
+    u16    | 5,
+    u32    | 6,
+    u64    | 7,
+    f32    | 8,
+    f64    | 9,
+    bool   | 10,
+    String | 11,
 
-    unsafe fn from_cs(raw: Self::Raw) -> Self {
-        raw
-    }
-
-    fn as_ptr(&self) -> *const c_void {
-        Box::into_raw(Box::new(self.into_cs())) as *const c_void
-    }
-
-}
-
-unsafe impl CSharpConvertible for i32 {
-    type Raw = i32;
-
-    fn into_cs(self) -> Self::Raw {
-        self
-    }
-
-    unsafe fn from_cs(raw: Self::Raw) -> Self {
-        raw
-    }
-
-    fn as_ptr(&self) -> *const c_void {
-        Box::into_raw(Box::new(self.into_cs())) as *const c_void
-    }
+    ColorNote     | 100,
+    BombNote      | 101,
+    Arc           | 102,
+    ChainHeadNote | 103,
+    ChainLinkNote | 104,
+    ChainNote     | 105,
+    Wall          | 106,
+    Saber         | 107,
+    Player        | 108,
 
 }
-
-unsafe impl CSharpConvertible for bool {
-    type Raw = bool;
-
-    fn into_cs(self) -> Self::Raw {
-        self
-    }
-    unsafe fn from_cs(raw: Self::Raw) -> Self {
-        raw
-    }
-    fn as_ptr(&self) -> *const c_void {
-        Box::into_raw(Box::new(self.into_cs())) as *const c_void
-    }
-}
-
-unsafe impl CSharpConvertible for () {
-    type Raw = ();
-
-    fn into_cs(self) -> Self::Raw {
-        self
-    }
-
-    unsafe fn from_cs(raw: Self::Raw) -> Self {
-        raw
-    }
-
-    fn as_ptr(&self) -> *const c_void {
-        Box::into_raw(Box::new(self.into_cs())) as *const c_void
-    }
-
-}
-
-unsafe impl CSharpConvertible for ColorNote {
-    type Raw = ColorNote;
-
-    fn into_cs(self) -> Self::Raw {
-        self
-    }
-
-    unsafe fn from_cs(raw: Self::Raw) -> Self {
-        raw
-    }
-
-    fn as_ptr(&self) -> *const c_void {
-        Box::into_raw(Box::new(self.into_cs())) as *const c_void
-    }
-
-}
-
-// unsafe impl CSharpConvertible for (f32, i32) {
-//     type Raw = (f32, i32);
-//
-//     fn into_cs(self) -> Self::Raw {
-//         self
-//     }
-//
-//     unsafe fn from_cs(raw: Self::Raw) -> Self {
-//         raw
-//     }
-//
-//     fn as_ptr(&self) -> *const c_void {
-//         Box::into_raw(Box::new(self.into_cs())) as *const c_void
-//     }
-//
-// }
-
-
-pub enum Param {
-    Int(i32),
-    Float(f32),
-    Bool(bool),
-    String(String),
-    ColorNote(ColorNote),
-    // Tuple(Vec<Box<Param>>)
-}
-
 
 #[repr(C)]
 pub struct CParam {
-    id: *const c_char,
-    data: *const c_void,
+    pub data_type: ParamType,
+    pub data: ParamData,
 }
 
 #[repr(C)]
@@ -150,13 +178,13 @@ pub struct CParams {
 
 
 impl CParam {
-    pub fn new(id: *const c_char, data: *const c_void) -> Self {
-        CParam { id, data }
+    pub fn new(data_type: ParamType, data: ParamData) -> Self {
+        CParam { data_type, data }
     }
 }
 
 pub struct Parameters {
-    params: Vec<Param>,
+    params: Vec<(ParamType, ParamData)>,
 }
 
 impl Parameters {
@@ -166,52 +194,38 @@ impl Parameters {
         }
     }
 
-    pub fn push(&mut self, param: Param) {
-        self.params.push(param);
-    }
+    pub fn push(&mut self, value: Param) {
 
-    fn get_id(param: &Param) -> *const c_char {
-        let id_str = match param {
-            Param::Int(_) => "int",
-            Param::Float(_) => "float",
-            Param::Bool(_) => "bool",
-            Param::String(_) => "string",
-            Param::ColorNote(_) => "ColorNote",
-            // Param::Tuple(_) => "tuple",
-        };
-        CString::new(id_str).unwrap().into_raw()
-    }
+        let typ = get_type(&value);
 
-    fn get_ptr(param: &Param) -> *const c_void {
-        match param {
-            Param::Int(x) => x.as_ptr(),
-            Param::Float(x) => x.as_ptr(),
-            Param::Bool(x) => x.as_ptr(),
-            Param::String(x) => x.as_ptr(),
-            Param::ColorNote(x) => x.as_ptr(),
-            // Param::Tuple(x) => {
-            //
-            // },
-        }
+        let mut v = get_value(&value);
+        let val = v.downcast_mut::<ParamData>().unwrap();
+
+        let data = ParamData::try_from(*val).unwrap();
+        self.params.push((
+            typ,
+            data
+        ));
+
     }
 
     pub fn pack(self) -> CParams {
 
         let mut params = Vec::new();
 
-        for param in &self.params {
-            let id = Self::get_id(param);
-            let ptr = Self::get_ptr(param);
-
-
-            params.push(Box::into_raw(Box::new(CParam::new(id, ptr))));
-
+        for (tp, param) in self.params {
+            let c_param = CParam {
+                data_type: tp,
+                data: param,
+            };
+            params.push(c_param);
         }
 
         CParams {
             param_count: params.len() as u32,
-            param_ptr_array_ptr: params.as_mut_ptr()
+            param_ptr_array_ptr: params.as_mut_ptr() as *mut *mut CParam,
         }
+
     }
 
 }
