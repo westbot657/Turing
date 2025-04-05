@@ -1,7 +1,8 @@
 use std::any::Any;
 use std::ffi::{c_char, c_void, CStr, CString};
+use std::fmt::{write, Display, Formatter};
 use crate::data::game_objects::*;
-use crate::interop::parameters::params::{get_type, get_value, Param, ParamData, ParamType};
+use crate::interop::parameters::params::{get_type, get_value, Param, ParamData, ParamType, Parameters};
 
 unsafe trait CSharpConvertible {
     type Raw;
@@ -41,7 +42,6 @@ macro_rules! convertible {
 
             fn as_ptr(&$self2) -> *const c_void $to_ptr
 
-
         }
 
     };
@@ -67,6 +67,7 @@ convertible!(
         self.clone().into_cs() as *const c_void
     }
 );
+
 
 convertible!(i8);
 convertible!(i16);
@@ -102,6 +103,7 @@ macro_rules! param_def {
         mod params {
             use crate::data::game_objects::*;
             use crate::interop::parameters::CSharpConvertible;
+            use std::fmt::{write, Display, Formatter};
 
             #[allow(non_camel_case_types)]
             #[repr(u32)]
@@ -114,7 +116,7 @@ macro_rules! param_def {
             #[repr(C)]
             #[derive(Clone, Copy)]
             pub union ParamData {
-                $( $ty: <$ty as CSharpConvertible>::Raw ),*
+                $( pub $ty: <$ty as CSharpConvertible>::Raw ),*
             }
 
             #[allow(non_camel_case_types)]
@@ -133,6 +135,32 @@ macro_rules! param_def {
                     $( Param::$ty(x) => Box::new(x.clone()), )*
                 }
             }
+
+
+            pub struct Parameters {
+                pub params: Vec<(ParamType, ParamData)>,
+            }
+
+            impl Display for Parameters {
+                fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+                    let mut vals = Vec::new();
+
+                    for (typ, data) in &self.params {
+                        let mut val;
+
+                        unsafe {
+                            match typ {
+                                $( ParamType::$ty => val = format!("Param::{}({:?})", stringify!($ty), data.$ty) ),*
+                            }
+                        }
+
+                        vals.push(format!("{:#?} : {}", typ, val));
+                    }
+
+                    write!(f, "Parameters: [{}]", vals.join(", "))
+                }
+            }
+
         }
     };
 }
@@ -183,9 +211,7 @@ impl CParam {
     }
 }
 
-pub struct Parameters {
-    params: Vec<(ParamType, ParamData)>,
-}
+
 
 impl Parameters {
     pub fn new() -> Self {
@@ -226,6 +252,41 @@ impl Parameters {
             param_ptr_array_ptr: params.as_mut_ptr() as *mut *mut CParam,
         }
 
+    }
+
+}
+
+#[macro_export]
+macro_rules! push_parameter {
+    ( $params:ident , $t:tt : $value:expr ) => {
+        let csharp_value = ParamData { $t: $value };
+        $params.push(Param::$t(csharp_value));
+    };
+}
+
+
+
+#[cfg(test)]
+mod parameters_tests {
+    use crate::data::game_objects::ColorNote;
+    use crate::interop::parameters::Parameters;
+    use crate::interop::parameters::params::{Param, ParamData};
+
+    #[test]
+    fn test_c_params() {
+
+        let mut p = Parameters::new();
+
+        let note = ColorNote { ptr: 0 };
+        push_parameter!(p, ColorNote: note);
+
+        let note2 = ColorNote { ptr: 1 };
+        push_parameter!(p, ColorNote: note2);
+
+        let f = 134.23f32;
+        push_parameter!(p, f32: f);
+
+        println!("{}", p);
     }
 
 }

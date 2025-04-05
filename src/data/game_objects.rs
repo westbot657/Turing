@@ -11,7 +11,7 @@ macro_rules! ptr_type {
         #[repr(C)]
         #[derive(Copy, Clone, Debug)]
         pub struct $name {
-            ptr: usize
+            pub ptr: usize
         }
     };
 }
