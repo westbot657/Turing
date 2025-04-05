@@ -1,8 +1,9 @@
 use std::any::Any;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::fmt::{write, Display, Formatter};
+use glam::{Quat, Vec3};
 use crate::data::game_objects::*;
-use crate::interop::parameters::params::{get_type, get_value, Param, ParamData, ParamType, Parameters};
+use crate::interop::parameters::params::{get_type, get_value, remap_data, Param, ParamData, ParamType, Parameters};
 
 unsafe trait CSharpConvertible {
     type Raw;
@@ -84,6 +85,9 @@ convertible!(f64);
 
 convertible!(bool);
 
+convertible!(Vec3);
+convertible!(Quat);
+
 convertible!(ColorNote);
 convertible!(BombNote);
 convertible!(Arc);
@@ -99,9 +103,10 @@ convertible!(Player);
 /// or
 /// type_name type - data_name enum_constant
 macro_rules! param_def {
-    ( $( $ty:tt | $val:literal ),* $(,)? ) => {
+    ( $ds:tt $( $ty:tt = $val:literal ),* $(,)? ) => {
         mod params {
             use crate::data::game_objects::*;
+            use glam::*;
             use crate::interop::parameters::CSharpConvertible;
             use std::fmt::{write, Display, Formatter};
 
@@ -136,6 +141,15 @@ macro_rules! param_def {
                 }
             }
 
+            macro_rules! remap_data {
+                ( $ds tp:tt, $ds dt:ident, $ds c_param: ident ) => {
+                    match $ds tp {
+                        $( ParamType::$ty => ParamData { $ty : *Box::from_raw($ds dt as *mut <$ty as CSharpConvertible>::Raw) } ),*
+                    }
+                };
+            }
+
+            pub(crate) use remap_data;
 
             pub struct Parameters {
                 pub params: Vec<(ParamType, ParamData)>,
@@ -165,40 +179,44 @@ macro_rules! param_def {
     };
 }
 
-param_def! {
+param_def! {$ // < this is here for internal macro creation, don't remove or replace it
+    i8     = 0,
+    i16    = 1,
+    i32    = 2,
+    i64    = 3,
+    u8     = 4,
+    u16    = 5,
+    u32    = 6,
+    u64    = 7,
+    f32    = 8,
+    f64    = 9,
+    bool   = 10,
+    String = 11,
 
-    i8     | 0,
-    i16    | 1,
-    i32    | 2,
-    i64    | 3,
-    u8     | 4,
-    u16    | 5,
-    u32    | 6,
-    u64    | 7,
-    f32    | 8,
-    f64    | 9,
-    bool   | 10,
-    String | 11,
+    ColorNote     = 100,
+    BombNote      = 101,
+    Arc           = 102,
+    ChainHeadNote = 103,
+    ChainLinkNote = 104,
+    ChainNote     = 105,
+    Wall          = 106,
+    Saber         = 107,
+    Player        = 108,
 
-    ColorNote     | 100,
-    BombNote      | 101,
-    Arc           | 102,
-    ChainHeadNote | 103,
-    ChainLinkNote | 104,
-    ChainNote     | 105,
-    Wall          | 106,
-    Saber         | 107,
-    Player        | 108,
+    Vec3  = 200,
+    Quat = 201
 
 }
 
 #[repr(C)]
+#[derive(Debug)]
 pub struct CParam {
     pub data_type: ParamType,
-    pub data: ParamData,
+    pub data: *const ParamData,
 }
 
 #[repr(C)]
+#[derive(Debug)]
 pub struct CParams {
     param_count: u32,
     param_ptr_array_ptr: *mut *mut CParam,
@@ -206,7 +224,7 @@ pub struct CParams {
 
 
 impl CParam {
-    pub fn new(data_type: ParamType, data: ParamData) -> Self {
+    pub fn new(data_type: ParamType, data: *const ParamData) -> Self {
         CParam { data_type, data }
     }
 }
@@ -242,7 +260,7 @@ impl Parameters {
         for (tp, param) in self.params {
             let c_param = CParam {
                 data_type: tp,
-                data: param,
+                data: Box::into_raw(Box::new(param)),
             };
             params.push(c_param);
         }
@@ -254,6 +272,43 @@ impl Parameters {
 
     }
 
+    pub unsafe fn unpack(c_params: CParams) -> Self {
+
+        let mut params = Vec::new();
+
+        let c_param_ptrs = std::slice::from_raw_parts(
+            c_params.param_ptr_array_ptr,
+            c_params.param_count as usize,
+        );
+
+        for &param_ptr in c_param_ptrs {
+
+            let c_param = &*param_ptr;
+
+            let data_type = c_param.data_type;
+
+            let raw_ptr = c_param.data;
+
+            let raw_value = remap_data!(data_type, raw_ptr, c_param);
+
+            params.push((data_type, raw_value));
+
+        }
+
+        Self {
+            params
+        }
+    }
+
+}
+
+macro_rules! get_parameter {
+    ( $params:expr, $t:tt, $index:expr) => {
+        {
+            var raw = $params.params[$index];
+            Param::$t(unsafe { raw.$t })
+        }
+    };
 }
 
 #[macro_export]
@@ -286,7 +341,17 @@ mod parameters_tests {
         let f = 134.23f32;
         push_parameter!(p, f32: f);
 
-        println!("{}", p);
+        println!("initial: {}", p);
+
+        let packed = p.pack();
+
+        println!("packed: {:?}", packed);
+
+        let unpacked = unsafe { Parameters::unpack(packed) };
+
+        println!("unpacked: {}", unpacked);
+
+
     }
 
 }
