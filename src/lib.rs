@@ -112,11 +112,19 @@ macro_rules! extern_fns {
 
 
 extern_fns!(
-    cs_print as print_out(message: String),
+    cs_print as print_out(msg: String),
     create_note as create_color_note(beat: f32) -> ColorNote,
 );
 
-
+macro_rules! error_param {
+    ( $err:expr ) => {
+        {
+            let mut params = Parameters::new();
+            push_parameter!(params, String: $err);
+            params.pack()
+        }
+    };
+}
 
 
 
@@ -128,8 +136,44 @@ extern_fns!(
 pub unsafe extern "C" fn initialize_wasm() {
     WASM_INTERPRETER = Some(WasmInterpreter::new());
 
-    // println!("Initialized wasm interpreter");
-    print_out("WASM interpreter initialized!".to_string());
+    println!("Initialized wasm interpreter");
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn load_script(str_ptr: *const c_char) -> CParams {
+    let cstr = CStr::from_ptr(str_ptr);
+    let s = cstr.to_string_lossy().to_string();
+
+    if let Some(wasm) = &mut WASM_INTERPRETER {
+        let res = wasm.load_script(&s);
+
+        if let Err(e) = res {
+            error_param!(e.to_string())
+        } else {
+            Parameters::new().pack()
+        }
+    } else {
+        error_param!("WASM interpreter is not loaded".to_string())
+    }
+
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn call_script_function(str_ptr: *const c_char, params: CParams) -> CParams {
+    let cstr = CStr::from_ptr(str_ptr);
+    let s = cstr.to_string_lossy().to_string();
+    if let Some(wasm) = &mut WASM_INTERPRETER {
+        let res = wasm.call_void_method(&s, Parameters::unpack(params));
+
+        if let Err(e) = res {
+            error_param!(e.to_string())
+        } else {
+            Parameters::new().pack()
+        }
+    } else {
+        error_param!("WASM interpreter is not loaded".to_string())
+    }
+
 }
 
 // /// loads a script from a directory

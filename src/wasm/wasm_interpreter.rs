@@ -60,7 +60,7 @@ impl WasmInterpreter {
         Ok(())
     }
 
-    pub fn call_void_method(&mut self, name: &str) -> Result<()> {
+    pub fn call_void_method(&mut self, name: &str, params: Parameters) -> Result<()> {
         if let Some((_, instance)) = &self.script_instance {
             let init_function = instance.get_typed_func::<(), ()>(&self.store, name)?;
             init_function.call(&mut self.store, ())?;
@@ -68,18 +68,6 @@ impl WasmInterpreter {
         } else {
             Err(anyhow!("no script is currently loaded"))
         }
-    }
-
-    pub fn call_init(&mut self) -> Result<()> {
-        self.call_void_method("init")
-    }
-
-    pub fn call_end(&mut self) -> Result<()> {
-        self.call_void_method("end")
-    }
-
-    pub fn call_update(&mut self) -> Result<()> {
-        self.call_void_method("update")
     }
 
 }
@@ -119,6 +107,10 @@ unsafe fn bind_data(engine: &Engine, store: &mut Store<HostState>, linker: &mut 
         });
 
     })?;
+
+    // linker.func_wrap("env", "_log", |caller: Caller<'_, HostState>, message: i64| {
+    //
+    // })?;
 
 
     Ok(())

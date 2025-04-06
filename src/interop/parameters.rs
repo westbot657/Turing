@@ -38,14 +38,19 @@ macro_rules! convertible {
     }
 }
 
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct RsString {
+    pub ptr: *const c_char,
+}
 
 convertible!(
-    String => *const c_char;
+    String => RsString;
     to C: self => {
-        CString::new(self).unwrap().into_raw()
+        RsString { ptr: CString::new(self).unwrap().into_raw() }
     }
     from C: raw => {
-        CStr::from_ptr(raw).to_string_lossy().to_string()
+        CStr::from_ptr(raw.ptr).to_string_lossy().to_string()
     }
 );
 
@@ -251,7 +256,7 @@ impl Parameters {
 
         CParams {
             param_count: params.len() as u32,
-            param_ptr_array_ptr: params.as_mut_ptr() as *mut *mut CParam,
+            param_ptr_array_ptr: params.as_mut_ptr(),
         }
 
     }
