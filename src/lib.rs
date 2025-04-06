@@ -61,7 +61,7 @@ macro_rules! extern_fn {
         #[no_mangle]
         pub unsafe fn $name( $( $arg : $arg_ty ),* ) $( -> $ret )? {
             let map = FUNCTION_MAP.lock().unwrap();
-            if let Some(_macro_arc) = map.get(stringify!($cs_name.to_string())) {
+            if let Some(_macro_arc) = map.get(stringify!($cs_name)) {
                 let _macro_raw_ptr = _macro_arc.load(std::sync::atomic::Ordering::SeqCst);
                 let $cs_name: CsMethod = unsafe { mem::transmute(_macro_raw_ptr) };
 
