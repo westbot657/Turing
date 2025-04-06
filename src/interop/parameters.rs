@@ -306,6 +306,7 @@ impl Parameters {
 
 }
 
+#[macro_export]
 macro_rules! get_parameter {
     ( $params:expr, $t:tt, $index:expr) => {
         {
@@ -324,6 +325,26 @@ macro_rules! get_parameter {
                     }
                 }
             }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! get_return {
+    ( $params:expr, $t:tt, $index:expr) => {
+        {
+            let raw = $params.params[$index];
+            if raw.0 as u32 != ParamType::$t as u32 {
+                Err("wrong value type was returned".to_owned())
+            }
+            else {
+                let p = Param::$t(unsafe { raw.1 });
+                match p {
+                    Param::$t(x) => Ok(unsafe { $t::from_cs( x.$t ) }),
+                    _ => Err("wrong value type was returned".to_owned())
+                }
+            }
+
         }
     };
 }
