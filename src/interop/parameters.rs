@@ -9,7 +9,6 @@ pub unsafe trait CSharpConvertible {
     type Raw;
     fn into_cs(self) -> Self::Raw;
     unsafe fn from_cs(raw: Self::Raw) -> Self;
-    fn as_ptr(&self) -> *const c_void;
 }
 
 macro_rules! convertible {
@@ -17,21 +16,6 @@ macro_rules! convertible {
         $strct:ty => $raw:ty;
         to C: $self:tt => $to_cs:block
         from C: $name:tt => $from_cs:block
-    ) => {
-        convertible!(
-            $strct => $raw;
-            to C: $self => $to_cs
-            from C: $name => $from_cs
-            to ptr: $self => {
-                Box::into_raw(Box::new($self.into_cs())) as *const c_void
-            }
-        );
-    };
-    (
-        $strct:ty => $raw:ty;
-        to C: $self:tt => $to_cs:block
-        from C: $name:tt => $from_cs:block
-        to ptr: $self2:tt => $to_ptr:block
     ) => {
         unsafe impl CSharpConvertible for $strct {
 
@@ -41,7 +25,6 @@ macro_rules! convertible {
 
             unsafe fn from_cs($name: Self::Raw) -> Self $from_cs
 
-            fn as_ptr(&$self2) -> *const c_void $to_ptr
 
         }
 
@@ -63,9 +46,6 @@ convertible!(
     }
     from C: raw => {
         CStr::from_ptr(raw).to_string_lossy().to_string()
-    }
-    to ptr: self => {
-        self.clone().into_cs() as *const c_void
     }
 );
 

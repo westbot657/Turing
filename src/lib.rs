@@ -20,7 +20,7 @@ type CsMethod = extern "C" fn(CParams) -> CParams;
 
 macro_rules! println {
     ( $st:literal ) => {
-        print_out($st.to_owned())
+        print_out($st.to_string())
     };
     ( $st:literal, $($args:expr),* ) => {
         print_out(format!($st, $($args),*))
@@ -128,7 +128,8 @@ extern_fns!(
 pub unsafe extern "C" fn initialize_wasm() {
     WASM_INTERPRETER = Some(WasmInterpreter::new());
 
-    println!("Initialized wasm interpreter");
+    // println!("Initialized wasm interpreter");
+    print_out("WASM interpreter initialized!".to_string());
 }
 
 // /// loads a script from a directory
