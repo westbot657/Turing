@@ -238,6 +238,10 @@ impl Parameters {
         }
     }
 
+    pub fn size(&self) -> usize {
+        self.params.len()
+    }
+
     pub fn push(&mut self, value: Param) {
 
         let typ = get_type(&value);
@@ -262,7 +266,7 @@ impl Parameters {
                 data_type: tp,
                 data: Box::into_raw(Box::new(param)),
             };
-            params.push(c_param);
+            params.push(Box::into_raw(Box::new(c_param)));
         }
 
         CParams {
@@ -305,8 +309,21 @@ impl Parameters {
 macro_rules! get_parameter {
     ( $params:expr, $t:tt, $index:expr) => {
         {
-            var raw = $params.params[$index];
-            Param::$t(unsafe { raw.$t })
+            if ($index >= $params.size()) {
+                Err("index out of bounds".to_owned())
+            } else {
+                let raw = $params.params[$index];
+                if raw.0 as u32 != ParamType::$t as u32 {
+                    Err("parameter at that position is not of expected type".to_owned())
+                }
+                else {
+                    let p = Param::$t(unsafe { raw.1 });
+                    match p {
+                        Param::$t(x) => Ok(unsafe { $t::from_cs( x.$t ) }),
+                        _ => Err("parameter at that position is not of expected type".to_owned())
+                    }
+                }
+            }
         }
     };
 }
@@ -314,7 +331,7 @@ macro_rules! get_parameter {
 #[macro_export]
 macro_rules! push_parameter {
     ( $params:ident , $t:tt : $value:expr ) => {
-        let csharp_value = ParamData { $t: $value };
+        let csharp_value = ParamData { $t: crate::interop::parameters::CSharpConvertible::into_cs($value) };
         $params.push(Param::$t(csharp_value));
     };
 }
@@ -324,8 +341,8 @@ macro_rules! push_parameter {
 #[cfg(test)]
 mod parameters_tests {
     use crate::data::game_objects::ColorNote;
-    use crate::interop::parameters::Parameters;
-    use crate::interop::parameters::params::{Param, ParamData};
+    use crate::interop::parameters::{CSharpConvertible, Parameters};
+    use crate::interop::parameters::params::{Param, ParamData, ParamType};
 
     #[test]
     fn test_c_params() {
@@ -341,6 +358,9 @@ mod parameters_tests {
         let f = 134.23f32;
         push_parameter!(p, f32: f);
 
+        let s = "test string".to_owned();
+        push_parameter!(p, String: s);
+
         println!("initial: {}", p);
 
         let packed = p.pack();
@@ -351,6 +371,15 @@ mod parameters_tests {
 
         println!("unpacked: {}", unpacked);
 
+        let note_unpacked = get_parameter!(unpacked, ColorNote, 0);
+
+        println!("note: {:?}", note_unpacked);
+
+        let str_unpacked = get_parameter!(unpacked, String, 3);
+        println!("str: {:?}", str_unpacked);
+
+        let error = get_parameter!(unpacked, f64, 2);
+        println!("error: {:?}", error);
 
     }
 
