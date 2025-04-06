@@ -11,6 +11,7 @@ use std::sync::{Mutex};
 use std::sync::atomic::AtomicPtr;
 use glam::{Quat, Vec3};
 use crate::interop::parameters::*;
+use crate::interop::parameters::params::Parameters;
 use crate::wasm::wasm_interpreter::WasmInterpreter;
 
 static mut WASM_INTERPRETER: Option<WasmInterpreter> = None;
@@ -46,27 +47,25 @@ unsafe extern "C" fn register_function(function_name: *const c_char, func_ptr: *
     let name_cstr = CStr::from_ptr(function_name);
     let name = name_cstr.to_string_lossy().to_string();
 
-    { // scope so that FUNCTION_MAP unlocks before print_out
-        let mut map = FUNCTION_MAP.lock().unwrap();
-        map.insert(name.to_string(), func_ptr_arc);
-    }
+    let mut map = FUNCTION_MAP.lock().unwrap();
+    map.insert(name.to_string(), func_ptr_arc);
 
-    println!("bound function to name '{}'", name);
+
 }
 
 macro_rules! extern_fn {
     (
         $cs_name: ident as
-        $name:ident ( $( $arg:ident : $arg_ty:ty ),* ) $( -> $ret:ty )?
+        $name:ident ( $( $arg:ident : $arg_ty:tt ),* ) $( -> $ret:tt )?
     ) => {
         #[no_mangle]
-        pub fn $name( $( $arg : $arg_ty ),* ) $( -> $ret )? {
+        pub unsafe fn $name( $( $arg : $arg_ty ),* ) $( -> $ret )? {
             let map = FUNCTION_MAP.lock().unwrap();
-            if let Some(_macro_arc) = map.get(stringify!($cs_name)) {
+            if let Some(_macro_arc) = map.get(stringify!($cs_name.to_string())) {
                 let _macro_raw_ptr = _macro_arc.load(std::sync::atomic::Ordering::SeqCst);
                 let $cs_name: CsMethod = unsafe { mem::transmute(_macro_raw_ptr) };
 
-                let mut params_in = crate::interop::parmeters::Parameters::new();
+                let mut params_in = crate::params::Parameters::new();
 
                 $(
                     push_parameter!(params_in, $arg_ty: $arg);
@@ -76,15 +75,18 @@ macro_rules! extern_fn {
 
                 let res = $cs_name(packed);
 
-                let result = res.unpack();
+                let result = unsafe { Parameters::unpack(res) };
 
                 $(
                 if result.size() == 1 {
-                    return get_return!(result, $ret, 0)
+                    get_return!(result, $ret, 0).unwrap()
+                } else {
+                    panic!("critical error in interop function {}/{}", stringify!($name), stringify!($cs_name))
                 }
                 )?
 
             } else {
+
                 panic!("critical error in interop function {}/{}", stringify!($name), stringify!($cs_name));
             }
 
@@ -96,7 +98,7 @@ macro_rules! extern_fns {
     (
         $(
             $cs_name:ident as
-            $name:ident ( $( $arg:ident : $arg_ty:ty ),* ) $( -> $ret:ty )?
+            $name:ident ( $( $arg:ident : $arg_ty:tt ),* ) $( -> $ret:tt )?
         ),* $(,)?
     ) => {
         $(

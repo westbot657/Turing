@@ -105,7 +105,7 @@ unsafe fn bind_data(engine: &Engine, store: &mut Store<HostState>, linker: &mut 
 
     // GLOBAL FUNCTIONS
     linker.func_wrap("env", "_create_color_note", |caller: Caller<'_, HostState>, beat: f32| {
-        let note = create_color_note(beat);
+        let note = unsafe { create_color_note(beat) };
         ExternRef::new(caller, note)
     })?;
     // linker.define("env", "_create_color_note", function_create_color_note)?;

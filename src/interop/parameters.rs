@@ -5,7 +5,7 @@ use glam::{Quat, Vec3};
 use crate::data::game_objects::*;
 use crate::interop::parameters::params::{get_type, get_value, remap_data, Param, ParamData, ParamType, Parameters};
 
-unsafe trait CSharpConvertible {
+pub unsafe trait CSharpConvertible {
     type Raw;
     fn into_cs(self) -> Self::Raw;
     unsafe fn from_cs(raw: Self::Raw) -> Self;
@@ -104,7 +104,7 @@ convertible!(Player);
 /// type_name type - data_name enum_constant
 macro_rules! param_def {
     ( $ds:tt $( $ty:tt = $val:literal ),* $(,)? ) => {
-        mod params {
+        pub mod params {
             use crate::data::game_objects::*;
             use glam::*;
             use crate::interop::parameters::CSharpConvertible;
@@ -314,13 +314,13 @@ macro_rules! get_parameter {
                 Err("index out of bounds".to_owned())
             } else {
                 let raw = $params.params[$index];
-                if raw.0 as u32 != ParamType::$t as u32 {
+                if raw.0 as u32 != crate::params::ParamType::$t as u32 {
                     Err("parameter at that position is not of expected type".to_owned())
                 }
                 else {
-                    let p = Param::$t(unsafe { raw.1 });
+                    let p = crate::params::Param::$t(unsafe { raw.1 });
                     match p {
-                        Param::$t(x) => Ok(unsafe { $t::from_cs( x.$t ) }),
+                        crate::params::Param::$t(x) => Ok(unsafe { $t::from_cs( x.$t ) }),
                         _ => Err("parameter at that position is not of expected type".to_owned())
                     }
                 }
@@ -334,13 +334,13 @@ macro_rules! get_return {
     ( $params:expr, $t:tt, $index:expr) => {
         {
             let raw = $params.params[$index];
-            if raw.0 as u32 != ParamType::$t as u32 {
-                Err("wrong value type was returned".to_owned())
+            if raw.0 as u32 != crate::params::ParamType::$t as u32 {
+                Err::<$t, String>("wrong value type was returned".to_owned())
             }
             else {
-                let p = Param::$t(unsafe { raw.1 });
+                let p = crate::params::Param::$t(unsafe { raw.1 });
                 match p {
-                    Param::$t(x) => Ok(unsafe { $t::from_cs( x.$t ) }),
+                    crate::params::Param::$t(x) => Ok(unsafe { $t::from_cs( x.$t ) }),
                     _ => Err("wrong value type was returned".to_owned())
                 }
             }
@@ -352,8 +352,8 @@ macro_rules! get_return {
 #[macro_export]
 macro_rules! push_parameter {
     ( $params:ident , $t:tt : $value:expr ) => {
-        let csharp_value = ParamData { $t: crate::interop::parameters::CSharpConvertible::into_cs($value) };
-        $params.push(Param::$t(csharp_value));
+        let csharp_value = crate::params::ParamData { $t: crate::interop::parameters::CSharpConvertible::into_cs($value) };
+        $params.push(crate::params::Param::$t(csharp_value));
     };
 }
 
