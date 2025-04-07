@@ -144,15 +144,19 @@ pub unsafe extern "C" fn load_script(str_ptr: *const c_char) -> CParams {
     let cstr = CStr::from_ptr(str_ptr);
     let s = cstr.to_string_lossy().to_string();
 
+    println!("Loading script: {}", s);
+
     if let Some(wasm) = &mut WASM_INTERPRETER {
         let res = wasm.load_script(&s);
 
         if let Err(e) = res {
-            error_param!(e.to_string())
+            println!("Error 1");
+            error_param!(String::from_utf8_lossy(e.to_string().as_bytes()).to_string())
         } else {
             Parameters::new().pack()
         }
     } else {
+        println!("Error 2");
         error_param!("WASM interpreter is not loaded".to_string())
     }
 
@@ -166,7 +170,8 @@ pub unsafe extern "C" fn call_script_function(str_ptr: *const c_char, params: CP
         let res = wasm.call_void_method(&s, Parameters::unpack(params));
 
         if let Err(e) = res {
-            error_param!(e.to_string())
+            println!("Error 3");
+            error_param!(String::from_utf8_lossy(e.to_string().as_bytes()).to_string())
         } else {
             Parameters::new().pack()
         }

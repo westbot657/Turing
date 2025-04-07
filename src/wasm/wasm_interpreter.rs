@@ -1,4 +1,5 @@
 use std::fs;
+use std::path::Path;
 use std::rc::Rc;
 use anyhow::{anyhow, Result};
 use wasmi::*;
@@ -45,11 +46,10 @@ impl WasmInterpreter {
 
     pub fn load_script(&mut self, path: &str) -> Result<()> {
 
-        let data = fs::read_to_string(path)?;
+        let path = Path::new(path);
+        let wasm = fs::read(path)?;
 
-        let wasm = wat::parse_str(&data)?;
-
-        let module = Module::new(&self.engine, &mut &wasm[..])?;
+        let module = Module::new(&self.engine, wasm)?;
 
         let instance = self.linker
             .instantiate(&mut self.store, &module)?

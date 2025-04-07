@@ -244,19 +244,25 @@ impl Parameters {
 
     pub fn pack(self) -> CParams {
 
-        let mut params = Vec::new();
+        let mut c_param_ptrs: Vec<*mut CParam> = self.params.into_iter()
+            .map(|(tp, param)| {
+                let c_param = CParam {
+                    data_type: tp,
+                    data: Box::into_raw(Box::new(param)),
+                };
+                Box::into_raw(Box::new(c_param))
+            })
+            .collect();
 
-        for (tp, param) in self.params {
-            let c_param = CParam {
-                data_type: tp,
-                data: Box::into_raw(Box::new(param)),
-            };
-            params.push(Box::into_raw(Box::new(c_param)));
-        }
+        let param_count = c_param_ptrs.len() as u32;
+
+        let param_ptr_array = c_param_ptrs.as_mut_ptr();
+
+        std::mem::forget(c_param_ptrs);
 
         CParams {
-            param_count: params.len() as u32,
-            param_ptr_array_ptr: params.as_mut_ptr(),
+            param_count,
+            param_ptr_array_ptr: param_ptr_array,
         }
 
     }
