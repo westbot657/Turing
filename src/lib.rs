@@ -142,6 +142,11 @@ pub unsafe extern "C" fn initialize_wasm() {
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn free_params(params: CParams) {
+    Parameters::free(params);
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn load_script(str_ptr: *const c_char) -> CParams {
     let cstr = CStr::from_ptr(str_ptr);
     let s = cstr.to_string_lossy().to_string();

@@ -3,7 +3,7 @@ use std::ffi::{c_char, CStr, CString};
 use std::fmt::Display;
 use glam::{Quat, Vec3};
 use crate::data::game_objects::*;
-use crate::interop::parameters::params::{get_type, get_value, remap_data, Param, ParamData, ParamType, Parameters};
+use crate::interop::parameters::params::{get_type, get_value, remap_data, free_data, Param, ParamData, ParamType, Parameters};
 
 pub unsafe trait CSharpConvertible {
     type Raw;
@@ -134,7 +134,15 @@ macro_rules! param_def {
                 };
             }
 
-            pub(crate) use remap_data;
+            macro_rules! free_data {
+                ( $ds tp:tt, $ds dt:ident, $ds c_param: ident ) => {
+                    match $ds tp {
+                        $( ParamType::$ty => ParamData { $ty : *Box::from_raw($ds dt as *mut <$ty as CSharpConvertible>::Raw) } ),*
+                    }
+                };
+            }
+
+            pub(crate) use {remap_data, free_data};
 
             pub struct Parameters {
                 pub params: Vec<(ParamType, ParamData)>,
@@ -291,6 +299,8 @@ impl Parameters {
 
         }
 
+        Self::free(c_params); // is this safe? idk
+
         Self {
             params
         }
@@ -298,6 +308,23 @@ impl Parameters {
 
     pub unsafe fn free(c_params: CParams) {
 
+        // take ownership of the pointed data
+        let c_params = Vec::from_raw_parts(
+            c_params.param_ptr_array_ptr,
+            c_params.param_count as usize,
+            c_params.param_count as usize,
+        );
+
+        for param in c_params {
+            // take ownership of each parameter
+            let param = Box::from_raw(param);
+
+            let data_type = param.data_type;
+            let raw_ptr = param.data;
+            // take ownership of each parameter's data
+            let _ = free_data!(data_type, raw_ptr, c_param);
+
+        }
     }
 
 }
