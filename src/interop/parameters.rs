@@ -227,7 +227,7 @@ impl Parameters {
         self.params.len()
     }
 
-    pub fn push(&mut self, value: Param) {
+    pub fn push(&mut self, value: Param) -> &mut self {
 
         let typ = get_type(&value);
 
@@ -240,6 +240,7 @@ impl Parameters {
             data
         ));
 
+        self
     }
 
     pub fn pack(self) -> CParams {
