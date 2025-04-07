@@ -1,5 +1,3 @@
-use std::ffi::c_void;
-use std::ops::Deref;
 
 // Unique data types
 #[repr(C)]

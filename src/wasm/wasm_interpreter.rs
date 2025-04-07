@@ -155,6 +155,7 @@ unsafe fn bind_data(engine: &Engine, store: &mut Store<HostState>, linker: &mut 
 
         }
 
+        // crate:: is necessary because otherwise it's ambiguous at compile time which macro to use
         crate::println!("[wasm]: {}", output_string);
 
     })?;

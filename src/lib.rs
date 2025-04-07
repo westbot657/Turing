@@ -4,12 +4,11 @@ mod interop;
 
 use std::collections::HashMap;
 use data::game_objects::*;
-use std::ffi::{CStr, CString};
+use std::ffi::CStr;
 use std::mem;
 use std::os::raw::{c_char, c_void};
 use std::sync::{Mutex};
 use std::sync::atomic::AtomicPtr;
-use glam::{Quat, Vec3};
 use crate::interop::parameters::*;
 use crate::interop::parameters::params::Parameters;
 use crate::wasm::wasm_interpreter::WasmInterpreter;
@@ -181,33 +180,6 @@ pub unsafe extern "C" fn call_script_function(str_ptr: *const c_char, params: CP
 
 }
 
-// /// loads a script from a directory
-// #[no_mangle]
-// pub unsafe extern "C" fn load_script(raw_path: *const c_char) {
-//     let path = CStr::from_ptr(raw_path);
-//     if let Some(wasm_interp) = &mut WASM_INTERPRETER {
-//         wasm_interp.load_script(path.to_str().unwrap()).unwrap();
-//         println!("Loaded wasm script");
-//     }
-// }
-
-// /// tries to find and call the `init` method in the currently loaded script
-// #[no_mangle]
-// pub unsafe extern "C" fn call_script_init() {
-//     if let Some(wasm_interp) = &mut WASM_INTERPRETER {
-//         println!("Calling wasm init");
-//         wasm_interp.call_init().unwrap();
-//         println!("Called wasm init");
-//     }
-// }
-
-// this function doesn't actually make sense to exist...
-// #[no_mangle]
-// pub unsafe extern "C" fn bind_colornote(note: ColorNote) {
-//
-// }
-
-// end of c#/c++ -> rust defs
 
 
 #[cfg(test)]
