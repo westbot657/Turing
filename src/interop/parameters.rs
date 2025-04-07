@@ -129,7 +129,7 @@ macro_rules! param_def {
             macro_rules! remap_data {
                 ( $ds tp:tt, $ds dt:ident, $ds c_param: ident ) => {
                     match $ds tp {
-                        $( ParamType::$ty => ParamData { $ty : *Box::from_raw($ds dt as *mut <$ty as CSharpConvertible>::Raw) } ),*
+                        $( ParamType::$ty => ParamData { $ty : *($ds dt as *mut <$ty as CSharpConvertible>::Raw) } ),*
                     }
                 };
             }
@@ -294,6 +294,10 @@ impl Parameters {
         Self {
             params
         }
+    }
+
+    pub unsafe fn free(c_params: CParams) {
+
     }
 
 }
