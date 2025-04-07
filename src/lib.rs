@@ -18,6 +18,7 @@ static mut WASM_INTERPRETER: Option<WasmInterpreter> = None;
 
 type CsMethod = extern "C" fn(CParams) -> CParams;
 
+#[macro_export]
 macro_rules! println {
     ( $st:literal ) => {
         print_out($st.to_string())
@@ -110,10 +111,12 @@ macro_rules! extern_fns {
     };
 }
 
-
+// structured as:
+// <C# name> as <rust method signature>
 extern_fns!(
     cs_print as print_out(msg: String),
-    create_note as create_color_note(beat: f32) -> ColorNote,
+    create_color_note as create_color_note(beat: f32) -> ColorNote,
+    beatmap_add_color_note as beatmap_add_color_note(note: ColorNote),
 );
 
 macro_rules! error_param {

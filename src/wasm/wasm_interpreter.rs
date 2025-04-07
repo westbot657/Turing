@@ -1,21 +1,52 @@
+use std::collections::VecDeque;
 use std::fs;
 use std::path::Path;
-use std::rc::Rc;
 use anyhow::{anyhow, Result};
 use wasmi::*;
-use wasmi::core::UntypedVal;
 use wat;
 use crate::*;
 use crate::data::game_objects::*;
 
 struct HostState {
-
+    free_locations: VecDeque<u32>,
+    next_index: u32,
+    external_data: HashMap<u32, ExternRef>,
 }
 
 impl HostState {
-    fn new() -> HostState {
-        HostState {}
+    pub fn new() -> HostState {
+        HostState {
+            free_locations: VecDeque::new(),
+            next_index: 0,
+            external_data: HashMap::new(),
+        }
     }
+
+    pub fn add(&mut self, extern_ref: ExternRef) -> u32 {
+        let i;
+        if self.free_locations.is_empty() {
+            i = self.next_index;
+            self.next_index += 1;
+        } else {
+            i = self.free_locations.pop_front().unwrap();
+        }
+        self.external_data.insert(i, extern_ref);
+        i
+    }
+
+    pub fn get(&self, i: u32) -> Option<&ExternRef> {
+        self.external_data.get(&i)
+    }
+
+    pub fn get_mut(&mut self, i: u32) -> Option<&mut ExternRef> {
+        self.external_data.get_mut(&i)
+    }
+
+    pub fn remove(&mut self, i: u32) -> Option<ExternRef> {
+        self.free_locations.push_front(i);
+        self.external_data.remove(&i)
+    }
+
 }
 
 pub struct WasmInterpreter {
@@ -72,16 +103,6 @@ impl WasmInterpreter {
 
 }
 
-
-macro_rules! unpack_ref {
-    ($store:ident, $var_in:ident => $var:ident : $typ:ty $body:block ) => {
-        if let Some(macro_any) = $var_in.data(&$store) {
-            let $var = macro_any.downcast_ref::<$typ>().unwrap();
-            $body
-        }
-    };
-}
-
 unsafe fn bind_data(engine: &Engine, store: &mut Store<HostState>, linker: &mut Linker<HostState>) -> Result<()> {
 
     // wasm names are prefixed with '_' so that languages
@@ -92,25 +113,51 @@ unsafe fn bind_data(engine: &Engine, store: &mut Store<HostState>, linker: &mut 
 
 
     // GLOBAL FUNCTIONS
-    linker.func_wrap("env", "_create_color_note", |caller: Caller<'_, HostState>, beat: f32| {
+    linker.func_wrap("env", "_create_color_note", |mut caller: Caller<'_, HostState>, beat: f32| -> i32 {
         let note = unsafe { create_color_note(beat) };
-        ExternRef::new(caller, note)
+        let extern_ref = ExternRef::new(&mut caller, note);
+
+        caller.data_mut().add(extern_ref) as i32
+
     })?;
     // linker.define("env", "_create_color_note", function_create_color_note)?;
 
 
     // INSTANCE FUNCTIONS
-    linker.func_wrap("env", "_beatmap_add_color_note", |caller: Caller<'_, HostState>, note_opt: ExternRef| {
-        println!("wtf?");
-        unpack_ref!(caller, note_opt => note: ColorNote {
-            // beatmap_add_color_note(note.clone());
-        });
+    linker.func_wrap("env", "_beatmap_add_color_note", |mut caller: Caller<'_, HostState>, note_opt: i32| {
+        let extern_ref = caller.data_mut().remove(note_opt as u32);
+
+        if let Some(rf) = extern_ref {
+            let val = rf.data(&mut caller).unwrap().downcast_ref::<ColorNote>().unwrap();
+
+            beatmap_add_color_note(*val);
+
+        } else {
+            panic!("Invalid pointer");
+        }
 
     })?;
 
-    // linker.func_wrap("env", "_log", |caller: Caller<'_, HostState>, message: i64| {
-    //
-    // })?;
+    linker.func_wrap("env", "_log", |caller: Caller<'_, HostState>, message: i32| {
+
+        let memory = caller.get_export("memory").unwrap().into_memory().unwrap();
+
+        let mut output_string = String::new();
+
+        for i in message..i32::MAX {
+            let byte: &u8 = memory.data(&caller).get(i as usize).unwrap();
+
+            if *byte == 0u8 {
+                break
+            }
+
+            output_string.push(char::from(*byte));
+
+        }
+
+        crate::println!("[wasm]: {}", output_string);
+
+    })?;
 
 
     Ok(())
