@@ -6,53 +6,109 @@ use wasmi::*;
 use wat;
 use crate::*;
 use crate::data::game_objects::*;
+use std::ops::RangeInclusive;
 
-struct HostState {
-    free_locations: VecDeque<u32>,
+#[derive(Debug)]
+struct HostState<T> {
+    free_ranges: VecDeque<RangeInclusive<u32>>,
     next_index: u32,
-    external_data: HashMap<u32, ExternRef>,
+    external_data: HashMap<u32, T>,
 }
 
-impl HostState {
-    pub fn new() -> HostState {
-        HostState {
-            free_locations: VecDeque::new(),
+impl<T> HostState<T> {
+    pub fn new() -> Self {
+        Self {
+            free_ranges: VecDeque::new(),
             next_index: 0,
             external_data: HashMap::new(),
         }
     }
 
-    pub fn add(&mut self, extern_ref: ExternRef) -> u32 {
-        let i;
-        if self.free_locations.is_empty() {
-            i = self.next_index;
-            self.next_index += 1;
+    pub fn add(&mut self, extern_ref: T) -> u32 {
+        let i = if let Some(range) = self.free_ranges.front_mut() {
+            let val = *range.start();
+            *range = (*range.start() + 1)..=*range.end();
+            if range.start() > range.end() {
+                self.free_ranges.pop_front();
+            }
+            val
         } else {
-            i = self.free_locations.pop_front().unwrap();
-        }
+            let mut i = self.next_index;
+            while self.external_data.contains_key(&i) {
+                self.next_index += 1;
+                if self.next_index == u32::MAX {
+                    panic!("Out Of Memory");
+                }
+                i = self.next_index;
+            }
+            self.next_index += 1;
+            i
+        };
+
         self.external_data.insert(i, extern_ref);
         i
     }
 
-    pub fn get(&self, i: u32) -> Option<&ExternRef> {
+    pub fn get(&self, i: u32) -> Option<&T> {
         self.external_data.get(&i)
     }
 
-    pub fn get_mut(&mut self, i: u32) -> Option<&mut ExternRef> {
+    pub fn get_mut(&mut self, i: u32) -> Option<&mut T> {
         self.external_data.get_mut(&i)
     }
 
-    pub fn remove(&mut self, i: u32) -> Option<ExternRef> {
-        self.free_locations.push_front(i);
+    pub fn remove(&mut self, i: u32) -> Option<T> {
+        self.insert_free_range(i);
         self.external_data.remove(&i)
     }
 
+    fn insert_free_range(&mut self, i: u32) {
+        let mut inserted = false;
+
+        for idx in 0..self.free_ranges.len() {
+            let range = &mut self.free_ranges[idx];
+
+            if i + 1 == *range.start() {
+                *range = i..=*range.end();
+                inserted = true;
+                break;
+            } else if i == *range.end() + 1 {
+                *range = *range.start()..=i;
+                inserted = true;
+                break;
+            } else if i < *range.start() {
+                self.free_ranges.insert(idx, i..=i);
+                inserted = true;
+                break;
+            }
+        }
+
+        if !inserted {
+            self.free_ranges.push_back(i..=i);
+        }
+
+        // Merge adjacent ranges
+        let mut merged = VecDeque::new();
+        while let Some(mut current) = self.free_ranges.pop_front() {
+            while let Some(next) = self.free_ranges.front() {
+                if *current.end() + 1 >= *next.start() {
+                    let next = self.free_ranges.pop_front().unwrap();
+                    current = *current.start()..=*next.end();
+                } else {
+                    break;
+                }
+            }
+            merged.push_back(current);
+        }
+        self.free_ranges = merged;
+    }
 }
+
 
 pub struct WasmInterpreter {
     engine: Engine,
-    store: Store<HostState>,
-    linker: Linker<HostState>,
+    store: Store<HostState<ExternRef>>,
+    linker: Linker<HostState<ExternRef>>,
     script_instance: Option<(Module, Instance)>,
 }
 
@@ -62,7 +118,7 @@ impl WasmInterpreter {
         config.enforced_limits(EnforcedLimits::strict());
         let engine = Engine::new(&config);
         let mut store = Store::new(&engine, HostState::new());
-        let mut linker = <Linker<HostState>>::new(&engine);
+        let mut linker = <Linker<HostState<ExternRef>>>::new(&engine);
 
         unsafe {
             bind_data(&engine, &mut store, &mut linker).expect("Failed to setup wasm environment");
@@ -103,7 +159,7 @@ impl WasmInterpreter {
 
 }
 
-unsafe fn bind_data(engine: &Engine, store: &mut Store<HostState>, linker: &mut Linker<HostState>) -> Result<()> {
+unsafe fn bind_data(engine: &Engine, store: &mut Store<HostState<ExternRef>>, linker: &mut Linker<HostState<ExternRef>>) -> Result<()> {
 
     // wasm names are prefixed with '_' so that languages
     // can have abstraction layers to turn stuff into normal
@@ -113,32 +169,15 @@ unsafe fn bind_data(engine: &Engine, store: &mut Store<HostState>, linker: &mut 
 
 
     // GLOBAL FUNCTIONS
-    linker.func_wrap("env", "_create_color_note", |mut caller: Caller<'_, HostState>, beat: f32| -> i32 {
+    linker.func_wrap("env", "_create_color_note", |mut caller: Caller<'_, HostState<ExternRef>>, beat: f32| -> i32 {
         let note = unsafe { create_color_note(beat) };
         let extern_ref = ExternRef::new(&mut caller, note);
 
         caller.data_mut().add(extern_ref) as i32
 
     })?;
-    // linker.define("env", "_create_color_note", function_create_color_note)?;
 
-
-    // INSTANCE FUNCTIONS
-    linker.func_wrap("env", "_beatmap_add_color_note", |mut caller: Caller<'_, HostState>, note_opt: i32| {
-        let extern_ref = caller.data_mut().remove(note_opt as u32);
-
-        if let Some(rf) = extern_ref {
-            let val = rf.data(&mut caller).unwrap().downcast_ref::<ColorNote>().unwrap();
-
-            beatmap_add_color_note(*val);
-
-        } else {
-            panic!("Invalid pointer");
-        }
-
-    })?;
-
-    linker.func_wrap("env", "_log", |caller: Caller<'_, HostState>, message: i32| {
+    linker.func_wrap("env", "_log", |caller: Caller<'_, HostState<ExternRef>>, message: i32| {
 
         let memory = caller.get_export("memory").unwrap().into_memory().unwrap();
 
@@ -160,25 +199,73 @@ unsafe fn bind_data(engine: &Engine, store: &mut Store<HostState>, linker: &mut 
 
     })?;
 
+    linker.func_wrap("env", "_drop_local", |mut caller: Caller<'_, HostState<ExternRef>>, object_index: i32| {
+
+        caller.data_mut().remove(object_index as u32);
+
+    })?;
+
+
+
+    // INSTANCE FUNCTIONS
+    linker.func_wrap("env", "_beatmap_add_color_note", |mut caller: Caller<'_, HostState<ExternRef>>, note_opt: i32| {
+        let extern_ref = caller.data_mut().remove(note_opt as u32);
+
+        if let Some(rf) = extern_ref {
+            let val = rf.data(&mut caller).unwrap().downcast_ref::<ColorNote>().unwrap();
+
+            beatmap_add_color_note(*val);
+
+        } else {
+            panic!("Invalid pointer");
+        }
+
+    })?;
+
+
 
     Ok(())
 }
 
 #[cfg(test)]
 mod wasm_tests {
-    use std::fs;
     use anyhow::Result;
-    use wasmprinter::print_bytes;
+    use crate::wasm::wasm_interpreter::HostState;
 
     #[test]
-    fn test_wasm() -> Result<()> {
-        let data = fs::read(r"C:\Users\Westb\Desktop\turing_wasm\target\wasm32-unknown-unknown\debug\turing_wasm.wasm")?;
+    fn test_memory() -> Result<()> {
 
-        let wasm = wat::parse_bytes(&data)?;
+        let mut state = HostState::new();
 
+        state.add(1.0f32);
+        state.add(2.0f32);
+        state.add(3.0f32);
+        state.add(4.0f32);
+        state.add(5.0f32);
+        state.add(6.0f32);
+        state.add(7.0f32);
+        state.add(8.0f32);
+        state.add(9.0f32);
+        state.add(10.0f32);
+        println!("{:?}", state);
 
-        println!("{:#}", print_bytes(&wasm)?);
+        state.remove(2);
+
+        println!("{:?}", state);
+
+        state.remove(3);
+        println!("{:?}", state);
+
+        state.add(11.0f32);
+        println!("{:?}", state);
+
+        state.remove(5);
+        println!("{:?}", state);
+
+        state.remove(4);
+        println!("{:?}", state);
 
         Ok(())
     }
+
 }

@@ -227,7 +227,7 @@ impl Parameters {
         self.params.len()
     }
 
-    pub fn push(&mut self, value: Param) -> &mut self {
+    pub fn push(&mut self, value: Param) -> &mut Self {
 
         let typ = get_type(&value);
 
