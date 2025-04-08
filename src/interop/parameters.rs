@@ -1,5 +1,5 @@
 use std::any::Any;
-use std::ffi::{c_char, CStr, CString};
+use std::ffi::{c_char, c_void, CStr, CString};
 use std::fmt::Display;
 use glam::{Quat, Vec3};
 use crate::data::game_objects::*;
@@ -18,16 +18,10 @@ macro_rules! convertible {
         from C: $name:tt => $from_cs:block
     ) => {
         unsafe impl CSharpConvertible for $strct {
-
             type Raw = $raw;
-
             fn into_cs($self) -> Self::Raw $to_cs
-
             unsafe fn from_cs($name: Self::Raw) -> Self $from_cs
-
-
         }
-
     };
     ($strct:ty) => {
         convertible!(
@@ -50,7 +44,8 @@ convertible!(
         RsString { ptr: CString::new(self).unwrap().into_raw() }
     }
     from C: raw => {
-        CStr::from_ptr(raw.ptr).to_string_lossy().to_string()
+        CString::from_raw(raw.ptr as *mut c_char).to_string_lossy().to_string() // takes full ownership
+        // CStr::from_ptr(raw.ptr).to_string_lossy().to_string() // copies data
     }
 );
 
@@ -137,7 +132,7 @@ macro_rules! param_def {
             macro_rules! free_data {
                 ( $ds tp:tt, $ds dt:ident, $ds c_param: ident ) => {
                     match $ds tp {
-                        $( ParamType::$ty => ParamData { $ty : *Box::from_raw($ds dt as *mut <$ty as CSharpConvertible>::Raw) } ),*
+                        $( ParamType::$ty => { $ty::from_cs(*Box::from_raw($ds dt as *mut <$ty as CSharpConvertible>::Raw)); } )*
                     }
                 };
             }
@@ -235,6 +230,7 @@ impl Parameters {
         self.params.len()
     }
 
+    /// push a value wrapped in the Param enum. Parameters must be packed into a CParams object for crossing interop
     pub fn push(&mut self, value: Param) -> &mut Self {
 
         let typ = get_type(&value);
@@ -251,6 +247,7 @@ impl Parameters {
         self
     }
 
+    /// Packs all parameters that were pushed into a new CParams struct instance.
     pub fn pack(self) -> CParams {
 
         let mut c_param_ptrs: Vec<*mut CParam> = self.params.into_iter()
@@ -276,6 +273,7 @@ impl Parameters {
 
     }
 
+    /// unpacks the CParams struct into Parameters, and then deallocates the CParams object
     pub unsafe fn unpack(c_params: CParams) -> Self {
 
         let mut params = Vec::new();
@@ -306,6 +304,7 @@ impl Parameters {
         }
     }
 
+    /// free a CParams object. C# calls to this function to free it's RsParams struct instances
     pub unsafe fn free(c_params: CParams) {
 
         // take ownership of the pointed data
@@ -322,7 +321,7 @@ impl Parameters {
             let data_type = param.data_type;
             let raw_ptr = param.data;
             // take ownership of each parameter's data
-            let _ = free_data!(data_type, raw_ptr, c_param);
+            free_data!(data_type, raw_ptr, c_param);
 
         }
     }
@@ -386,7 +385,6 @@ macro_rules! push_parameter {
 mod parameters_tests {
     use crate::data::game_objects::ColorNote;
     use crate::interop::parameters::{CSharpConvertible, Parameters};
-    use crate::interop::parameters::params::{Param, ParamData, ParamType};
 
     #[test]
     fn test_c_params() {
