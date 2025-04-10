@@ -503,7 +503,6 @@ mod parameters_tests {
 
         let error = unpacked.check_error();
 
-        return;
         println!("error: {:?}", error);
 
     }
