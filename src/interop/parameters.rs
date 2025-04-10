@@ -1,9 +1,8 @@
 use std::any::Any;
 use std::ffi::{c_char, c_void, CStr, CString};
-use std::fmt::Display;
 use glam::{Quat, Vec3};
 use crate::data::game_objects::*;
-use crate::interop::parameters::params::{get_type, get_value, remap_data, free_data, Param, ParamData, ParamType, Parameters};
+use crate::interop::parameters::params::{free_data, get_param_data, get_type, pack_value, remap_data, Param, ParamData, ParamDataRaw, ParamType, Parameters};
 
 pub unsafe trait CSharpConvertible {
     type Raw;
@@ -32,10 +31,11 @@ macro_rules! convertible {
     }
 }
 
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
 pub struct RsString {
-    pub ptr: *const c_char,
+    pub ptr: *mut c_char,
 }
 
 convertible!(
@@ -44,8 +44,40 @@ convertible!(
         RsString { ptr: CString::new(self).unwrap().into_raw() }
     }
     from C: raw => {
-        CString::from_raw(raw.ptr as *mut c_char).to_string_lossy().to_string() // takes full ownership
+        CString::from_raw(raw.ptr).to_string_lossy().to_string() // takes full ownership
         // CStr::from_ptr(raw.ptr).to_string_lossy().to_string() // copies data
+    }
+);
+
+#[derive(Debug, Clone)]
+pub struct InteropError {
+    pub error_type: String,
+    pub message: String,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct InteroperableError {
+    pub type_ptr: *mut c_char,
+    pub error_message: *mut c_char,
+}
+
+convertible!(
+    InteropError => InteroperableError;
+    to C: self => {
+        InteroperableError {
+            type_ptr: CString::new(self.error_type).unwrap().into_raw(),
+            error_message: CString::new(self.message).unwrap().into_raw()
+        }
+    }
+    from C: raw => {
+        let et = CString::from_raw(raw.type_ptr).to_string_lossy().to_string();
+        let m = CString::from_raw(raw.error_message).to_string_lossy().to_string();
+
+        Self {
+            error_type: et,
+            message: m
+        }
     }
 );
 
@@ -78,17 +110,14 @@ convertible!(Wall);
 convertible!(Saber);
 convertible!(Player);
 
-/// a list of either of these patterns, which can be mixed:
-/// type_name type enum_constant
-/// or
-/// type_name type - data_name enum_constant
 macro_rules! param_def {
     ( $ds:tt $( $ty:tt = $val:literal ),* $(,)? ) => {
         pub mod params {
             use crate::data::game_objects::*;
             use glam::*;
-            use crate::interop::parameters::CSharpConvertible;
+            use crate::interop::parameters::{CSharpConvertible, CParams, CParam};
             use std::fmt::{write, Display, Formatter};
+            use crate::InteropError;
 
             #[allow(non_camel_case_types)]
             #[repr(u32)]
@@ -98,15 +127,29 @@ macro_rules! param_def {
             }
 
             #[allow(non_snake_case)]
-            #[repr(C)]
-            #[derive(Clone, Copy)]
+            // #[derive(Clone, Copy)]
             pub union ParamData {
+                $( pub $ty: std::mem::ManuallyDrop<$ty> ),*
+            }
+
+            #[allow(non_snake_case)]
+            #[repr(C)]
+            // #[derive(Clone)]
+            pub union ParamDataRaw {
                 $( pub $ty: <$ty as CSharpConvertible>::Raw ),*
             }
+
+
 
             #[allow(non_camel_case_types)]
             pub enum Param {
                 $( $ty(ParamData) ),*
+            }
+
+            pub fn get_param_data(param: Param) -> ParamData {
+                match param {
+                    $( Param::$ty(d) => d ),*
+                }
             }
 
             pub fn get_type(value: &Param) -> ParamType {
@@ -115,16 +158,27 @@ macro_rules! param_def {
                 }
             }
 
-            pub fn get_value(value: &Param) -> Box<dyn std::any::Any> {
-                match value {
-                    $( Param::$ty(x) => Box::new(x.clone()), )*
+            pub fn pack_value(tp: ParamType, value: ParamData) -> CParam {
+                match tp {
+                    $(
+                        ParamType::$ty => {
+                            CParam {
+                                data_type: tp,
+                                data: Box::into_raw(Box::new( ParamDataRaw { $ty: $ty::into_cs(unsafe { std::mem::ManuallyDrop::into_inner(value.$ty) }) }))
+                            }
+                        },
+                    )*
                 }
+
+                // match value {
+                //     $( Param::$ty(x) => Box::new($ty::to_cs(x)), )*
+                // }
             }
 
             macro_rules! remap_data {
                 ( $ds tp:tt, $ds dt:ident, $ds c_param: ident ) => {
                     match $ds tp {
-                        $( ParamType::$ty => ParamData { $ty : *($ds dt as *mut <$ty as CSharpConvertible>::Raw) } ),*
+                        $( ParamType::$ty => ParamData { $ty : std::mem::ManuallyDrop::new($ty::from_cs(*($ds dt as *mut <$ty as CSharpConvertible>::Raw))) } ),*
                     }
                 };
             }
@@ -192,15 +246,60 @@ param_def! {$ // < this is here for internal macro creation, don't remove or rep
     Player        = 108,
 
     Vec3  = 200,
-    Quat = 201
+    Quat = 201,
 
+    InteropError = 900
+
+}
+
+#[macro_export]
+macro_rules! get_parameter {
+    ( $params:expr, $t:tt, $index:expr) => {
+        {
+            if ($index >= $params.size()) {
+                Err("index out of bounds".to_owned())
+            } else {
+                let raw = $params.params.remove($index);
+                if raw.0 as u32 != crate::params::ParamType::$t as u32 {
+                    Err("parameter at that position is not of expected type".to_owned())
+                }
+                else {
+                    let p = crate::params::Param::$t(unsafe { raw.1 });
+                    match p {
+                        crate::params::Param::$t(x) => Ok(unsafe { std::mem::ManuallyDrop::into_inner(x.$t.clone()) }),
+                        _ => Err("parameter at that position is not of expected type".to_owned())
+                    }
+                }
+            }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! get_return {
+    ( $params:expr, $t:tt, $index:expr) => {
+        {
+            let raw = $params.params.remove($index);
+            if raw.0 as u32 != crate::params::ParamType::$t as u32 {
+                Err::<std::mem::ManuallyDrop<$t>, String>("wrong value type was returned".to_owned())
+            }
+            else {
+                let p = crate::params::Param::$t(unsafe { raw.1 });
+                match p {
+                    crate::params::Param::$t(x) => Ok(unsafe { x.$t }),
+                    _ => Err("wrong value type was returned".to_owned())
+                }
+            }
+
+        }
+    };
 }
 
 #[repr(C)]
 #[derive(Debug)]
 pub struct CParam {
     pub data_type: ParamType,
-    pub data: *const ParamData,
+    pub data: *const ParamDataRaw,
 }
 
 #[repr(C)]
@@ -212,17 +311,16 @@ pub struct CParams {
 
 
 impl CParam {
-    pub fn new(data_type: ParamType, data: *const ParamData) -> Self {
+    pub fn new(data_type: ParamType, data: *const ParamDataRaw) -> Self {
         CParam { data_type, data }
     }
 }
 
-
-
 impl Parameters {
+
     pub fn new() -> Self {
         Self {
-            params: Vec::new(),
+            params: Vec::new()
         }
     }
 
@@ -230,35 +328,22 @@ impl Parameters {
         self.params.len()
     }
 
-    /// push a value wrapped in the Param enum. Parameters must be packed into a CParams object for crossing interop
-    pub fn push(&mut self, value: Param) -> &mut Self {
-
+    pub fn push(&mut self, value: Param) {
         let typ = get_type(&value);
 
-        let mut v = get_value(&value);
-        let val = v.downcast_mut::<ParamData>().unwrap();
+        let data = get_param_data(value);
 
-        let data = ParamData::try_from(*val).unwrap();
-        self.params.push((
-            typ,
-            data
-        ));
+        self.params.push((typ, data));
 
-        self
     }
 
-    /// Packs all parameters that were pushed into a new CParams struct instance.
     pub fn pack(self) -> CParams {
-
         let mut c_param_ptrs: Vec<*mut CParam> = self.params.into_iter()
             .map(|(tp, param)| {
-                let c_param = CParam {
-                    data_type: tp,
-                    data: Box::into_raw(Box::new(param)),
-                };
+                let c_param = pack_value(tp, param);
+
                 Box::into_raw(Box::new(c_param))
-            })
-            .collect();
+            }).collect();
 
         let param_count = c_param_ptrs.len() as u32;
 
@@ -274,7 +359,7 @@ impl Parameters {
     }
 
     /// unpacks the CParams struct into Parameters, and then deallocates the CParams object
-    pub unsafe fn unpack(c_params: CParams) -> Self {
+    pub unsafe fn unpack(c_params: &CParams) -> Self {
 
         let mut params = Vec::new();
 
@@ -297,15 +382,30 @@ impl Parameters {
 
         }
 
-        Self::free(c_params); // is this safe? idk
+        // Self::free(c_params); // is this safe? idk
 
         Self {
             params
         }
     }
 
+    /// checks for an error at parameter index 0
+    pub fn check_error(&mut self) -> Option<InteropError> {
+        let res = get_parameter!(self, InteropError, 0);
+
+        if let Ok(err) = res {
+            Some(err)
+        } else {
+            None
+        }
+
+    }
+
+
+    pub unsafe fn free_cs(c_params: CParams) {}
+
     /// free a CParams object. C# calls to this function to free it's RsParams struct instances
-    pub unsafe fn free(c_params: CParams) {
+    pub unsafe fn free(c_params: &CParams) {
 
         // take ownership of the pointed data
         let c_params = Vec::from_raw_parts(
@@ -328,63 +428,19 @@ impl Parameters {
 
 }
 
-#[macro_export]
-macro_rules! get_parameter {
-    ( $params:expr, $t:tt, $index:expr) => {
-        {
-            if ($index >= $params.size()) {
-                Err("index out of bounds".to_owned())
-            } else {
-                let raw = $params.params[$index];
-                if raw.0 as u32 != crate::params::ParamType::$t as u32 {
-                    Err("parameter at that position is not of expected type".to_owned())
-                }
-                else {
-                    let p = crate::params::Param::$t(unsafe { raw.1 });
-                    match p {
-                        crate::params::Param::$t(x) => Ok(unsafe { $t::from_cs( x.$t ) }),
-                        _ => Err("parameter at that position is not of expected type".to_owned())
-                    }
-                }
-            }
-        }
-    };
-}
 
-#[macro_export]
-macro_rules! get_return {
-    ( $params:expr, $t:tt, $index:expr) => {
-        {
-            let raw = $params.params[$index];
-            if raw.0 as u32 != crate::params::ParamType::$t as u32 {
-                Err::<$t, String>("wrong value type was returned".to_owned())
-            }
-            else {
-                let p = crate::params::Param::$t(unsafe { raw.1 });
-                match p {
-                    crate::params::Param::$t(x) => Ok(unsafe { $t::from_cs( x.$t ) }),
-                    _ => Err("wrong value type was returned".to_owned())
-                }
-            }
-
-        }
-    };
-}
-
-#[macro_export]
 macro_rules! push_parameter {
-    ( $params:ident , $t:tt : $value:expr ) => {
-        let csharp_value = crate::params::ParamData { $t: crate::interop::parameters::CSharpConvertible::into_cs($value) };
-        $params.push(crate::params::Param::$t(csharp_value));
+    ( $params:expr, $typ:ident: $obj:expr ) => {
+        $params.push(crate::params::Param::$typ( crate::params::ParamData { $typ: std::mem::ManuallyDrop::new($obj) } ))
     };
 }
-
 
 
 #[cfg(test)]
 mod parameters_tests {
     use crate::data::game_objects::ColorNote;
-    use crate::interop::parameters::{CSharpConvertible, Parameters};
+    use crate::interop::parameters::{CSharpConvertible, InteropError, Parameters};
+    use crate::interop::parameters::params::Param;
 
     #[test]
     fn test_c_params() {
@@ -409,7 +465,7 @@ mod parameters_tests {
 
         println!("packed: {:?}", packed);
 
-        let unpacked = unsafe { Parameters::unpack(packed) };
+        let mut unpacked = unsafe { Parameters::unpack(&packed) };
 
         println!("unpacked: {}", unpacked);
 
@@ -417,13 +473,39 @@ mod parameters_tests {
 
         println!("note: {:?}", note_unpacked);
 
-        let str_unpacked = get_parameter!(unpacked, String, 3);
+        let str_unpacked = get_parameter!(unpacked, String, 2);
         println!("str: {:?}", str_unpacked);
 
-        let error = get_parameter!(unpacked, f64, 2);
+        let error = get_parameter!(unpacked, f64, 1);
+        println!("error: {:?}", error);
+
+    }
+
+    #[test]
+    fn test_error() {
+        let mut p = Parameters::new();
+
+        let err = InteropError {
+            error_type: "Test Error".to_string(),
+            message: "hello".to_string(),
+        };
+
+        push_parameter!(p, InteropError: err);
+
+        let packed = p.pack();
+
+        println!("packed: {:?}", packed);
+
+        let mut unpacked = unsafe { Parameters::unpack(&packed) };
+
+        println!("unpacked: {}", unpacked);
+
+
+        let error = unpacked.check_error();
+
+        return;
         println!("error: {:?}", error);
 
     }
 
 }
-

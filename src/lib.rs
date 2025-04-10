@@ -9,8 +9,9 @@ use std::mem;
 use std::os::raw::{c_char, c_void};
 use std::sync::{Mutex};
 use std::sync::atomic::AtomicPtr;
+use anyhow::__private::kind::TraitKind;
 use crate::interop::parameters::*;
-use crate::interop::parameters::params::Parameters;
+use crate::interop::parameters::params::{ParamData, Parameters};
 use crate::wasm::wasm_interpreter::WasmInterpreter;
 
 static mut WASM_INTERPRETER: Option<WasmInterpreter> = None;
@@ -68,18 +69,18 @@ macro_rules! extern_fn {
                 let mut params_in = crate::params::Parameters::new();
 
                 $(
-                    push_parameter!(params_in, $arg_ty: $arg);
+                    params_in.push(crate::params::Param::$arg_ty( crate::params::ParamData { $arg_ty: std::mem::ManuallyDrop::new($arg)}));
                 )*
 
                 let packed = params_in.pack();
 
                 let res = $cs_name(packed);
 
-                let result = unsafe { Parameters::unpack(res) };
+                let mut result = unsafe { Parameters::unpack(&res) };
 
                 $(
                 if result.size() == 1 {
-                    get_return!(result, $ret, 0).unwrap()
+                    *get_return!(result, $ret, 0).unwrap()
                 } else {
                     panic!("critical error in interop function {}/{}", stringify!($name), stringify!($cs_name))
                 }
@@ -119,11 +120,25 @@ extern_fns!(
 );
 
 macro_rules! error_param {
-    ( $err:expr ) => {
+    ( $err_type:expr, $err:expr ) => {
         {
             let mut params = Parameters::new();
-            push_parameter!(params, String: $err);
+            let err = InteropError {
+                error_type: $err_type.to_string(),
+                message: $err.to_string(),
+            };
+            params.push(crate::params::Param::InteropError( ParamData { InteropError: std::mem::ManuallyDrop::new(err)}));
             params.pack()
+        }
+    };
+}
+
+macro_rules! return_error {
+    ( $err:expr, $err_type:expr ) => {
+        if let Err(e) = $err {
+            error_param!($err_type, String::from_utf8_lossy(e.to_string().as_bytes()))
+        } else {
+            Parameters::new().pack()
         }
     };
 }
@@ -143,7 +158,7 @@ pub unsafe extern "C" fn initialize_wasm() {
 
 #[no_mangle]
 pub unsafe extern "C" fn free_params(params: CParams) {
-    Parameters::free(params);
+    Parameters::free_cs(params);
 }
 
 #[no_mangle]
@@ -156,13 +171,9 @@ pub unsafe extern "C" fn load_script(str_ptr: *const c_char) -> CParams {
     if let Some(wasm) = &mut WASM_INTERPRETER {
         let res = wasm.load_script(&s);
 
-        if let Err(e) = res {
-            error_param!(String::from_utf8_lossy(e.to_string().as_bytes()).to_string())
-        } else {
-            Parameters::new().pack()
-        }
+        return_error!(res, "Load Error")
     } else {
-        error_param!("WASM interpreter is not loaded".to_string())
+        error_param!("Critical Error", "WASM interpreter is not loaded")
     }
 
 }
@@ -172,15 +183,11 @@ pub unsafe extern "C" fn call_script_function(str_ptr: *const c_char, params: CP
     let cstr = CStr::from_ptr(str_ptr);
     let s = cstr.to_string_lossy().to_string();
     if let Some(wasm) = &mut WASM_INTERPRETER {
-        let res = wasm.call_void_method(&s, Parameters::unpack(params));
+        let res = wasm.call_void_method(&s, Parameters::unpack(&params));
 
-        if let Err(e) = res {
-            error_param!(String::from_utf8_lossy(e.to_string().as_bytes()).to_string())
-        } else {
-            Parameters::new().pack()
-        }
+        return_error!(res, "Runtime Error")
     } else {
-        error_param!("WASM interpreter is not loaded".to_string())
+        error_param!("Critical Error", "WASM interpreter is not loaded")
     }
 
 }
