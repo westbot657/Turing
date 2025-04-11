@@ -14,6 +14,7 @@ serde_json = "1.0.140"
 wasmi = "0.44.0"
 wat = "1.227.1"
 lazy_static = "1.5.0"
+paste = "1.0.15"
 
 [dev-dependencies]
 wasmprinter = "0.228.0"

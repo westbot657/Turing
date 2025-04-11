@@ -10,6 +10,8 @@ use std::os::raw::{c_char, c_void};
 use std::sync::{Mutex};
 use std::sync::atomic::AtomicPtr;
 use anyhow::__private::kind::TraitKind;
+use glam::{Vec2, Vec3, Vec4, Quat};
+use crate::data::types::Color;
 use crate::interop::parameters::*;
 use crate::interop::parameters::params::{ParamData, Parameters};
 use crate::wasm::wasm_interpreter::WasmInterpreter;
@@ -111,13 +113,88 @@ macro_rules! extern_fns {
     };
 }
 
+macro_rules! cs {
+    ( $( $name:ident ( $( $arg:ident : $arg_ty:tt ),* ) $( -> $ret:tt )? ),* $(,)? ) => {
+        extern_fns!{ $( $name as $name ( $( $arg: $arg_ty ),* ) $( -> $ret )? ),* }
+    };
+}
 // structured as:
 // <C# name> as <rust method signature>
-extern_fns!(
+extern_fns! {
     cs_print as print_out(msg: String),
-    create_color_note as create_color_note(beat: f32) -> ColorNote,
-    beatmap_add_color_note as beatmap_add_color_note(note: ColorNote),
-);
+}
+
+cs! {
+    create_color_note(beat: f32) -> ColorNote,
+    beatmap_add_color_note(note: ColorNote),
+    beatmap_remove_color_note(note: ColorNote),
+    color_note_set_position(note: ColorNote, pos: Vec3),
+    color_note_get_position(note: ColorNote) -> Vec3,
+    color_note_set_orientation(note: ColorNote, rot: Quat),
+    color_note_get_orientation(note: ColorNote) -> Quat,
+    color_note_set_color(note: ColorNote, color: Color),
+    color_note_get_color(note: ColorNote) -> Color,
+
+    create_bomb_note(beat: f32) -> BombNote,
+    beatmap_add_bomb_note(bomb: BombNote),
+    beatmap_remove_bomb_note(bomb: BombNote),
+    bomb_note_set_position(bomb: BombNote, pos: Vec3),
+    bomb_note_get_position(bomb: BombNote) -> Vec3,
+    bomb_note_set_orientation(bomb: BombNote, rot: Quat),
+    bomb_note_get_orientation(bomb: BombNote) -> Quat,
+    bomb_note_set_color(bomb: BombNote, color: Color),
+    bomb_note_get_color(bomb: BombNote) -> Color,
+
+    create_arc(beat: f32) -> Arc,
+    beatmap_add_arc(arc: Arc),
+    beatmap_remove_arc(arc: Arc),
+    arc_set_position(arc: Arc, pos: Vec3),
+    arc_get_position(arc: Arc) -> Vec3,
+    arc_set_orientation(arc: Arc, rot: Quat),
+    arc_get_orientation(arc: Arc) -> Quat,
+    arc_set_color(arc: Arc, color: Color),
+    arc_get_color(arc: Arc) -> Color,
+
+    create_wall(beat: f32) -> Wall,
+    beatmap_add_wall(wall: Wall),
+    beatmap_remove_wall(wall: Wall),
+    wall_set_position(wall: Wall, pos: Vec3),
+    wall_get_position(wall: Wall) -> Vec3,
+    wall_set_orientation(wall: Wall, rot: Quat),
+    wall_get_orientation(wall: Wall) -> Quat,
+    wall_set_color(wall: Wall, color: Color),
+    wall_get_color(wall: Wall) -> Color,
+
+    create_chain_head_note(beat: f32) -> ChainHeadNote,
+    beatmap_add_chain_head_note(note: ChainHeadNote),
+    beatmap_remove_chain_head_note(note: ChainHeadNote),
+    chain_head_note_set_position(note: ChainHeadNote, pos: Vec3),
+    chain_head_note_get_position(note: ChainHeadNote) -> Vec3,
+    chain_head_note_set_orientation(note: ChainHeadNote, rot: Quat),
+    chain_head_note_get_orientation(note: ChainHeadNote) -> Quat,
+    chain_head_note_set_color(note: ChainHeadNote, color: Color),
+    chain_head_note_get_color(note: ChainHeadNote) -> Color,
+
+    create_chain_link_note(beat: f32) -> ChainLinkNote,
+    beatmap_add_chain_link_note(note: ChainLinkNote),
+    beatmap_remove_chain_link_note(note: ChainLinkNote),
+    chain_link_note_set_position(note: ChainLinkNote, pos: Vec3),
+    chain_link_note_get_position(note: ChainLinkNote) -> Vec3,
+    chain_link_note_set_orientation(note: ChainLinkNote, rot: Quat),
+    chain_link_note_get_orientation(note: ChainLinkNote) -> Quat,
+    chain_link_note_set_color(note: ChainLinkNote, color: Color),
+    chain_link_note_get_color(note: ChainLinkNote) -> Color,
+
+    create_chain_note(beat: f32) -> ChainNote,
+    beatmap_add_chain_note(note: ChainNote),
+    beatmap_remove_chain_note(note: ChainNote),
+    chain_note_set_position(note: ChainNote, pos: Vec3),
+    chain_note_get_position(note: ChainNote) -> Vec3,
+    chain_note_set_orientation(note: ChainNote, rot: Quat),
+    chain_note_get_orientation(note: ChainNote) -> Quat,
+    chain_note_set_color(note: ChainNote, color: Color),
+    chain_note_get_color(note: ChainNote) -> Color,
+}
 
 macro_rules! error_param {
     ( $err_type:expr, $err:expr ) => {

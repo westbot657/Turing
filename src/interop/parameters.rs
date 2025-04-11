@@ -1,7 +1,7 @@
 use std::any::Any;
 use std::ffi::{c_char, c_void, CStr, CString};
-use glam::{Quat, Vec3};
-use crate::data::game_objects::*;
+use glam::{Quat, Vec2, Vec3, Vec4};
+use crate::data::{game_objects::*, types::Color};
 use crate::interop::parameters::params::{free_data, get_param_data, get_type, pack_value, remap_data, Param, ParamData, ParamDataRaw, ParamType, Parameters};
 
 pub unsafe trait CSharpConvertible {
@@ -97,8 +97,11 @@ convertible!(f64);
 
 convertible!(bool);
 
+convertible!(Vec2);
 convertible!(Vec3);
+convertible!(Vec4);
 convertible!(Quat);
+convertible!(Color);
 
 convertible!(ColorNote);
 convertible!(BombNote);
@@ -110,6 +113,7 @@ convertible!(Wall);
 convertible!(Saber);
 convertible!(Player);
 
+
 macro_rules! param_def {
     ( $ds:tt $( $ty:tt = $val:literal ),* $(,)? ) => {
         pub mod params {
@@ -117,6 +121,7 @@ macro_rules! param_def {
             use glam::*;
             use crate::interop::parameters::{CSharpConvertible, CParams, CParam};
             use std::fmt::{write, Display, Formatter};
+            use crate::data::types::Color;
             use crate::InteropError;
 
             #[allow(non_camel_case_types)]
@@ -245,8 +250,11 @@ param_def! {$ // < this is here for internal macro creation, don't remove or rep
     Saber         = 107,
     Player        = 108,
 
-    Vec3  = 200,
-    Quat = 201,
+    Vec2  = 200,
+    Vec3  = 201,
+    Vec4  = 202,
+    Quat  = 203,
+    Color = 204,
 
     InteropError = 900
 
