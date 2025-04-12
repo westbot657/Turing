@@ -184,15 +184,17 @@ unsafe fn bind_data(engine: &Engine, store: &mut Store<HostState<ExternRef>>, li
         caller.data_mut().remove(object_index as u32);
     })?;
 
-    // Gameplay Objects
-    linker.func_wrap("env", "_create_color_note", |mut caller: Caller<'_, HostState<ExternRef>>, beat: f32| -> i32 {
-        let note = unsafe { create_color_note(beat) };
-        let extern_ref = ExternRef::new(&mut caller, note);
-        caller.data_mut().add(extern_ref) as i32
-    })?;
-
-
     // INSTANCE FUNCTIONS
+
+    macro_rules! object_create {
+        ( $linker:ident, $name:ident, $tp:ty ) => {
+            $linker.func_wrap("env", concat!("_create_", stringify!($name)), |mut caller: Caller<'_, HostState<ExternRef>>, beat: f32| -> i32 {
+                let note = unsafe { paste! { [<create_ $name>](beat) } };
+                let extern_ref = ExternRef::new(&mut caller, note);
+                caller.data_mut().add(extern_ref) as i32
+            })?;
+        }
+    }
 
     macro_rules! object_add_def {
         ( $linker:ident, $name:ident, $tp:ty ) => {
@@ -263,6 +265,7 @@ unsafe fn bind_data(engine: &Engine, store: &mut Store<HostState<ExternRef>>, li
 
     macro_rules! game_object_common {
         ( $linker:ident, $name:ident, $tp:ty ) => {
+            object_create! { $linker, $name, $tp }
             object_add_def! { $linker, $name, $tp }
             object_remove_def! { $linker, $name, $tp }
             get_set! { $linker, $name, $tp, position, glam::Vec3, set }
@@ -282,75 +285,9 @@ unsafe fn bind_data(engine: &Engine, store: &mut Store<HostState<ExternRef>>, li
     game_object_common! { linker, chain_link_note, ChainLinkNote }
     game_object_common! { linker, chain_note, ChainNote }
 
+
+
     todo!(/*
-        "_beatmap_remove_color_note",
-        "_color_note_get_position",
-        "_color_note_set_position",
-        "_color_note_get_orientation",
-        "_color_note_set_orientation",
-        "_color_note_set_color",
-        "_color_note_get_color",
-
-        "_create_bomb_note",
-        "_beatmap_add_bomb_note",
-        "_beatmap_remove_bomb_note",
-        "_bomb_note_get_position",
-        "_bomb_note_set_position",
-        "_bomb_note_get_orientation",
-        "_bomb_note_set_orientation",
-        "_bomb_note_set_color",
-        "_bomb_note_get_color",
-
-        "_create_arc",
-        "_beatmap_add_arc",
-        "_beatmap_remove_arc",
-        "_arc_get_position",
-        "_arc_set_position",
-        "_arc_get_orientation",
-        "_arc_set_orientation",
-        "_arc_set_color",
-        "_arc_get_color",
-
-        "_create_wall",
-        "_beatmap_add_wall",
-        "_beatmap_remove_wall",
-        "_wall_get_position",
-        "_wall_set_position",
-        "_wall_get_orientation",
-        "_wall_set_orientation",
-        "_wall_set_color",
-        "_wall_get_color",
-
-        "_create_chain_head_note",
-        "_beatmap_add_chain_head_note",
-        "_beatmap_remove_chain_head_note",
-        "_chain_head_note_get_position",
-        "_chain_head_note_set_position",
-        "_chain_head_note_get_orientation",
-        "_chain_head_note_set_orientation",
-        "_chain_head_note_set_color",
-        "_chain_head_note_get_color",
-
-        "_create_chain_link_note",
-        "_beatmap_add_chain_link_note",
-        "_beatmap_remove_chain_link_note",
-        "_chain_link_note_get_position",
-        "_chain_link_note_set_position",
-        "_chain_link_note_get_orientation",
-        "_chain_link_note_set_orientation",
-        "_chain_link_note_set_color",
-        "_chain_link_note_get_color",
-
-        "_create_chain_note",
-        "_beatmap_add_chain_note",
-        "_beatmap_remove_chain_note",
-        "_chain_note_get_position",
-        "_chain_note_set_position",
-        "_chain_note_get_orientation",
-        "_chain_note_set_orientation",
-        "_chain_note_set_color",
-        "_chain_note_get_color",
-
         "_saber_set_color",
         "_saber_get_color",
         "_get_left_saber",
