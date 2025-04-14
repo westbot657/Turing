@@ -160,6 +160,16 @@ impl WasmInterpreter {
 
 }
 
+fn get_string(message: u32, memory: &Memory, caller: &Caller<'_, HostState<ExternRef>>) -> String {
+    let mut output_string = String::new();
+    for i in message..u32::MAX {
+        let byte: &u8 = memory.data(caller).get(i as usize).unwrap();
+        if *byte == 0u8 { break }
+        output_string.push(char::from(*byte));
+    }
+    output_string
+}
+
 unsafe fn bind_data(engine: &Engine, store: &mut Store<HostState<ExternRef>>, linker: &mut Linker<HostState<ExternRef>>) -> Result<()> {
 
     // wasm names are prefixed with '_' so that languages
@@ -169,19 +179,20 @@ unsafe fn bind_data(engine: &Engine, store: &mut Store<HostState<ExternRef>>, li
     // Static objects
     linker.func_wrap("env", "_log", |caller: Caller<'_, HostState<ExternRef>>, message: i32| {
         let memory = caller.get_export("memory").unwrap().into_memory().unwrap();
-        let mut output_string = String::new();
-        for i in message..i32::MAX {
-            let byte: &u8 = memory.data(&caller).get(i as usize).unwrap();
-            if *byte == 0u8 { break }
-            output_string.push(char::from(*byte));
-        }
+
+        let msg = get_string(message as u32, &memory, &caller);
         // crate:: is necessary because otherwise it's ambiguous at compile time which macro to use
-        crate::println!("[wasm]: {}", output_string);
+        crate::println!("[wasm]: {}", msg);
     })?;
 
 
     linker.func_wrap("env", "_drop_reference", |mut caller: Caller<'_, HostState<ExternRef>>, object_index: i32| {
         caller.data_mut().remove(object_index as u32);
+    })?;
+
+    // this needs to be defined for AssemblyScript
+    linker.func_wrap("env", "abort", |caller: Caller<'_, HostState<ExternRef>>, message: i32, file_name: i32, line: i32, col: i32| {
+        panic!("WASM script aborted");
     })?;
 
     // INSTANCE FUNCTIONS
