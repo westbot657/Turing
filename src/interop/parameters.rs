@@ -1,5 +1,5 @@
 use std::any::Any;
-use std::ffi::{c_char, c_void, CStr, CString};
+use std::ffi::{c_char, CString};
 use glam::{Quat, Vec2, Vec3, Vec4};
 use crate::data::{game_objects::*, types::Color};
 use crate::interop::parameters::params::{free_data, get_param_data, get_type, pack_value, remap_data, Param, ParamData, ParamDataRaw, ParamType, Parameters};
@@ -410,7 +410,7 @@ impl Parameters {
     }
 
 
-    pub unsafe fn free_cs(c_params: CParams) {}
+    pub unsafe fn free_cs(_c_params: CParams) {}
 
     /// free a CParams object. C# calls to this function to free it's RsParams struct instances
     pub unsafe fn free(c_params: &CParams) {
@@ -447,8 +447,7 @@ macro_rules! push_parameter {
 #[cfg(test)]
 mod parameters_tests {
     use crate::data::game_objects::ColorNote;
-    use crate::interop::parameters::{CSharpConvertible, InteropError, Parameters};
-    use crate::interop::parameters::params::Param;
+    use crate::interop::parameters::{InteropError, Parameters};
 
     #[test]
     fn test_c_params() {
