@@ -9,7 +9,6 @@ use std::mem;
 use std::os::raw::{c_char, c_void};
 use std::sync::{Mutex};
 use std::sync::atomic::AtomicPtr;
-use anyhow::__private::kind::TraitKind;
 use glam::{Vec2, Vec3, Vec4, Quat};
 use crate::data::types::Color;
 use crate::interop::parameters::*;
