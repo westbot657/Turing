@@ -15,15 +15,8 @@ macro_rules! ptr_type {
     };
 }
 
-ptr_type!(ColorNote);
-ptr_type!(BombNote);
-ptr_type!(Arc);
-ptr_type!(ChainHeadNote);
-ptr_type!(ChainLinkNote);
-ptr_type!(ChainNote);
-ptr_type!(Wall);
-ptr_type!(Saber);
-ptr_type!(Player);
+ptr_type!(Object);
+ptr_type!(FuncRef);
 
 
 

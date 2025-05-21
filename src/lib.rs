@@ -1,41 +1,60 @@
 mod wasm;
 mod data;
 mod interop;
+pub mod dynamic_function_builder;
 
 use std::collections::HashMap;
 use data::game_objects::*;
-use std::ffi::CStr;
-use std::mem;
+use std::ffi::{CStr, CString};
+use std::{mem, slice};
 use std::os::raw::{c_char, c_void};
-use std::sync::{Mutex};
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicPtr;
-use glam::{Vec2, Vec3, Vec4, Quat};
-use crate::data::types::Color;
+use wasmi::{Caller, Engine, ExternRef, FuncType, Linker, Store, Val};
+use wasmi::core::ValType;
 use crate::interop::parameters::*;
-use crate::interop::parameters::params::{ParamData, Parameters};
-use crate::wasm::wasm_interpreter::WasmInterpreter;
+use crate::interop::parameters::params::Parameters;
+use dynamic_function_builder::function_gen::generate;
+use crate::wasm::wasm_interpreter::{HostState, WasmInterpreter};
+use anyhow::{anyhow, Result};
+
+type F = dyn Fn(Caller<'_, HostState<ExternRef>>, &[Val], &mut [Val]) -> Result<(), wasmi::Error>;
 
 static mut WASM_INTERPRETER: Option<WasmInterpreter> = None;
+static mut WASM_FNS: Option<HashMap<String, (FuncType, Box<F>)>> = None;
+
+pub unsafe fn bind_data(engine: &Engine, store: &mut Store<HostState<ExternRef>>, linker: &mut Linker<HostState<ExternRef>>) -> Result<()> {
+   if WASM_FNS.is_some() {
+       let mut fns = None;
+       mem::swap(&mut WASM_FNS, &mut fns);
+       let mut fns = fns.unwrap();
+       for f in &fns {
+
+           let a0 = &f.0;
+           let b0 = &f.1.0;
+
+           linker.func_new("env", a0, b0.clone(), |a, b, c| {
+               if WASM_FNS.is_some() {
+                   let mut fns = None;
+                   mem::swap(&mut WASM_FNS, &mut fns);
+                   let mut fns = fns.unwrap();
+                   let pair = fns.get(a0.as_str()).unwrap();
+                   let res = pair.1(a,b,c);
+                   mem::swap(&mut WASM_FNS, &mut Some(fns));
+                   res
+               } else {
+                   Ok(())
+               }
+           })?;
+       }
+
+       mem::swap(&mut WASM_FNS, &mut Some(fns));
+
+   }
+   Ok(())
+}
 
 type CsMethod = extern "C" fn(CParams) -> CParams;
-
-#[macro_export]
-macro_rules! println {
-    ( $st:literal ) => {
-        print_out($st.to_string())
-    };
-    ( $st:literal, $($args:expr),* ) => {
-        print_out(format!($st, $($args),*))
-    }
-}
-macro_rules! print {
-    ( $st:literal ) => {
-        println!($st);
-    };
-    ( $st:literal, $($args:expr),* ) => {
-        println!($st, $($args),*);
-    }
-}
 
 
 lazy_static::lazy_static! {
@@ -43,182 +62,92 @@ lazy_static::lazy_static! {
 }
 
 
+extern "C" {
+    pub fn abort(error_code: *const std::ffi::c_char, error_message: *const std::ffi::c_char) -> !;
+}
+
+#[macro_export]
+macro_rules! throw {
+    ( $code:expr, $msg:expr ) => {
+        {
+            let c = CString::new($code).unwrap();
+            let m = CString::new($msg).unwrap();
+            unsafe { abort(c.as_ptr(), m.as_ptr()) };
+        }
+    };
+}
+
+pub fn call_cs(name: &str, params: CParams) -> CParams {
+    let map = FUNCTION_MAP.lock().unwrap();
+    if let Some(arc) = map.get(name) {
+        let raw_ptr = arc.load(std::sync::atomic::Ordering::SeqCst);
+        let callback: CsMethod = unsafe { mem::transmute(raw_ptr) };
+
+        callback(params)
+    } else {
+        throw!("Not Defined", format!("Function '{}' not found", name));
+    }
+}
+
+
+#[repr(C)]
+struct ParamTypes {
+    count: u32,
+    array: *const u32
+}
+
+
+fn to_param_type(p: &u32) -> ValType {
+    match p {
+        2 => ValType::I32,
+        3 => ValType::I64,
+        8 => ValType::F32,
+        9 => ValType::F64,
+        100..199 => ValType::ExternRef,
+        200 => ValType::FuncRef,
+        _ => {
+            throw!("Invalid Type", format!("Type {p} is not recognized"));
+        }
+    }
+}
+
 #[no_mangle]
-unsafe extern "C" fn register_function(function_name: *const c_char, func_ptr: *mut c_void) {
+unsafe extern "C" fn generate_wasm_fn(name: *const std::ffi::c_char, func_ptr: *mut std::ffi::c_void, params_types: ParamTypes, return_types: ParamTypes) {
+
     let func_ptr_arc = std::sync::Arc::new(AtomicPtr::new(func_ptr));
-    let name_cstr = CStr::from_ptr(function_name);
+    let name_cstr = CStr::from_ptr(name);
     let name = name_cstr.to_string_lossy().to_string();
 
-    let mut map = FUNCTION_MAP.lock().unwrap();
-    map.insert(name.to_string(), func_ptr_arc);
+    {
+        let mut map = crate::FUNCTION_MAP.lock().unwrap();
+        map.insert(name.to_string(), func_ptr_arc);
+    }
 
+    let mut pts = Vec::new();
+    let mut rts = Vec::new();
+
+    let ptp_array = slice::from_raw_parts(params_types.array, params_types.count as usize);
+    let rtp_array = slice::from_raw_parts(return_types.array, return_types.count as usize);
+
+    for p in ptp_array {
+        pts.push(to_param_type(p));
+    }
+
+    for p in rtp_array {
+        rts.push(to_param_type(p));
+    }
+
+    let binding = generate(&name, pts, rts);
+
+    if WASM_FNS.is_none() {
+        WASM_FNS = Some(HashMap::new());
+    }
+
+    if let Some(fns) = &mut WASM_FNS {
+        fns.insert(name, binding);
+    }
 
 }
-
-macro_rules! extern_fn {
-    (
-        $cs_name: ident as
-        $name:ident ( $( $arg:ident : $arg_ty:tt ),* ) $( -> $ret:tt )?
-    ) => {
-        #[no_mangle]
-        pub unsafe fn $name( $( $arg : $arg_ty ),* ) $( -> $ret )? {
-            let map = FUNCTION_MAP.lock().unwrap();
-            if let Some(_macro_arc) = map.get(stringify!($cs_name)) {
-                let _macro_raw_ptr = _macro_arc.load(std::sync::atomic::Ordering::SeqCst);
-                let $cs_name: CsMethod = unsafe { mem::transmute(_macro_raw_ptr) };
-
-                let mut params_in = crate::params::Parameters::new();
-
-                $(
-                    params_in.push(crate::params::Param::$arg_ty( crate::params::ParamData { $arg_ty: std::mem::ManuallyDrop::new($arg)}));
-                )*
-
-                let packed = params_in.pack();
-
-                let res = $cs_name(packed);
-
-                let mut result = unsafe { Parameters::unpack(&res) };
-
-                $(
-                if result.size() == 1 {
-                    *get_return!(result, $ret, 0).unwrap()
-                } else {
-                    panic!("critical error in interop function {}/{}", stringify!($name), stringify!($cs_name))
-                }
-                )?
-
-            } else {
-
-                panic!("critical error in interop function {}/{}", stringify!($name), stringify!($cs_name));
-            }
-
-        }
-    };
-}
-
-macro_rules! extern_fns {
-    (
-        $(
-            $cs_name:ident as
-            $name:ident ( $( $arg:ident : $arg_ty:tt ),* ) $( -> $ret:tt )?
-        ),* $(,)?
-    ) => {
-        $(
-            extern_fn! {
-                $cs_name as
-                $name ( $( $arg : $arg_ty ),* ) $( -> $ret )?
-            }
-        )*
-    };
-}
-
-macro_rules! cs {
-    ( $( $name:ident ( $( $arg:ident : $arg_ty:tt ),* ) $( -> $ret:tt )? ),* $(,)? ) => {
-        extern_fns!{ $( $name as $name ( $( $arg: $arg_ty ),* ) $( -> $ret )? ),* }
-    };
-}
-// structured as:
-// <C# name> as <rust method signature>
-extern_fns! {
-    cs_print as print_out(msg: String),
-}
-
-cs! {
-    create_color_note(beat: f32) -> ColorNote,
-    beatmap_add_color_note(note: ColorNote),
-    beatmap_remove_color_note(note: ColorNote),
-    color_note_set_position(note: ColorNote, pos: Vec3),
-    color_note_get_position(note: ColorNote) -> Vec3,
-    color_note_set_orientation(note: ColorNote, rot: Quat),
-    color_note_get_orientation(note: ColorNote) -> Quat,
-    color_note_set_color(note: ColorNote, color: Color),
-    color_note_get_color(note: ColorNote) -> Color,
-
-    create_bomb_note(beat: f32) -> BombNote,
-    beatmap_add_bomb_note(bomb: BombNote),
-    beatmap_remove_bomb_note(bomb: BombNote),
-    bomb_note_set_position(bomb: BombNote, pos: Vec3),
-    bomb_note_get_position(bomb: BombNote) -> Vec3,
-    bomb_note_set_orientation(bomb: BombNote, rot: Quat),
-    bomb_note_get_orientation(bomb: BombNote) -> Quat,
-    bomb_note_set_color(bomb: BombNote, color: Color),
-    bomb_note_get_color(bomb: BombNote) -> Color,
-
-    create_arc(beat: f32) -> Arc,
-    beatmap_add_arc(arc: Arc),
-    beatmap_remove_arc(arc: Arc),
-    arc_set_position(arc: Arc, pos: Vec3),
-    arc_get_position(arc: Arc) -> Vec3,
-    arc_set_orientation(arc: Arc, rot: Quat),
-    arc_get_orientation(arc: Arc) -> Quat,
-    arc_set_color(arc: Arc, color: Color),
-    arc_get_color(arc: Arc) -> Color,
-
-    create_wall(beat: f32) -> Wall,
-    beatmap_add_wall(wall: Wall),
-    beatmap_remove_wall(wall: Wall),
-    wall_set_position(wall: Wall, pos: Vec3),
-    wall_get_position(wall: Wall) -> Vec3,
-    wall_set_orientation(wall: Wall, rot: Quat),
-    wall_get_orientation(wall: Wall) -> Quat,
-    wall_set_color(wall: Wall, color: Color),
-    wall_get_color(wall: Wall) -> Color,
-
-    create_chain_head_note(beat: f32) -> ChainHeadNote,
-    beatmap_add_chain_head_note(note: ChainHeadNote),
-    beatmap_remove_chain_head_note(note: ChainHeadNote),
-    chain_head_note_set_position(note: ChainHeadNote, pos: Vec3),
-    chain_head_note_get_position(note: ChainHeadNote) -> Vec3,
-    chain_head_note_set_orientation(note: ChainHeadNote, rot: Quat),
-    chain_head_note_get_orientation(note: ChainHeadNote) -> Quat,
-    chain_head_note_set_color(note: ChainHeadNote, color: Color),
-    chain_head_note_get_color(note: ChainHeadNote) -> Color,
-
-    create_chain_link_note(beat: f32) -> ChainLinkNote,
-    beatmap_add_chain_link_note(note: ChainLinkNote),
-    beatmap_remove_chain_link_note(note: ChainLinkNote),
-    chain_link_note_set_position(note: ChainLinkNote, pos: Vec3),
-    chain_link_note_get_position(note: ChainLinkNote) -> Vec3,
-    chain_link_note_set_orientation(note: ChainLinkNote, rot: Quat),
-    chain_link_note_get_orientation(note: ChainLinkNote) -> Quat,
-    chain_link_note_set_color(note: ChainLinkNote, color: Color),
-    chain_link_note_get_color(note: ChainLinkNote) -> Color,
-
-    create_chain_note(beat: f32) -> ChainNote,
-    beatmap_add_chain_note(note: ChainNote),
-    beatmap_remove_chain_note(note: ChainNote),
-    chain_note_set_position(note: ChainNote, pos: Vec3),
-    chain_note_get_position(note: ChainNote) -> Vec3,
-    chain_note_set_orientation(note: ChainNote, rot: Quat),
-    chain_note_get_orientation(note: ChainNote) -> Quat,
-    chain_note_set_color(note: ChainNote, color: Color),
-    chain_note_get_color(note: ChainNote) -> Color,
-}
-
-macro_rules! error_param {
-    ( $err_type:expr, $err:expr ) => {
-        {
-            let mut params = Parameters::new();
-            let err = InteropError {
-                error_type: $err_type.to_string(),
-                message: $err.to_string(),
-            };
-            params.push(crate::params::Param::InteropError( ParamData { InteropError: std::mem::ManuallyDrop::new(err)}));
-            params.pack()
-        }
-    };
-}
-
-macro_rules! return_error {
-    ( $err:expr, $err_type:expr ) => {
-        if let Err(e) = $err {
-            error_param!($err_type, String::from_utf8_lossy(e.to_string().as_bytes()))
-        } else {
-            Parameters::new().pack()
-        }
-    };
-}
-
 
 
 //////////////////////////////////////////////////////
@@ -238,7 +167,7 @@ pub unsafe extern "C" fn free_params(params: CParams) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn load_script(str_ptr: *const c_char) -> CParams {
+pub unsafe extern "C" fn load_script(str_ptr: *const c_char) {
     let cstr = CStr::from_ptr(str_ptr);
     let s = cstr.to_string_lossy().to_string();
 
@@ -247,34 +176,28 @@ pub unsafe extern "C" fn load_script(str_ptr: *const c_char) -> CParams {
     if let Some(wasm) = &mut WASM_INTERPRETER {
         let res = wasm.load_script(&s);
 
-        return_error!(res, "Load Error")
+        if let Err(e) = res {
+            throw!("Script Loading Error", e.to_string())
+        }
     } else {
-        error_param!("Critical Error", "WASM interpreter is not loaded")
+        throw!("Critical Error", "WASM interpreter is not loaded")
     }
 
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn call_script_function(str_ptr: *const c_char, params: CParams) -> CParams {
+pub unsafe extern "C" fn call_script_function(str_ptr: *const c_char, params: CParams) {
     let cstr = CStr::from_ptr(str_ptr);
     let s = cstr.to_string_lossy().to_string();
     if let Some(wasm) = &mut WASM_INTERPRETER {
         let res = wasm.call_void_method(&s, Parameters::unpack(&params));
 
-        return_error!(res, "Runtime Error")
+        if let Err(e) = res {
+            throw!("Script Call Error", e.to_string())
+        }
+
     } else {
-        error_param!("Critical Error", "WASM interpreter is not loaded")
+        throw!("Critical Error", "WASM interpreter is not loaded")
     }
 
-}
-
-
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test() {
-    }
 }

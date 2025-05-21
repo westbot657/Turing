@@ -1,7 +1,6 @@
 use std::any::Any;
 use std::ffi::{c_char, CString};
-use glam::{Quat, Vec2, Vec3, Vec4};
-use crate::data::{game_objects::*, types::Color};
+use crate::data::game_objects::*;
 use crate::interop::parameters::params::{free_data, get_param_data, get_type, pack_value, remap_data, Param, ParamData, ParamDataRaw, ParamType, Parameters};
 
 pub unsafe trait CSharpConvertible {
@@ -97,22 +96,8 @@ convertible!(f64);
 
 convertible!(bool);
 
-convertible!(Vec2);
-convertible!(Vec3);
-convertible!(Vec4);
-convertible!(Quat);
-convertible!(Color);
-
-convertible!(ColorNote);
-convertible!(BombNote);
-convertible!(Arc);
-convertible!(ChainHeadNote);
-convertible!(ChainLinkNote);
-convertible!(ChainNote);
-convertible!(Wall);
-convertible!(Saber);
-convertible!(Player);
-
+convertible!(Object);
+convertible!(FuncRef);
 
 macro_rules! param_def {
     ( $ds:tt $( $ty:tt = $val:literal ),* $(,)? ) => {
@@ -240,21 +225,8 @@ param_def! {$ // < this is here for internal macro creation, don't remove or rep
     bool   = 10,
     String = 11,
 
-    ColorNote     = 100,
-    BombNote      = 101,
-    Arc           = 102,
-    ChainHeadNote = 103,
-    ChainLinkNote = 104,
-    ChainNote     = 105,
-    Wall          = 106,
-    Saber         = 107,
-    Player        = 108,
-
-    Vec2  = 200,
-    Vec3  = 201,
-    Vec4  = 202,
-    Quat  = 203,
-    Color = 204,
+    Object   = 100,
+    FuncRef = 200,
 
     InteropError = 900
 
@@ -446,7 +418,7 @@ macro_rules! push_parameter {
 
 #[cfg(test)]
 mod parameters_tests {
-    use crate::data::game_objects::ColorNote;
+    use crate::data::game_objects::Object;
     use crate::interop::parameters::{InteropError, Parameters};
 
     #[test]
@@ -454,11 +426,11 @@ mod parameters_tests {
 
         let mut p = Parameters::new();
 
-        let note = ColorNote { ptr: 0 };
-        push_parameter!(p, ColorNote: note);
+        let note = Object { ptr: 0 };
+        push_parameter!(p, Object: note);
 
-        let note2 = ColorNote { ptr: 1 };
-        push_parameter!(p, ColorNote: note2);
+        let note2 = Object { ptr: 1 };
+        push_parameter!(p, Object: note2);
 
         let f = 134.23f32;
         push_parameter!(p, f32: f);
@@ -476,7 +448,7 @@ mod parameters_tests {
 
         println!("unpacked: {}", unpacked);
 
-        let note_unpacked = get_parameter!(unpacked, ColorNote, 0);
+        let note_unpacked = get_parameter!(unpacked, Object, 0);
 
         println!("note: {:?}", note_unpacked);
 
