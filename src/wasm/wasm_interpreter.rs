@@ -121,7 +121,7 @@ impl WasmInterpreter {
         let mut linker = <Linker<HostState<ExternRef>>>::new(&engine);
 
         unsafe {
-            bind_data(&engine, &mut store, &mut linker).expect("Failed to setup wasm environment");
+            bind_data(&mut linker).expect("Failed to setup wasm environment");
         }
         WasmInterpreter {
             engine,

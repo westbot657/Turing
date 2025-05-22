@@ -1,55 +1,204 @@
 mod wasm;
 mod data;
 mod interop;
-pub mod dynamic_function_builder;
 
 use std::collections::HashMap;
 use data::game_objects::*;
 use std::ffi::{CStr, CString};
 use std::{mem, slice};
+use std::mem::ManuallyDrop;
 use std::os::raw::{c_char, c_void};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::sync::atomic::AtomicPtr;
-use wasmi::{Caller, Engine, ExternRef, FuncType, Linker, Store, Val};
+use wasmi::{AsContextMut, Caller, Engine, ExternRef, FuncType, Linker, Store, Val};
 use wasmi::core::ValType;
 use crate::interop::parameters::*;
 use crate::interop::parameters::params::Parameters;
-use dynamic_function_builder::function_gen::generate;
 use crate::wasm::wasm_interpreter::{HostState, WasmInterpreter};
 use anyhow::{anyhow, Result};
 
 type F = dyn Fn(Caller<'_, HostState<ExternRef>>, &[Val], &mut [Val]) -> Result<(), wasmi::Error>;
 
 static mut WASM_INTERPRETER: Option<WasmInterpreter> = None;
-static mut WASM_FNS: Option<HashMap<String, (FuncType, Box<F>)>> = None;
+static mut WASM_FNS: Option<HashMap<String, (Vec<ValType>, Vec<ValType>)>> = None;
 
-pub unsafe fn bind_data(engine: &Engine, store: &mut Store<HostState<ExternRef>>, linker: &mut Linker<HostState<ExternRef>>) -> Result<()> {
+
+macro_rules! push_parameter {
+    ( $params:expr, $typ:ident: $obj:expr ) => {
+        $params.push(crate::params::Param::$typ( crate::params::ParamData { $typ: std::mem::ManuallyDrop::new($obj) } ))
+    };
+}
+
+macro_rules! get_return {
+    ( $params:expr, $t:tt, $index:expr) => {
+        {
+            let raw = $params.params.remove($index);
+            if raw.0 as u32 != crate::params::ParamType::$t as u32 {
+                Err::<std::mem::ManuallyDrop<$t>, String>("wrong value type was returned".to_owned())
+            }
+            else {
+                let p = crate::params::Param::$t(unsafe { raw.1 });
+                match p {
+                    crate::params::Param::$t(x) => Ok(unsafe { x.$t }),
+                    _ => Err("wrong value type was returned".to_owned())
+                }
+            }
+
+        }
+    };
+}
+
+pub unsafe fn bind_data(linker: &mut Linker<HostState<ExternRef>>) -> Result<()> {
    if WASM_FNS.is_some() {
        let mut fns = None;
        mem::swap(&mut WASM_FNS, &mut fns);
        let mut fns = fns.unwrap();
-       for f in &fns {
+       for f in fns {
 
-           let a0 = &f.0;
-           let b0 = &f.1.0;
+           let name = f.0;
+           let params = f.1.0;
+           let results = f.1.1;
 
-           linker.func_new("env", a0, b0.clone(), |a, b, c| {
-               if WASM_FNS.is_some() {
-                   let mut fns = None;
-                   mem::swap(&mut WASM_FNS, &mut fns);
-                   let mut fns = fns.unwrap();
-                   let pair = fns.get(a0.as_str()).unwrap();
-                   let res = pair.1(a,b,c);
-                   mem::swap(&mut WASM_FNS, &mut Some(fns));
-                   res
-               } else {
-                   Ok(())
+           let ft = FuncType::new(params.clone(), results.clone());
+
+           linker.func_new("env", name.clone().as_str(), ft, move |mut caller, ps, rs| -> std::result::Result<(), wasmi::Error> {
+
+               let mut p = Parameters::new();
+
+               for i in 0..ps.len() {
+                   let v = ps.get(i).unwrap();
+                   let t = params.get(i);
+                   if let Some(tp) = t {
+                       match tp {
+                           ValType::I32 => {
+                               push_parameter!(p, i32: v.i32().unwrap());
+                           }
+                           ValType::I64 => {
+                               push_parameter!(p, i64: v.i64().unwrap());
+                           }
+                           ValType::F32 => {
+                               push_parameter!(p, f32: v.f32().unwrap().to_float());
+                           }
+                           ValType::F64 => {
+                               push_parameter!(p, f64: v.f64().unwrap().to_float());
+                           }
+                           ValType::V128 => {
+                               let code = CString::new("Unimplemented").unwrap();
+                               let msg = CString::new("Param type V128 not handled").unwrap();
+                               unsafe { abort(code.as_ptr(), msg.as_ptr()) }
+                           }
+                           ValType::FuncRef => {
+                               let code = CString::new("Unimplemented").unwrap();
+                               let msg = CString::new("Param type FuncRef not handled").unwrap();
+                               unsafe { abort(code.as_ptr(), msg.as_ptr()) }
+                           }
+                           ValType::ExternRef => {
+                               let obj = caller.data().get(v.i32().unwrap() as u32).unwrap();
+                               let o = obj.data(&caller).unwrap().downcast_ref::<Object>().unwrap();
+                               push_parameter!(p, Object: *o);
+                           }
+                       }
+                   } else {
+                       let code = CString::new("Argument Mismatch").unwrap();
+                       let msg = CString::new(format!("Expected {} arguments, got {}", params.len(), ps.len())).unwrap();
+                       unsafe { abort(code.as_ptr(), msg.as_ptr()) }
+                   }
                }
+
+
+               let r = unsafe { call_cs(name.as_str(), p.pack()) };
+
+               let mut r = unsafe { Parameters::unpack(&r) };
+
+               for i in 0..results.len() {
+                   let t = results.get(i).unwrap();
+                   match t {
+                       ValType::I32 => {
+                           let x = get_return!(r, i32, i);
+                           match x {
+                               Ok(v) => {
+                                   let v = ManuallyDrop::into_inner(v);
+                                   let _ = rs.get(i).insert(&Val::I32(v));
+                               }
+                               Err(e) => {
+                                   let code = CString::new("Return Type Mismatch").unwrap();
+                                   let msg = CString::new(e).unwrap();
+                                   unsafe { abort(code.as_ptr(), msg.as_ptr()) }
+                               }
+                           }
+                       }
+                       ValType::I64 => {
+                           let x = get_return!(r, i64, i);
+                           match x {
+                               Ok(v) => {
+                                   let v = ManuallyDrop::into_inner(v);
+                                   let _ = rs.get(i).insert(&Val::I64(v));
+                               }
+                               Err(e) => {
+                                   let code = CString::new("Return Type Mismatch").unwrap();
+                                   let msg = CString::new(e).unwrap();
+                                   unsafe { abort(code.as_ptr(), msg.as_ptr()) }
+                               }
+                           }
+                       }
+                       ValType::F32 => {
+                           let x = get_return!(r, f32, i);
+                           match x {
+                               Ok(v) => {
+                                   let v = ManuallyDrop::into_inner(v);
+                                   let _ = rs.get(i).insert(&Val::F32(v.into()));
+                               }
+                               Err(e) => {
+                                   let code = CString::new("Return Type Mismatch").unwrap();
+                                   let msg = CString::new(e).unwrap();
+                                   unsafe { abort(code.as_ptr(), msg.as_ptr()) }
+                               }
+                           }
+                       }
+                       ValType::F64 => {
+                           let x = get_return!(r, f64, i);
+                           match x {
+                               Ok(v) => {
+                                   let v = ManuallyDrop::into_inner(v);
+                                   let _ = rs.get(i).insert(&Val::F64(v.into()));
+                               }
+                               Err(e) => {
+                                   let code = CString::new("Return Type Mismatch").unwrap();
+                                   let msg = CString::new(e).unwrap();
+                                   unsafe { abort(code.as_ptr(), msg.as_ptr()) }
+                               }
+                           }
+                       }
+                       ValType::V128 => {
+                           let code = CString::new("Unimplemented").unwrap();
+                           let msg = CString::new("Return type V128 not handled").unwrap();
+                           unsafe { abort(code.as_ptr(), msg.as_ptr()) }
+                       }
+                       ValType::FuncRef => {
+                           let code = CString::new("Unimplemented").unwrap();
+                           let msg = CString::new("Return type FuncRef not handled").unwrap();
+                           unsafe { abort(code.as_ptr(), msg.as_ptr()) }
+                       }
+                       ValType::ExternRef => {
+                           let x = get_return!(r, Object, i);
+                           match x {
+                               Ok(v) => {
+                                   let v = ManuallyDrop::into_inner(v);
+                                   let _ = rs.get(i).insert(&Val::ExternRef(ExternRef::new(&mut caller.as_context_mut(), v)));
+                               }
+                               Err(e) => {
+                                   let code = CString::new("Return Type Mismatch").unwrap();
+                                   let msg = CString::new(e).unwrap();
+                                   unsafe { abort(code.as_ptr(), msg.as_ptr()) }
+                               }
+                           }
+                       }
+                   }
+               }
+
+               Ok(())
            })?;
        }
-
-       mem::swap(&mut WASM_FNS, &mut Some(fns));
-
    }
    Ok(())
 }
@@ -137,14 +286,12 @@ unsafe extern "C" fn generate_wasm_fn(name: *const std::ffi::c_char, func_ptr: *
         rts.push(to_param_type(p));
     }
 
-    let binding = generate(&name, pts, rts);
-
     if WASM_FNS.is_none() {
         WASM_FNS = Some(HashMap::new());
     }
 
     if let Some(fns) = &mut WASM_FNS {
-        fns.insert(name, binding);
+        fns.insert(name, (pts, rts));
     }
 
 }
