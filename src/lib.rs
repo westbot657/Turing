@@ -52,7 +52,7 @@ pub unsafe fn bind_data(linker: &mut Linker<HostState<ExternRef>>) -> Result<()>
    if WASM_FNS.is_some() {
        let mut fns = None;
        mem::swap(&mut WASM_FNS, &mut fns);
-       let mut fns = fns.unwrap();
+       let fns = fns.unwrap();
        for f in fns {
 
            let name = f.0;
@@ -104,9 +104,8 @@ pub unsafe fn bind_data(linker: &mut Linker<HostState<ExternRef>>) -> Result<()>
                        unsafe { abort(code.as_ptr(), msg.as_ptr()) }
                    }
                }
-
-
-               let r = unsafe { call_cs(name.as_str(), p.pack()) };
+               
+               let r = call_cs(name.as_str(), p.pack());
 
                let mut r = unsafe { Parameters::unpack(&r) };
 
