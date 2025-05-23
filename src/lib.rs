@@ -252,7 +252,7 @@ fn to_param_type(p: &u32) -> ValType {
         3 => ValType::I64,
         8 => ValType::F32,
         9 => ValType::F64,
-        100..199 => ValType::ExternRef,
+        100..200 => ValType::ExternRef,
         200 => ValType::FuncRef,
         _ => {
             throw!("Invalid Type", format!("Type {p} is not recognized"));
