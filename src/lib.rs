@@ -17,6 +17,12 @@ use crate::interop::parameters::params::Parameters;
 use crate::wasm::wasm_interpreter::{HostState, WasmInterpreter};
 use anyhow::{anyhow, Result};
 
+use std::alloc::System;
+
+#[global_allocator]
+static GLOBAL: System = System;
+
+
 type F = dyn Fn(Caller<'_, HostState<ExternRef>>, &[Val], &mut [Val]) -> Result<(), wasmi::Error>;
 
 static mut WASM_INTERPRETER: Option<WasmInterpreter> = None;
@@ -260,7 +266,7 @@ fn to_param_type(p: &u32) -> ValType {
 }
 
 #[no_mangle]
-unsafe extern "C" fn generate_wasm_fn(name: *const std::ffi::c_char, func_ptr: *mut std::ffi::c_void, params_types: ParamTypes, return_types: ParamTypes) {
+unsafe extern "C" fn generate_wasm_fn(name: *const c_char, func_ptr: *mut c_void, params_types: ParamTypes, return_types: ParamTypes) {
 
     let func_ptr_arc = std::sync::Arc::new(AtomicPtr::new(func_ptr));
     let name_cstr = CStr::from_ptr(name);
