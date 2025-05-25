@@ -35,13 +35,10 @@ struct InteroperableError {
 }
 ```
 
-layout for:  
-`ColorNote`, `BombNote`, `Wall`, `Arc`, `ChainHeadNote`, `ChainLinkNote`, `ChainNote`:
-
 ```rust
 #[repr(C)]
-struct ____ {
-    ptr: *const c_void // pointer to a C# managed wrapper object.
+struct RsObject {
+    ptr: *const c_void // pointer to a C# managed object.
 }
 ```
 
