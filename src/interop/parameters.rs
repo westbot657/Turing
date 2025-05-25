@@ -225,7 +225,7 @@ param_def! {$ // < this is here for internal macro creation, don't remove or rep
     bool   = 10,
     String = 11,
 
-    Object   = 100,
+    Object = 100,
     FuncRef = 200,
 
     InteropError = 900

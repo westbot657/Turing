@@ -1,5 +1,5 @@
 # Turing.rs
-A wasm interpreter written in rust that interops with beat saber.
+A wasm interpreter written in rust that interops with beat saber.  
 
 
 
@@ -42,60 +42,58 @@ struct RsObject {
 }
 ```
 
+```rust
+struct ParamTypes {
+    count: u32,
+    array: *const u32
+}
+```
+Parameter/Return types:  
+
+| id       | type    |
+|----------|---------|
+| 2        | i32     |
+| 3        | i64     |
+| 8        | f32     |
+| 9        | f64     |
+| 100..199 | Object  |
+| 200      | FuncRef |
+
+
 ## Functions
-| Categorization   | Defined by Beat Saber Mod                                                                                                                                                                                                                                             | Defined by Turing.rs                                                                              |
-|------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------|
-| Util / WASM      | `cs_print(*mut c_char)`                                                                                                                                                                                                                                               | Logs a message to the console. <br/><br/> **Parameters**: <br/> - A pointer to the message string |
-|                  | Starts the WASM interpreter                                                                                                                                                                                                                                           | `initialize_wasm()`                                                                               |
-|                  | Loads a WASM script. <br/><br/> **Parameters**: <br/> - A pointer to the script's path string                                                                                                                                                                         | `load_script(*mut c_char)`                                                                        |
-|                  | Deallocates a CParams object and all parameters that it held. <br/><br/> **Parameters**: <br/> - The CParams object to deallocate                                                                                                                                     | `free_params(CParams)`                                                                            |
-|                  | Calls a function from the currently loaded WASM script. <br/><br/> **Parameters**: <br/> - A pointer to the function name string <br/> - A CParams object for wasm function parameters <br/> **Returns**: <br/> - A CParams object containing return values or errors | `call_script_function(*mut c_char, CParams) -> CParams`                                           |
-|                  |                                                                                                                                                                                                                                                                       |                                                                                                   |
-| Color Notes      | `create_color_note(f32)`                                                                                                                                                                                                                                              | Creates a ColorNote <br/><br/> **Parameters**: <br/> - The beat to create the note for            |
-|                  | `beatmap_add_color_note(ColorNote)`                                                                                                                                                                                                                                   | Adds a ColorNote to the beatmap                                                                   |
-|                  |                                                                                                                                                                                                                                                                       |                                                                                                   |
-|                  |                                                                                                                                                                                                                                                                       |                                                                                                   |
-| Bomb Notes       |                                                                                                                                                                                                                                                                       |                                                                                                   |
-|                  |                                                                                                                                                                                                                                                                       |                                                                                                   |
-| Walls            |                                                                                                                                                                                                                                                                       |                                                                                                   |
-|                  |                                                                                                                                                                                                                                                                       |                                                                                                   |
-| Arcs             |                                                                                                                                                                                                                                                                       |                                                                                                   |
-|                  |                                                                                                                                                                                                                                                                       |                                                                                                   |
-| Chain Notes      |                                                                                                                                                                                                                                                                       |                                                                                                   |
-|                  |                                                                                                                                                                                                                                                                       |                                                                                                   |
-| Chain Head Notes |                                                                                                                                                                                                                                                                       |                                                                                                   |
-|                  |                                                                                                                                                                                                                                                                       |                                                                                                   |
-| Chain Link Notes |                                                                                                                                                                                                                                                                       |                                                                                                   |
-|                  |                                                                                                                                                                                                                                                                       |                                                                                                   |
 
+### defined by rust, Called by C#
 
+```rust
+unsafe extern "C" fn generate_wasm_fn(name: *const c_char, func_ptr: *mut c_void, param_types: ParamTypes, return_types: ParamTypes) { ... }
+```
+C# should call this to bind every wasm function.  
+C# must call `initialize_wasm()` to actually bind functions to wasm (so no late-adding functions)  
 
-# WASM Specifications
-| Categorization   | Defined by Turing.rs ("env")     | Defined by WASM                                                                                                                                          |
-|------------------|----------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
-| System           | `_log(i32)`                      | Logs a message to the console <br/><br/> **Parameters**: <br/> - message string address pointer                                                          |
-|                  | `_drop_reference(i32)`           | Drops a host-managed object such as ColorNotes, Vec3s, etc <br/><br/> **Parameters**: <br/> - host object reference "pointer"                            |
-|                  |                                  |                                                                                                                                                          |
-| Color Notes      | `_create_color_note(f32) -> i32` | Creates a ColorNote <br/><br/> **Parameters**: <br/> - The beat to create the note for <br/><br/> **Returns**: <br/> - a host object reference "pointer" |
-|                  | `_beatmap_add_color_note(i32)`   | Adds a ColorNote to the beatmap <br/><br/> **Parameters**: <br/> - host object reference "pointer" for a ColorNote object                                |
-|                  |                                  |                                                                                                                                                          |
-| Bomb Notes       |                                  |                                                                                                                                                          |
-|                  |                                  |                                                                                                                                                          |
-| Walls            |                                  |                                                                                                                                                          |
-|                  |                                  |                                                                                                                                                          |
-| Arcs             |                                  |                                                                                                                                                          |
-|                  |                                  |                                                                                                                                                          |
-| Chain Notes      |                                  |                                                                                                                                                          |
-|                  |                                  |                                                                                                                                                          |
-| Chain Head Notes |                                  |                                                                                                                                                          |
-|                  |                                  |                                                                                                                                                          |
-| Chain Link Notes |                                  |                                                                                                                                                          |
-|                  |                                  |                                                                                                                                                          |
-|                  |                                  |                                                                                                                                                          |
-|                  |                                  |                                                                                                                                                          |
-|                  |                                  |                                                                                                                                                          |
+```rust
+pub unsafe extern "C" fn initialize_wasm() { ... }
+```
+links all defined functions and initializes the wasm interpreter  
 
+```rust
+pub unsafe extern "C" fn free_params(params: CParams) { ... }
+```
+Completely frees the CParams structure (excluding pointers to C# managed objects)  
 
+```rust
+pub unsafe extern "C" fn load_script(str_ptr: *const c_char) { ... }
+```
+loads a script file (*.wasm), given the absolute path to it.  
 
+```rust
+pub unsafe extern "C" fn call_script_function(str_ptr: *const c_char, params: CParams) { ... }
+```
+calls a function defined in wasm. currently doesn't handle a return value.  
 
+### defined by C#, Called by rust
 
+```rust
+extern "C" { fn abort(error_code: *const c_char, error_message: *const c_char); }
+```
+this is how rust and wasm will throw an error for C# to catch.  
+C# is expected to either re-throw or properly disengage and give a user-friendly error.  
