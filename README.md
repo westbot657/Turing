@@ -26,6 +26,25 @@ struct CParams {
     param_ptr_array_ptr: *mut *mut CParam,
 }
 ```
+C Parameter types:
+
+| id  | type (pointer) |
+|-----|----------------|
+| 0   | i8             |
+| 1   | i16            |
+| 2   | i32            |
+| 3   | i64            |
+| 4   | u8             |
+| 5   | u16            |
+| 6   | u32            |
+| 7   | u64            |
+| 8   | f32            |
+| 9   | f64            |
+| 10  | bool           |
+| 11  | string         |
+| 100 | Object         |
+| 200 | FuncRef        |
+| 900 | InteropError   |
 
 ```rust
 #[repr(C)]
