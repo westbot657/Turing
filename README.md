@@ -45,12 +45,6 @@ pub struct FfiParam {
     value: RawParam,
 }
 
-pub struct FfiResult {
-    is_ok: bool,
-    value: FfiParam,
-    error: *const c_char,
-}
-
 ```
 
 

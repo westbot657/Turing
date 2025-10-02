@@ -86,7 +86,12 @@ pub extern "C" fn create_params() -> u32 {
 
 // Import functions
 unsafe extern "C" {
+    /// Called when things go so horribly wrong that proper recovery is not possible
     pub fn abort(error_code: *const c_char, error_message: *const c_char) -> !;
+
+
+
+
 }
 
 
