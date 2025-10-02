@@ -15,6 +15,7 @@ pub enum Param {
     String(*const c_char),
     Object(*const c_void),
     Error(*const c_char),
+    Void,
 }
 
 #[repr(C)]
@@ -30,12 +31,13 @@ pub union RawParam {
     String: *const c_char,
     Object: *const c_void,
     Error: *const c_char,
+    Void: u32
 }
 
 #[repr(C)]
 pub struct FfiParam {
-    type_id: u32,
-    value: RawParam,
+    pub type_id: u32,
+    pub value: RawParam,
 }
 
 impl Param {
@@ -52,6 +54,7 @@ impl Param {
             Param::String(x) => FfiParam { type_id: 9, value: RawParam { String: x } },
             Param::Object(x) => FfiParam { type_id: 10, value: RawParam { Object: x } },
             Param::Error(x) => FfiParam { type_id: 11, value: RawParam { Error: x } },
+            Param::Void => FfiParam { type_id: 12, value: RawParam { Void: 0 } },
         }
     }
 }
@@ -70,11 +73,17 @@ impl FfiParam {
             9 => Param::String( unsafe { self.value.String } ),
             10 => Param::Object( unsafe { self.value.Object } ),
             11 => Param::Error( unsafe { self.value.Error } ),
+            12 => Param::Void,
             _ => return Err(anyhow!("Unknown type variant: {}", self.type_id))
         })
     }
 }
 
+impl From<Param> for FfiParam {
+    fn from(value: Param) -> Self {
+        value.to_ffi_param()
+    }
+}
 
 
 pub struct Params {
@@ -89,6 +98,12 @@ impl Params {
         }
     }
 
+    pub fn of_size(size: u32) -> Self {
+        Self {
+            params: Vec::with_capacity(size as usize),
+        }
+    }
+
     pub fn push(&mut self, param: Param) {
         self.params.push(param);
     }
@@ -97,15 +112,5 @@ impl Params {
         self.params.get(idx).copied()
     }
 }
-
-
-#[repr(C)]
-pub struct FfiResult {
-    is_ok: bool,
-    value: FfiParam,
-    error: *const c_char,
-}
-
-
 
 

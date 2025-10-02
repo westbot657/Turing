@@ -1,4 +1,5 @@
 use std::collections::{HashMap, VecDeque};
+use std::ffi::{c_char, CString};
 use std::ops::RangeInclusive;
 
 
@@ -111,6 +112,38 @@ impl<T> TrackedHashMap<T> {
         }
         self.free_ranges = merged;
     }
+}
+
+
+pub trait ToCStr {
+    fn to_cstr_ptr(self) -> *const c_char;
+}
+
+impl ToCStr for String {
+    fn to_cstr_ptr(self) -> *const c_char {
+        let cstr = CString::new(self).unwrap();
+        unsafe {
+            cstr.into_raw()
+        }
+    }
+}
+
+impl ToCStr for &str {
+    fn to_cstr_ptr(self) -> *const c_char {
+        self.to_owned().to_cstr_ptr()
+    }
+}
+
+
+pub unsafe fn free_cstr(ptr: *mut c_char) {
+    if ptr.is_null() {
+        return;
+    }
+
+    unsafe {
+        let _ = CString::from_raw(ptr);
+    }
+
 }
 
 
