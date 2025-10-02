@@ -21,7 +21,7 @@ use self::util::{free_cstr, ToCStr, TrackedHashMap};
 use self::wasm::wasm_engine::HostState;
 
 #[derive(Default)]
-struct TuringState {
+pub struct TuringState {
     pub wasm: Option<WasmInterpreter>,
     pub wasm_fns: HashMap<String, (Vec<ValType>, Vec<ValType>)>,
     pub param_builders: TrackedHashMap<Params>,
@@ -106,11 +106,7 @@ pub extern "C" fn init_wasm() -> FfiParam {
         if let Some(state) = &mut STATE {
             let interp = {
                 let mut s = state.borrow_mut();
-                if let Ok(interp) = WasmInterpreter::new(&mut s) {
-                    Some(interp)
-                } else {
-                    None
-                }
+                WasmInterpreter::new(&mut s).ok()
             };
             let mut s = state.borrow_mut();
             if let Some(t) = interp {

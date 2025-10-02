@@ -122,9 +122,7 @@ pub trait ToCStr {
 impl ToCStr for String {
     fn to_cstr_ptr(self) -> *const c_char {
         let cstr = CString::new(self).unwrap();
-        unsafe {
-            cstr.into_raw()
-        }
+        cstr.into_raw()
     }
 }
 
