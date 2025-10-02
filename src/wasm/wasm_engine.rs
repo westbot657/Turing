@@ -104,7 +104,7 @@ impl<T> HostState<T> {
     }
 }
 
-
+#[derive(Debug)]
 pub struct WasmInterpreter {
     engine: Engine,
     store: Store<HostState<ExternRef>>,
@@ -138,9 +138,7 @@ impl WasmInterpreter {
 
         let module = Module::new(&self.engine, wasm)?;
 
-        let instance = self.linker
-            .instantiate(&mut self.store, &module)?
-            .start(&mut self.store)?;
+        let instance = self.linker.instantiate_and_start(&mut self.store, &module)?;
 
         self.script_instance = Some((module, instance));
 

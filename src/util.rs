@@ -3,7 +3,7 @@ use std::ffi::{c_char, CString};
 use std::ops::RangeInclusive;
 
 
-
+#[derive(Default, Debug)]
 pub struct TrackedHashMap<T> {
     map: HashMap<u32, T>,
     free_ranges: VecDeque<RangeInclusive<u32>>,
@@ -134,7 +134,9 @@ impl ToCStr for &str {
     }
 }
 
-
+/// Frees a rust-allocated C String.
+/// # Safety
+/// safety was never an option.
 pub unsafe fn free_cstr(ptr: *mut c_char) {
     if ptr.is_null() {
         return;
