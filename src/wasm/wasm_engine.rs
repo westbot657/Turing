@@ -1,12 +1,12 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
-use std::path::Path;
-use anyhow::{anyhow, Result};
-use wasmi::*;
-use wat;
-use crate::*;
-use crate::data::game_objects::*;
 use std::ops::RangeInclusive;
+use std::path::Path;
+
+use anyhow::Result;
+use wasmi::{Config, EnforcedLimits, Engine, ExternRef, Instance, Linker, Module, Store};
+
+
 
 #[derive(Debug)]
 pub struct HostState<T> {
@@ -121,7 +121,7 @@ impl WasmInterpreter {
         let mut linker = <Linker<HostState<ExternRef>>>::new(&engine);
 
         unsafe {
-            bind_data(&mut linker).expect("Failed to setup wasm environment");
+            //bind_data(&mut linker).expect("Failed to setup wasm environment");
         }
         WasmInterpreter {
             engine,
@@ -146,68 +146,5 @@ impl WasmInterpreter {
 
         Ok(())
     }
-
-    pub fn call_void_method(&mut self, name: &str, params: Parameters) -> Result<()> {
-        if let Some((_, instance)) = &self.script_instance {
-            let init_function = instance.get_typed_func::<(), ()>(&self.store, name)?;
-            init_function.call(&mut self.store, ())?;
-            Ok(())
-        } else {
-            Err(anyhow!("no script is currently loaded"))
-        }
-    }
-
 }
 
-fn get_string(message: u32, memory: &Memory, caller: &Caller<'_, HostState<ExternRef>>) -> String {
-    let mut output_string = String::new();
-    for i in message..u32::MAX {
-        let byte: &u8 = memory.data(caller).get(i as usize).unwrap();
-        if *byte == 0u8 { break }
-        output_string.push(char::from(*byte));
-    }
-    output_string
-}
-
-#[cfg(test)]
-mod wasm_tests {
-    use anyhow::Result;
-    use crate::wasm::wasm_interpreter::HostState;
-
-    #[test]
-    fn test_memory() -> Result<()> {
-
-        let mut state = HostState::new();
-
-        state.add(1.0f32);
-        state.add(2.0f32);
-        state.add(3.0f32);
-        state.add(4.0f32);
-        state.add(5.0f32);
-        state.add(6.0f32);
-        state.add(7.0f32);
-        state.add(8.0f32);
-        state.add(9.0f32);
-        state.add(10.0f32);
-        println!("{:?}", state);
-
-        state.remove(2);
-
-        println!("{:?}", state);
-
-        state.remove(3);
-        println!("{:?}", state);
-
-        state.add(11.0f32);
-        println!("{:?}", state);
-
-        state.remove(5);
-        println!("{:?}", state);
-
-        state.remove(4);
-        println!("{:?}", state);
-
-        Ok(())
-    }
-
-}
