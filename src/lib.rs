@@ -10,6 +10,7 @@ use std::ffi::{c_char};
 
 use anyhow::{anyhow, Result};
 use wasmi::core::ValType;
+use wasmi::{ExternRef, Linker};
 
 use crate::wasm::wasm_engine::WasmInterpreter;
 
@@ -17,6 +18,7 @@ use crate::interop::params::Params;
 
 use self::interop::params::{FfiParam, Param};
 use self::util::{free_cstr, ToCStr, TrackedHashMap};
+use self::wasm::wasm_engine::HostState;
 
 #[derive(Default)]
 struct TuringState {
@@ -28,6 +30,7 @@ struct TuringState {
 
 static mut STATE: Option<RefCell<TuringState>> = None;
 
+const TURING_UNINIT: &str = "Turing has not been initialized";
 
 impl TuringState {
     pub fn new() -> Self {
@@ -64,6 +67,25 @@ impl TuringState {
         }
     }
 
+    pub fn read_param(&self, index: u32) -> Param {
+        if let Some(builder) = self.param_builders.get(&self.active_builder) {
+            if index >= builder.len() {
+                Param::Error("Index out of bounds".to_cstr_ptr())
+            } else if let Some(val) = builder.get(index as usize) {
+                val
+            } else {
+                Param::Error("Could not read param for unknown reason".to_cstr_ptr())
+            }
+        } else {
+            Param::Error("param object does not exist".to_cstr_ptr())
+        }
+    }
+
+
+    pub fn bind_wasm(&mut self, linker: &mut Linker<HostState<ExternRef>>) {
+
+    }
+
 }
 
 
@@ -79,12 +101,28 @@ pub extern "C" fn init_turing() {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn init_wasm() {
+pub extern "C" fn init_wasm() -> FfiParam {
     unsafe {
         if let Some(state) = &mut STATE {
-            state.borrow_mut().wasm = Some(WasmInterpreter::new());
+            let interp = {
+                let mut s = state.borrow_mut();
+                if let Ok(interp) = WasmInterpreter::new(&mut s) {
+                    Some(interp)
+                } else {
+                    None
+                }
+            };
+            let mut s = state.borrow_mut();
+            if let Some(t) = interp {
+                s.wasm = Some(t);
+                Param::Void
+            } else {
+                Param::Error("Failed to initialize wasm engine".to_cstr_ptr())
+            }
+        } else {
+            Param::Error(TURING_UNINIT.to_cstr_ptr())
         }
-    }
+    }.into()
 }
 
 
@@ -146,7 +184,7 @@ pub extern "C" fn add_param(value: FfiParam) -> FfiParam {
                 Param::Error(format!("Failed to add parameter. Invalid type id: {}", typ_id).to_cstr_ptr())
             }
         } else {
-            Param::Error("Turing has not been initialized".to_cstr_ptr())
+            Param::Error(TURING_UNINIT.to_cstr_ptr())
         }
     }.into()
 }
@@ -168,7 +206,19 @@ pub extern "C" fn set_param(index: u32, value: FfiParam) -> FfiParam {
                 Param::Error(format!("Failed to set parameter. Invalid type id: {}", typ_id).to_cstr_ptr())
             }
         } else {
-            Param::Error("Turing has not been initialized".to_cstr_ptr())
+            Param::Error(TURING_UNINIT.to_cstr_ptr())
+        }
+    }.into()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn read_param(index: u32) -> FfiParam {
+    unsafe {
+        if let Some(state) = &mut STATE {
+            let mut s = state.borrow_mut();
+            s.read_param(index)
+        } else {
+            Param::Error(TURING_UNINIT.to_cstr_ptr())
         }
     }.into()
 }
@@ -201,8 +251,6 @@ pub unsafe extern "C" fn free_string(ptr: *mut c_char) {
 unsafe extern "C" {
     /// Called when things go so horribly wrong that proper recovery is not possible
     pub fn abort(error_code: *const c_char, error_message: *const c_char) -> !;
-
-
 
 
 }

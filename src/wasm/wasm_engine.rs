@@ -6,6 +6,8 @@ use std::path::Path;
 use anyhow::Result;
 use wasmi::{Config, EnforcedLimits, Engine, ExternRef, Instance, Linker, Module, Store};
 
+use crate::TuringState;
+
 
 
 #[derive(Debug)]
@@ -113,22 +115,21 @@ pub struct WasmInterpreter {
 }
 
 impl WasmInterpreter {
-    pub fn new() -> WasmInterpreter {
+    pub fn new(state: &mut TuringState) -> Result<WasmInterpreter> {
         let mut config = Config::default();
         config.enforced_limits(EnforcedLimits::strict());
         let engine = Engine::new(&config);
         let mut store = Store::new(&engine, HostState::new());
         let mut linker = <Linker<HostState<ExternRef>>>::new(&engine);
 
-        unsafe {
-            //bind_data(&mut linker).expect("Failed to setup wasm environment");
-        }
-        WasmInterpreter {
+        state.bind_wasm(&mut linker);
+
+        Ok(WasmInterpreter {
             engine,
             store,
             linker,
             script_instance: None,
-        }
+        })
     }
 
     pub fn load_script(&mut self, path: &str) -> Result<()> {
