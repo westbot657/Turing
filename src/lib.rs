@@ -173,6 +173,19 @@ pub extern "C" fn set_param(index: u32, value: FfiParam) -> FfiParam {
     }.into()
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn delete_params(params: u32) {
+    unsafe {
+        if let Some(state) = &mut STATE {
+            let mut s = state.borrow_mut();
+            s.param_builders.remove(&params);
+            if s.active_builder == params {
+                s.active_builder = 0;
+            }
+        }
+    }
+}
+
 
 #[unsafe(no_mangle)]
 /// Frees a rust-allocated C string.
