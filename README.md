@@ -38,6 +38,7 @@ pub union RawParam {
     String: *const c_char, //     9
     Object: *const c_void, //    10
     Error: *const c_char,  //    11
+    Void: u32,             //    12 // value is always 0
 }
 
 pub struct FfiParam {
