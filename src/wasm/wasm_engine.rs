@@ -4,10 +4,26 @@ use std::ops::RangeInclusive;
 use std::path::Path;
 
 use anyhow::Result;
-use wasmi::{Config, EnforcedLimits, Engine, ExternRef, Instance, Linker, Module, Store};
+use wasmi::{Config, EnforcedLimits, Engine, ExternRef, Instance, Linker, Module, Store, ValType};
 
 use crate::TuringState;
 
+
+pub struct WasmFnBuilder {
+    name: String,
+    param_types: Vec<ValType>,
+    return_type: Option<ValType>,
+}
+
+impl WasmFnBuilder {
+    pub fn new(name: String) -> Self {
+        Self {
+            name,
+            param_types: Vec::new(),
+            return_type: None,
+        }
+    }
+}
 
 
 #[derive(Debug)]

@@ -100,7 +100,34 @@ pub extern "C" fn init_turing() {
     }
 }
 
+
 #[unsafe(no_mangle)]
+/// creates a wasm fn builder and returns its uid
+pub extern "C" fn create_wasm_fn(name: *const c_char) -> u32 {
+
+}
+
+#[unsafe(no_mangle)]
+/// builds the wasm fn builder and adds it to the list of complete wasm fns
+pub extern "C" fn finalize_wasm_fn(uid: u32) -> FfiParam {
+
+}
+
+#[unsafe(no_mangle)]
+/// appends a parameter type to the specified wasm fn builder
+pub extern "C" fn add_wasm_fn_param_type(uid: u32, param_type: u32) -> FfiParam {
+
+}
+
+#[unsafe(no_mangle)]
+/// sets the return type of the specified wasm fn builder
+pub extern "C" fn set_wasm_fn_return_type(uid: u32, return_type: u32) -> FfiParam {
+
+}
+
+
+#[unsafe(no_mangle)]
+/// Takes all registered wasm functions, generates their wasm code, and then starts the wasm engine
 pub extern "C" fn init_wasm() -> FfiParam {
     unsafe {
         if let Some(state) = &mut STATE {
@@ -126,6 +153,7 @@ pub extern "C" fn init_wasm() -> FfiParam {
 // Params
 
 #[unsafe(no_mangle)]
+/// Creates a param builder and returns it's uid
 pub extern "C" fn create_params() -> u32 {
     unsafe {
         if let Some(state) = &mut STATE {
@@ -240,6 +268,7 @@ pub extern "C" fn delete_params(params: u32) {
 pub unsafe extern "C" fn free_string(ptr: *mut c_char) {
     unsafe { free_cstr(ptr) };
 }
+
 
 
 
