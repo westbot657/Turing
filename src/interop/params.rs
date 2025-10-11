@@ -1,4 +1,5 @@
 use std::ffi::{c_char, c_void};
+use std::mem;
 
 use anyhow::{anyhow, Result};
 
@@ -40,21 +41,27 @@ pub struct FfiParam {
     pub value: RawParam,
 }
 
+#[repr(C)]
+pub struct FfiParamArray {
+    pub count: u32,
+    pub ptr: *const c_void,
+}
+
 impl Param {
     pub fn to_ffi_param(self) -> FfiParam {
         match self {
-            Param::I8(x) => FfiParam { type_id: 1, value: RawParam { i8: x } },
-            Param::I16(x) => FfiParam { type_id: 2, value: RawParam { i16: x } },
-            Param::I32(x) => FfiParam { type_id: 3, value: RawParam { i32: x } },
-            Param::U8(x) => FfiParam { type_id: 4, value: RawParam { u8: x } },
-            Param::U16(x) => FfiParam { type_id: 5, value: RawParam { u16: x } },
-            Param::U32(x) => FfiParam { type_id: 6, value: RawParam { u32: x } },
-            Param::F32(x) => FfiParam { type_id: 7, value: RawParam { f32: x } },
-            Param::Bool(x) => FfiParam { type_id: 8, value: RawParam { bool: x } },
-            Param::String(x) => FfiParam { type_id: 9, value: RawParam { string: x } },
+            Param::I8(x)     => FfiParam { type_id: 1,  value: RawParam { i8:     x } },
+            Param::I16(x)    => FfiParam { type_id: 2,  value: RawParam { i16:    x } },
+            Param::I32(x)    => FfiParam { type_id: 3,  value: RawParam { i32:    x } },
+            Param::U8(x)     => FfiParam { type_id: 4,  value: RawParam { u8:     x } },
+            Param::U16(x)    => FfiParam { type_id: 5,  value: RawParam { u16:    x } },
+            Param::U32(x)    => FfiParam { type_id: 6,  value: RawParam { u32:    x } },
+            Param::F32(x)    => FfiParam { type_id: 7,  value: RawParam { f32:    x } },
+            Param::Bool(x)   => FfiParam { type_id: 8,  value: RawParam { bool:   x } },
+            Param::String(x) => FfiParam { type_id: 9,  value: RawParam { string: x } },
             Param::Object(x) => FfiParam { type_id: 10, value: RawParam { object: x } },
-            Param::Error(x) => FfiParam { type_id: 11, value: RawParam { error: x } },
-            Param::Void => FfiParam { type_id: 12, value: RawParam { void: 0 } },
+            Param::Error(x)  => FfiParam { type_id: 11, value: RawParam { error:  x } },
+            Param::Void      => FfiParam { type_id: 12, value: RawParam { void:   0 } },
         }
     }
 }
@@ -62,19 +69,19 @@ impl Param {
 impl FfiParam {
     pub fn to_param(self) -> Result<Param> {
         Ok(match self.type_id {
-            1 => Param::I8( unsafe { self.value.i8 } ),
-            2 => Param::I16( unsafe { self.value.i16 } ),
-            3 => Param::I32( unsafe { self.value.i32 } ),
-            4 => Param::U8( unsafe { self.value.u8 } ),
-            5 => Param::U16( unsafe { self.value.u16 } ),
-            6 => Param::U32( unsafe { self.value.u32 } ),
-            7 => Param::F32( unsafe { self.value.f32 } ),
-            8 => Param::Bool( unsafe { self.value.bool } ),
-            9 => Param::String( unsafe { self.value.string } ),
+            1  => Param::I8(     unsafe { self.value.i8     } ),
+            2  => Param::I16(    unsafe { self.value.i16    } ),
+            3  => Param::I32(    unsafe { self.value.i32    } ),
+            4  => Param::U8(     unsafe { self.value.u8     } ),
+            5  => Param::U16(    unsafe { self.value.u16    } ),
+            6  => Param::U32(    unsafe { self.value.u32    } ),
+            7  => Param::F32(    unsafe { self.value.f32    } ),
+            8  => Param::Bool(   unsafe { self.value.bool   } ),
+            9  => Param::String( unsafe { self.value.string } ),
             10 => Param::Object( unsafe { self.value.object } ),
-            11 => Param::Error( unsafe { self.value.error } ),
+            11 => Param::Error(  unsafe { self.value.error  } ),
             12 => Param::Void,
-            _ => return Err(anyhow!("Unknown type variant: {}", self.type_id))
+            _  => return Err(anyhow!("Unknown type variant: {}", self.type_id))
         })
     }
 }
@@ -125,5 +132,52 @@ impl Params {
     }
 
 }
+
+
+impl From<Vec<Param>> for FfiParamArray {
+    fn from(vec: Vec<Param>) -> Self {
+        if vec.is_empty() {
+            return FfiParamArray {
+                count: 0,
+                ptr: std::ptr::null(),
+            };
+        }
+
+        let ffi_params: Vec<FfiParam> = vec.into_iter().map(Into::into).collect();
+
+        let count = ffi_params.len() as u32;
+        let ptr = ffi_params.as_ptr() as *const c_void;
+
+        mem::forget(ffi_params);
+
+        FfiParamArray { count, ptr }
+    }
+}
+
+impl TryFrom<FfiParamArray> for Vec<Param> {
+    type Error = anyhow::Error;
+
+    fn try_from(array: FfiParamArray) -> Result<Self> {
+        if array.ptr.is_null() || array.count == 0 {
+            return Ok(Vec::new());
+        }
+
+        unsafe {
+            let raw_vec = Vec::from_raw_parts(
+                array.ptr as *mut FfiParam,
+                array.count as usize,
+                array.count as usize,
+            );
+
+            let mut result = Vec::with_capacity(raw_vec.len());
+            for ffi_param in raw_vec {
+                result.push(ffi_param.to_param()?);
+            }
+
+            Ok(result)
+        }
+    }
+}
+
 
 

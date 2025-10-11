@@ -6,11 +6,12 @@ pub mod util;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::ffi::{c_char};
+use std::ffi::{c_char, CString};
+use std::mem;
 
 use anyhow::{anyhow, Result};
 use wasmi::core::ValType;
-use wasmi::{ExternRef, Linker};
+use wasmi::{ExternRef, FuncType, Linker};
 
 use crate::wasm::wasm_engine::WasmInterpreter;
 
@@ -18,7 +19,7 @@ use crate::interop::params::Params;
 
 use self::interop::params::{FfiParam, Param};
 use self::util::{free_cstr, ToCStr, TrackedHashMap};
-use self::wasm::wasm_engine::HostState;
+use self::wasm::wasm_engine::{HostState, WasmFnBuilder};
 
 #[derive(Default)]
 pub struct TuringState {
@@ -26,6 +27,7 @@ pub struct TuringState {
     pub wasm_fns: HashMap<String, (Vec<ValType>, Vec<ValType>)>,
     pub param_builders: TrackedHashMap<Params>,
     pub active_builder: u32,
+    pub active_wasm_fn: Option<WasmFnBuilder>,
 }
 
 static mut STATE: Option<RefCell<TuringState>> = None;
@@ -39,6 +41,7 @@ impl TuringState {
             wasm_fns: HashMap::new(),
             param_builders: TrackedHashMap::starting_at(1),
             active_builder: 0,
+            active_wasm_fn: None,
         }
     }
 
@@ -81,9 +84,25 @@ impl TuringState {
         }
     }
 
-
     pub fn bind_wasm(&mut self, linker: &mut Linker<HostState<ExternRef>>) {
+        unsafe {
+            if let Some(state) = &mut STATE {
+                let mut s = state.borrow_mut();
 
+                let mut fns = HashMap::new();
+                mem::swap(&mut fns, &mut s.wasm_fns);
+
+                for (n, (p, r)) in fns.iter() {
+                    let ft = FuncType::new(p.clone(), r.clone());
+
+                    linker.func_new("env", n.clone().as_str(), ft, move |mut caller, ps, rs| -> Result<(), wasmi::Error> {
+
+                    })
+
+                }
+
+            }
+        }
     }
 
 }
@@ -102,27 +121,28 @@ pub extern "C" fn init_turing() {
 
 
 #[unsafe(no_mangle)]
-/// creates a wasm fn builder and returns its uid
-pub extern "C" fn create_wasm_fn(name: *const c_char) -> u32 {
-
+/// starts building a new wasm function. May return an error
+pub extern "C" fn create_wasm_fn(name: *const c_char) -> FfiParam {
+    Param::Void.into()
 }
 
 #[unsafe(no_mangle)]
 /// builds the wasm fn builder and adds it to the list of complete wasm fns
-pub extern "C" fn finalize_wasm_fn(uid: u32) -> FfiParam {
-
+pub extern "C" fn finalize_wasm_fn() -> FfiParam {
+    Param::Void.into()
 }
 
 #[unsafe(no_mangle)]
-/// appends a parameter type to the specified wasm fn builder
-pub extern "C" fn add_wasm_fn_param_type(uid: u32, param_type: u32) -> FfiParam {
-
+/// appends a parameter type to the specified wasm fn builder, types are identical to the ids used
+/// for FfiParam
+pub extern "C" fn add_wasm_fn_param_type(param_type: u32) -> FfiParam {
+    Param::Void.into()
 }
 
 #[unsafe(no_mangle)]
 /// sets the return type of the specified wasm fn builder
-pub extern "C" fn set_wasm_fn_return_type(uid: u32, return_type: u32) -> FfiParam {
-
+pub extern "C" fn set_wasm_fn_return_type(return_type: u32) -> FfiParam {
+    Param::Void.into()
 }
 
 
@@ -239,7 +259,7 @@ pub extern "C" fn set_param(index: u32, value: FfiParam) -> FfiParam {
 pub extern "C" fn read_param(index: u32) -> FfiParam {
     unsafe {
         if let Some(state) = &mut STATE {
-            let mut s = state.borrow_mut();
+            let s = state.borrow_mut();
             s.read_param(index)
         } else {
             Param::Error(TURING_UNINIT.to_cstr_ptr())
@@ -276,10 +296,44 @@ pub unsafe extern "C" fn free_string(ptr: *mut c_char) {
 unsafe extern "C" {
     /// Called when things go so horribly wrong that proper recovery is not possible
     pub fn abort(error_code: *const c_char, error_message: *const c_char) -> !;
-
+    pub fn log_info(message: *const c_char);
+    pub fn log_warn(message: *const c_char);
+    pub fn log_error(message: *const c_char);
+    pub fn log_debug(message: *const c_char);
 
 }
 
+// rust-local wrappers
 
+pub struct Log {}
+macro_rules! mlog {
+    ($func:tt : $msg:tt ) => {
+        let s = $msg.to_string();
+        let s = CString::new(s).unwrap();
+        let ptr = s.as_ptr();
+        unsafe {
+            $func(ptr);
+        }
+    };
+}
+impl Log {
+
+    pub fn info(msg: impl ToString) {
+        mlog!(log_info: msg);
+    }
+
+    pub fn warn(msg: impl ToString) {
+        mlog!(log_warn: msg);
+    }
+
+    pub fn error(msg: impl ToString) {
+        mlog!(log_error: msg);
+    }
+
+    pub fn debug(msg: impl ToString) {
+        mlog!(log_debug: msg);
+    }
+
+}
 
 
