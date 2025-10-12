@@ -8,6 +8,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::mem;
+use std::os::raw::c_char;
 
 use anyhow::{anyhow, Result};
 use wasmi::core::ValType;
@@ -19,6 +20,34 @@ use crate::interop::params::Params;
 
 use self::interop::params::{FfiParam, Param};
 use self::util::{free_cstr, ToCStr, TrackedHashMap};
+
+type AbortFn = extern "C" fn(*const c_char, *const c_char);
+type LogFn = extern "C" fn(*const c_char);
+
+
+pub struct CsFns {
+    pub abort: AbortFn,
+    pub log_info: LogFn,
+    pub log_warn: LogFn,
+    pub log_error: LogFn,
+    pub log_debug: LogFn,
+}
+
+extern "C" fn null_abort(_: *const c_char, _: *const c_char) {}
+extern "C" fn null_log(_: *const c_char) {}
+
+impl CsFns {
+    pub fn new() -> Self {
+        Self {
+            abort: null_abort,
+            log_info: null_log,
+            log_warn: null_log,
+            log_error: null_log,
+            log_debug: null_log,
+        }
+    }
+}
+
 
 #[derive(Default)]
 pub struct TuringState {
@@ -461,16 +490,8 @@ pub unsafe extern "C" fn free_string(ptr: *mut c_char) {
 }
 
 
-
-
-// Import functions
-unsafe extern "C" {
-    /// Called when things go so horribly wrong that proper recovery is not possible
-    pub fn abort(error_code: *const c_char, error_message: *const c_char) -> !;
-    pub fn log_info(message: *const c_char);
-    pub fn log_warn(message: *const c_char);
-    pub fn log_error(message: *const c_char);
-    pub fn log_debug(message: *const c_char);
+#[unsafe(no_mangle)]
+extern "C" fn register_function(name: *const c_char, pointer: *const c_void) {
 
 }
 
