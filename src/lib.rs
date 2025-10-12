@@ -6,12 +6,12 @@ pub mod util;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::ffi::{c_char, CString};
+use std::ffi::{c_char, c_void, CStr, CString};
 use std::mem;
 
 use anyhow::{anyhow, Result};
 use wasmi::core::ValType;
-use wasmi::{ExternRef, FuncType, Linker};
+use wasmi::{Caller, ExternRef, FuncType, Linker, Memory, Val, F32};
 
 use crate::wasm::wasm_engine::WasmInterpreter;
 
@@ -19,20 +19,47 @@ use crate::interop::params::Params;
 
 use self::interop::params::{FfiParam, Param};
 use self::util::{free_cstr, ToCStr, TrackedHashMap};
-use self::wasm::wasm_engine::{HostState, WasmFnBuilder};
 
 #[derive(Default)]
 pub struct TuringState {
     pub wasm: Option<WasmInterpreter>,
-    pub wasm_fns: HashMap<String, (Vec<ValType>, Vec<ValType>)>,
+    pub wasm_fns: HashMap<String, (*const c_void, Vec<u32>, Vec<u32>)>,
     pub param_builders: TrackedHashMap<Params>,
     pub active_builder: u32,
-    pub active_wasm_fn: Option<WasmFnBuilder>,
+    pub active_wasm_fn: Option<String>,
+    pub opaque_pointers: TrackedHashMap<*const c_void>,
 }
 
 static mut STATE: Option<RefCell<TuringState>> = None;
 
 const TURING_UNINIT: &str = "Turing has not been initialized";
+
+type FfiCallback = extern "C" fn(u32) -> FfiParam;
+
+trait IntoWasmi<T> {
+    fn into_wasmi(self) -> Result<T, wasmi::Error>;
+}
+
+impl<T, E> IntoWasmi<T> for Result<T, E>
+where
+    E: Into<anyhow::Error>,
+{
+    fn into_wasmi(self) -> Result<T, wasmi::Error> {
+        self.map_err(|e| wasmi::Error::new(e.into().to_string()))
+    }
+}
+
+
+
+fn get_string(message: u32, memory: &Memory, caller: &Caller<'_, ()>) -> String {
+    let mut output_string = String::new();
+    for i in message..u32::MAX {
+        let byte: &u8 = memory.data(caller).get(i as usize).unwrap();
+        if *byte == 0u8 { break }
+        output_string.push(char::from(*byte));
+    }
+    output_string
+}
 
 impl TuringState {
     pub fn new() -> Self {
@@ -42,6 +69,7 @@ impl TuringState {
             param_builders: TrackedHashMap::starting_at(1),
             active_builder: 0,
             active_wasm_fn: None,
+            opaque_pointers: TrackedHashMap::starting_at(1),
         }
     }
 
@@ -84,20 +112,118 @@ impl TuringState {
         }
     }
 
-    pub fn bind_wasm(&mut self, linker: &mut Linker<HostState<ExternRef>>) {
+    pub fn bind_wasm(&mut self, linker: &mut Linker<()>) {
         unsafe {
             if let Some(state) = &mut STATE {
-                let mut s = state.borrow_mut();
 
                 let mut fns = HashMap::new();
-                mem::swap(&mut fns, &mut s.wasm_fns);
+                {
+                    let mut s = state.borrow_mut();
+                    mem::swap(&mut fns, &mut s.wasm_fns);
+                }
 
-                for (n, (p, r)) in fns.iter() {
-                    let ft = FuncType::new(p.clone(), r.clone());
+                for (n, (func_ptr, p, r)) in fns.iter() {
+
+                    let func: FfiCallback = mem::transmute(func_ptr);
+
+                    let mut p_types = Vec::new();
+                    let mut r_type = Vec::new();
+                    for pt in p {
+                        let p_type = match pt {
+                            1 | 2 | 3 | 4 | 5 | 6 | 8 | 9 | 10 => ValType::I32,
+                            7 => ValType::F32,
+                            _ => unreachable!("invalid parameter type")
+                        };
+                        p_types.push(p_type);
+                    }
+                    if !r.is_empty() {
+                        let r_typ = match r[0] {
+                            1 | 2 | 3 | 4 | 5 | 6 | 8 | 9 | 10 => ValType::I32,
+                            7 => ValType::F32,
+                            _ => unreachable!("invalid return type")
+                        };
+                        r_type.push(r_typ);
+                    }
+
+                    let ft = FuncType::new(p_types, r_type);
+
+                    let p = p.clone();
+                    let r = r.clone();
 
                     linker.func_new("env", n.clone().as_str(), ft, move |mut caller, ps, rs| -> Result<(), wasmi::Error> {
+                        let mut params = Params::new();
 
-                    })
+                        // set up function parameters
+                        for (exp_typ, value) in p.iter().zip(ps) {
+                            match (exp_typ, value) {
+                                (1, Val::I32(i)) => params.push(Param::I8(*i as i8)),
+                                (2, Val::I32(i)) => params.push(Param::I16(*i as i16)),
+                                (3, Val::I32(i)) => params.push(Param::I32(*i)),
+                                (4, Val::I32(u)) => params.push(Param::U8(*u as u8)),
+                                (5, Val::I32(u)) => params.push(Param::U16(*u as u16)),
+                                (6, Val::I32(u)) => params.push(Param::U32(*u as u32)),
+                                (7, Val::F32(f)) => params.push(Param::F32(f.to_float())),
+                                (8, Val::I32(b)) => params.push(Param::Bool(*b != 0)),
+                                (9, Val::I32(ptr)) => {
+                                    if let Some(state) = &mut STATE {
+                                        let ptr = *ptr as u32;
+                                        let s = state.borrow_mut();
+
+                                        if let Some(memory) = caller.get_export("memory").and_then(|e| e.into_memory()) {
+                                            let s = get_string(ptr, &memory, &caller);
+                                            params.push(Param::String(s.to_cstr_ptr()));
+                                        } else {
+                                            return Err(anyhow!("wasm does not export memory")).into_wasmi();
+                                        }
+
+                                    } else {
+                                        return Err(anyhow!("if you are reading this, something has gone horribly wrong")).into_wasmi();
+                                    }
+                                },
+                                (10, Val::I32(p)) => {
+                                    let p = *p as u32;
+                                    if let Some(state) = &mut STATE {
+                                        let s = state.borrow_mut();
+                                        if let Some(true_pointer) = s.opaque_pointers.get(&p) {
+                                            params.push(Param::Object(*true_pointer));
+                                        } else {
+                                            return Err(anyhow!("opaque pointer does not correspond to a real pointer")).into_wasmi();
+                                        }
+                                    }
+                                }
+                                _ => params.push(Param::Error("Mismatched parameter type".to_cstr_ptr()))
+                            }
+                        }
+
+                        if let Some(state) = &mut STATE {
+                            let mut s = state.borrow_mut();
+
+                            let pid = s.param_builders.add(params);
+
+                            let res = func(pid).to_param().into_wasmi()?;
+
+                            let rv = match res {
+                                Param::I8(i)  => Val::I32(i as i32),
+                                Param::I16(i) => Val::I32(i as i32),
+                                Param::I32(i) => Val::I32(i),
+                                Param::U8(u)  => Val::I32(u as i32),
+                                Param::U16(u) => Val::I32(u as i32),
+                                Param::U32(u) => Val::I32(u as i32),
+                                Param::F32(f) => Val::F32(F32::from_float(f)),
+                                Param::Bool(b) => Val::I32(if b { 1 } else { 0 }),
+                                Param::String(s) => {},
+                                Param::Object(p) => {},
+                                _ => return Err(anyhow!("Invalid return value")).into_wasmi()
+                            };
+
+
+                        }
+
+
+
+                        Ok(())
+
+                    }).unwrap();
 
                 }
 
@@ -122,27 +248,72 @@ pub extern "C" fn init_turing() {
 
 #[unsafe(no_mangle)]
 /// starts building a new wasm function. May return an error
-pub extern "C" fn create_wasm_fn(name: *const c_char) -> FfiParam {
-    Param::Void.into()
-}
+/// # Safety
+/// only safe if name: *const c_char points at a valid string
+pub unsafe extern "C" fn create_wasm_fn(name: *const c_char, pointer: *const c_void) -> FfiParam {
+    unsafe {
+        let name = CStr::from_ptr(name).to_string_lossy().to_string();
 
-#[unsafe(no_mangle)]
-/// builds the wasm fn builder and adds it to the list of complete wasm fns
-pub extern "C" fn finalize_wasm_fn() -> FfiParam {
-    Param::Void.into()
+        if let Some(state) = &mut STATE {
+            let mut s = state.borrow_mut();
+
+            if s.wasm_fns.contains_key(&name) {
+                Param::Error(format!("wasm fn is already defined: '{}'", name).to_cstr_ptr())
+            } else {
+                s.active_wasm_fn = Some(name.clone());
+                s.wasm_fns.insert(name, (pointer, Vec::new(), Vec::new()));
+                Param::Void
+            }
+        } else {
+            Param::Error(TURING_UNINIT.to_cstr_ptr())
+        }
+    }.into()
 }
 
 #[unsafe(no_mangle)]
 /// appends a parameter type to the specified wasm fn builder, types are identical to the ids used
 /// for FfiParam
 pub extern "C" fn add_wasm_fn_param_type(param_type: u32) -> FfiParam {
-    Param::Void.into()
+    unsafe {
+        if let Some(state) = &mut STATE {
+            let mut s = state.borrow_mut();
+            if s.wasm_fns.is_empty() || s.active_wasm_fn.is_none() {
+                Param::Error("no wasm function to add parameter type to".to_cstr_ptr())
+            } else if (1..=10).contains(&param_type) {
+                let active = s.active_wasm_fn.as_ref().unwrap().clone();
+                let fn_builder = s.wasm_fns.get_mut(&active).unwrap();
+                fn_builder.1.push(param_type);
+                Param::Void
+            } else {
+                Param::Error(format!("Invalid param type id: {}", param_type).to_cstr_ptr())
+            }
+        }
+        else {
+            Param::Error(TURING_UNINIT.to_cstr_ptr())
+        }
+    }.into()
 }
 
 #[unsafe(no_mangle)]
 /// sets the return type of the specified wasm fn builder
 pub extern "C" fn set_wasm_fn_return_type(return_type: u32) -> FfiParam {
-    Param::Void.into()
+    unsafe {
+        if let Some(state) = &mut STATE {
+            let mut s = state.borrow_mut();
+            if s.wasm_fns.is_empty() || s.active_wasm_fn.is_none() {
+                Param::Error("no wasm function to add parameter type to".to_cstr_ptr())
+            } else if (1..=10).contains(&return_type) {
+                let active = s.active_wasm_fn.as_ref().unwrap().clone();
+                let fn_builder = s.wasm_fns.get_mut(&active).unwrap();
+                fn_builder.2.push(return_type);
+                Param::Void
+            } else {
+                Param::Error(format!("Invalid param type id: {}", return_type).to_cstr_ptr())
+            }
+        } else {
+            Param::Error(TURING_UNINIT.to_cstr_ptr())
+        }
+    }.into()
 }
 
 
