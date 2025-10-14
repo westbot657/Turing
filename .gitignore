@@ -1,3 +1,6 @@
 /target
 .idea/
+<<<<<<< HEAD
 
+=======
+>>>>>>> d538f0a (Swapped to wasmtime + wasi system)

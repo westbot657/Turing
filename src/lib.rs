@@ -6,13 +6,14 @@ pub mod util;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::error::Error;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::mem;
 use std::os::raw::c_char;
 
 use anyhow::{anyhow, Result};
-use wasmi::core::ValType;
-use wasmi::{Caller, ExternRef, FuncType, Linker, Memory, Val, F32};
+use wasmtime::{ValType, Caller, Engine, ExternRef, FuncType, Linker, Memory, Val};
+use wasmtime_wasi::p1::WasiP1Ctx;
 
 use crate::wasm::wasm_engine::WasmInterpreter;
 
@@ -65,22 +66,22 @@ const TURING_UNINIT: &str = "Turing has not been initialized";
 
 type FfiCallback = extern "C" fn(u32) -> FfiParam;
 
-trait IntoWasmi<T> {
-    fn into_wasmi(self) -> Result<T, wasmi::Error>;
+
+trait IntoWasm<T> {
+    fn into_wasm(self) -> Result<T, wasmtime::Error>;
 }
 
-impl<T, E> IntoWasmi<T> for Result<T, E>
+impl<T, E> IntoWasm<T> for Result<T, E>
 where
-    E: Into<anyhow::Error>,
+    E: std::fmt::Display + std::fmt::Debug + Send + Sync + 'static,
 {
-    fn into_wasmi(self) -> Result<T, wasmi::Error> {
-        self.map_err(|e| wasmi::Error::new(e.into().to_string()))
+    fn into_wasm(self) -> Result<T, wasmtime::Error> {
+        self.map_err(|e| wasmtime::Error::msg(format!("{}", e)))
     }
 }
 
 
-
-fn get_string(message: u32, memory: &Memory, caller: &Caller<'_, ()>) -> String {
+fn get_string(message: u32, memory: &Memory, caller: &Caller<'_, WasiP1Ctx>) -> String {
     let mut output_string = String::new();
     for i in message..u32::MAX {
         let byte: &u8 = memory.data(caller).get(i as usize).unwrap();
@@ -141,7 +142,7 @@ impl TuringState {
         }
     }
 
-    pub fn bind_wasm(&mut self, linker: &mut Linker<()>) {
+    pub fn bind_wasm(&mut self, engine: &Engine, linker: &mut Linker<WasiP1Ctx>) {
         unsafe {
             if let Some(state) = &mut STATE {
 
@@ -174,12 +175,12 @@ impl TuringState {
                         r_type.push(r_typ);
                     }
 
-                    let ft = FuncType::new(p_types, r_type);
+                    let ft = FuncType::new(engine, p_types, r_type);
 
                     let p = p.clone();
                     let r = r.clone();
 
-                    linker.func_new("env", n.clone().as_str(), ft, move |mut caller, ps, rs| -> Result<(), wasmi::Error> {
+                    linker.func_new("env", n.clone().as_str(), ft, move |mut caller, ps, rs| -> Result<(), wasmtime::Error> {
                         let mut params = Params::new();
 
                         // set up function parameters
@@ -191,7 +192,7 @@ impl TuringState {
                                 (4, Val::I32(u)) => params.push(Param::U8(*u as u8)),
                                 (5, Val::I32(u)) => params.push(Param::U16(*u as u16)),
                                 (6, Val::I32(u)) => params.push(Param::U32(*u as u32)),
-                                (7, Val::F32(f)) => params.push(Param::F32(f.to_float())),
+                                (7, Val::F32(f)) => params.push(Param::F32(f32::from_bits(*f))),
                                 (8, Val::I32(b)) => params.push(Param::Bool(*b != 0)),
                                 (9, Val::I32(ptr)) => {
                                     if let Some(state) = &mut STATE {
@@ -202,11 +203,11 @@ impl TuringState {
                                             let s = get_string(ptr, &memory, &caller);
                                             params.push(Param::String(s.to_cstr_ptr()));
                                         } else {
-                                            return Err(anyhow!("wasm does not export memory")).into_wasmi();
+                                            return Err(anyhow!("wasm does not export memory")).into_wasm();
                                         }
 
                                     } else {
-                                        return Err(anyhow!("if you are reading this, something has gone horribly wrong")).into_wasmi();
+                                        return Err(anyhow!("if you are reading this, something has gone horribly wrong")).into_wasm();
                                     }
                                 },
                                 (10, Val::I32(p)) => {
@@ -216,7 +217,7 @@ impl TuringState {
                                         if let Some(true_pointer) = s.opaque_pointers.get(&p) {
                                             params.push(Param::Object(*true_pointer));
                                         } else {
-                                            return Err(anyhow!("opaque pointer does not correspond to a real pointer")).into_wasmi();
+                                            return Err(anyhow!("opaque pointer does not correspond to a real pointer")).into_wasm();
                                         }
                                     }
                                 }
@@ -229,7 +230,7 @@ impl TuringState {
 
                             let pid = s.param_builders.add(params);
 
-                            let res = func(pid).to_param().into_wasmi()?;
+                            let res = func(pid).to_param().into_wasm()?;
 
                             let rv = match res {
                                 Param::I8(i)  => Val::I32(i as i32),
@@ -238,11 +239,11 @@ impl TuringState {
                                 Param::U8(u)  => Val::I32(u as i32),
                                 Param::U16(u) => Val::I32(u as i32),
                                 Param::U32(u) => Val::I32(u as i32),
-                                Param::F32(f) => Val::F32(F32::from_float(f)),
+                                Param::F32(f) => Val::F32(f.to_bits()),
                                 Param::Bool(b) => Val::I32(if b { 1 } else { 0 }),
-                                Param::String(s) => {},
-                                Param::Object(p) => {},
-                                _ => return Err(anyhow!("Invalid return value")).into_wasmi()
+                                Param::String(s) => { todo!() },
+                                Param::Object(p) => { todo!() },
+                                _ => return Err(anyhow!("Invalid return value")).into_wasm()
                             };
 
 
