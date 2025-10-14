@@ -9,7 +9,6 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::mem;
-use std::os::raw::c_char;
 
 use anyhow::{anyhow, Result};
 use wasmtime::{ValType, Caller, Engine, ExternRef, FuncType, Linker, Memory, Val};
@@ -25,7 +24,6 @@ use self::util::{free_cstr, ToCStr, TrackedHashMap};
 type AbortFn = extern "C" fn(*const c_char, *const c_char);
 type LogFn = extern "C" fn(*const c_char);
 
-
 pub struct CsFns {
     pub abort: AbortFn,
     pub log_info: LogFn,
@@ -37,6 +35,12 @@ pub struct CsFns {
 extern "C" fn null_abort(_: *const c_char, _: *const c_char) {}
 extern "C" fn null_log(_: *const c_char) {}
 
+impl Default for CsFns {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CsFns {
     pub fn new() -> Self {
         Self {
@@ -47,6 +51,23 @@ impl CsFns {
             log_debug: null_log,
         }
     }
+
+    /// # Safety
+    /// 404 safety not found (only safe if the function pointer points to a perfectly matching
+    ///     function as the default)
+    pub unsafe fn link(&mut self, fn_name: &str, ptr: *const c_void) {
+        unsafe {
+            match fn_name {
+                "abort" => self.abort = mem::transmute(ptr),
+                "log_info" => self.log_info = mem::transmute(ptr),
+                "log_warn" => self.log_warn = mem::transmute(ptr),
+                "log_error" => self.log_error = mem::transmute(ptr),
+                "log_debug" => self.log_debug = mem::transmute(ptr),
+                _ => {}
+            }
+        }
+    }
+
 }
 
 
@@ -58,6 +79,7 @@ pub struct TuringState {
     pub active_builder: u32,
     pub active_wasm_fn: Option<String>,
     pub opaque_pointers: TrackedHashMap<*const c_void>,
+    pub cs: CsFns,
 }
 
 static mut STATE: Option<RefCell<TuringState>> = None;
@@ -100,6 +122,7 @@ impl TuringState {
             active_builder: 0,
             active_wasm_fn: None,
             opaque_pointers: TrackedHashMap::starting_at(1),
+            cs: CsFns::new(),
         }
     }
 
@@ -492,41 +515,46 @@ pub unsafe extern "C" fn free_string(ptr: *mut c_char) {
 
 
 #[unsafe(no_mangle)]
-extern "C" fn register_function(name: *const c_char, pointer: *const c_void) {
-
+unsafe extern "C" fn register_function(name: *const c_char, pointer: *const c_void) {
+    unsafe {
+        let cstr = CStr::from_ptr(name).to_string_lossy().to_string();
+        if let Some(state) = &mut STATE {
+            let mut s = state.borrow_mut();
+            s.cs.link(&cstr, pointer);
+        }
+    }
 }
 
-// rust-local wrappers
 
 pub struct Log {}
 macro_rules! mlog {
-    ($func:tt : $msg:tt ) => {
-        let s = $msg.to_string();
-        let s = CString::new(s).unwrap();
-        let ptr = s.as_ptr();
+    ($f:tt => $msg:tt ) => {
         unsafe {
-            $func(ptr);
+            if let Some(state) = &mut STATE {
+                let s = state.borrow();
+                (s.cs.$f)($msg.to_string().to_cstr_ptr());
+            }
         }
     };
 }
 impl Log {
-
     pub fn info(msg: impl ToString) {
-        mlog!(log_info: msg);
+        mlog!(log_info => msg);
     }
-
     pub fn warn(msg: impl ToString) {
-        mlog!(log_warn: msg);
+        mlog!(log_warn => msg);
     }
-
     pub fn error(msg: impl ToString) {
-        mlog!(log_error: msg);
+        mlog!(log_error => msg);
     }
-
     pub fn debug(msg: impl ToString) {
-        mlog!(log_debug: msg);
+        mlog!(log_debug => msg);
     }
-
 }
+
+
+
+
+
 
 
