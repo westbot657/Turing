@@ -25,7 +25,31 @@ Add params via `add_param(param: FfiParam)`
 
 Read params via `read_param(index: u32) -> FfiParam`  
 
-Delete the params object via `delete_params(params: u32)`
+Delete the params object via `delete_params(params: u32)`  
+
+### wasm functions
+
+create a new function with `create_wasm_fn(name: *const c_char, pointer: *const c_void) -> FfiParam`  
+
+add param types via `add_wasm_fn_param_type(param_type: u32) -> FfiParam`  
+
+set return type via `set_wasm_fn_return_type(return_type: u32) -> FfiParam`  
+
+call a wasm function via `call_wasm_fn(name: *const c_char, params: u32) -> FfiParam`  
+
+
+### Helpers
+
+`free_string(ptr: *const c_char)`  
+
+register rust <-> C# functions with `register_function(name: *const c_char, pointer: *const c_void)`  
+rust expects these functions to be registered after `init_turing` and before anything else
+- `abort(error_code: *const c_char, error_message: *const c_char) -> !`
+- `log_info(msg: *const c_char)`
+- `log_warn(msg: *const c_char)`
+- `log_error(msg: *const c_char)`
+- `log_debug(msg: *const c_char)`
+Failing to register these is technically fine since they all have an empty fallback implementation  
 
 
 ### Interop Structs
