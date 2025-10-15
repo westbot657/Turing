@@ -4,11 +4,14 @@ pub mod wasm;
 pub mod interop;
 pub mod util;
 
+#[cfg(test)]
+pub mod tests;
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
 use std::ffi::{c_char, c_void, CStr, CString};
-use std::mem;
+use std::{mem, path};
 
 use anyhow::{anyhow, Result};
 use wasmtime::{ValType, Caller, Engine, ExternRef, FuncType, Linker, Memory, Val};
@@ -34,13 +37,6 @@ pub struct CsFns {
 
 extern "C" fn null_abort(_: *const c_char, _: *const c_char) {}
 extern "C" fn null_log(_: *const c_char) {}
-
-impl Default for CsFns {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl CsFns {
     pub fn new() -> Self {
         Self {
@@ -69,6 +65,13 @@ impl CsFns {
     }
 
 }
+
+impl Default for CsFns {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 
 
 #[derive(Default)]
@@ -154,14 +157,23 @@ impl TuringState {
     pub fn read_param(&self, index: u32) -> Param {
         if let Some(builder) = self.param_builders.get(&self.active_builder) {
             if index >= builder.len() {
-                Param::Error("Index out of bounds".to_cstr_ptr())
+                Param::Error("Index out of bounds".to_string())
             } else if let Some(val) = builder.get(index as usize) {
-                val
+                val.clone()
             } else {
-                Param::Error("Could not read param for unknown reason".to_cstr_ptr())
+                Param::Error("Could not read param for unknown reason".to_string())
             }
         } else {
-            Param::Error("param object does not exist".to_cstr_ptr())
+            Param::Error("param object does not exist".to_string())
+        }
+    }
+
+    pub fn swap_params(&mut self, params: u32) -> Result<Params> {
+        let mut p = Params::new();
+        if let Some(p) = self.param_builders.swap(&params, p) {
+            Ok(p)
+        } else {
+            Err(anyhow!("Params object does not exist"))
         }
     }
 
@@ -224,7 +236,7 @@ impl TuringState {
 
                                         if let Some(memory) = caller.get_export("memory").and_then(|e| e.into_memory()) {
                                             let s = get_string(ptr, &memory, &caller);
-                                            params.push(Param::String(s.to_cstr_ptr()));
+                                            params.push(Param::String(s));
                                         } else {
                                             return Err(anyhow!("wasm does not export memory")).into_wasm();
                                         }
@@ -244,7 +256,7 @@ impl TuringState {
                                         }
                                     }
                                 }
-                                _ => params.push(Param::Error("Mismatched parameter type".to_cstr_ptr()))
+                                _ => params.push(Param::Error("Mismatched parameter type".to_string()))
                             }
                         }
 
@@ -271,8 +283,6 @@ impl TuringState {
 
 
                         }
-
-
 
                         Ok(())
 
@@ -311,14 +321,14 @@ pub unsafe extern "C" fn create_wasm_fn(name: *const c_char, pointer: *const c_v
             let mut s = state.borrow_mut();
 
             if s.wasm_fns.contains_key(&name) {
-                Param::Error(format!("wasm fn is already defined: '{}'", name).to_cstr_ptr())
+                Param::Error(format!("wasm fn is already defined: '{}'", name))
             } else {
                 s.active_wasm_fn = Some(name.clone());
                 s.wasm_fns.insert(name, (pointer, Vec::new(), Vec::new()));
                 Param::Void
             }
         } else {
-            Param::Error(TURING_UNINIT.to_cstr_ptr())
+            Param::Error(TURING_UNINIT.to_string())
         }
     }.into()
 }
@@ -331,18 +341,18 @@ pub extern "C" fn add_wasm_fn_param_type(param_type: u32) -> FfiParam {
         if let Some(state) = &mut STATE {
             let mut s = state.borrow_mut();
             if s.wasm_fns.is_empty() || s.active_wasm_fn.is_none() {
-                Param::Error("no wasm function to add parameter type to".to_cstr_ptr())
+                Param::Error("no wasm function to add parameter type to".to_string())
             } else if (1..=10).contains(&param_type) {
                 let active = s.active_wasm_fn.as_ref().unwrap().clone();
                 let fn_builder = s.wasm_fns.get_mut(&active).unwrap();
                 fn_builder.1.push(param_type);
                 Param::Void
             } else {
-                Param::Error(format!("Invalid param type id: {}", param_type).to_cstr_ptr())
+                Param::Error(format!("Invalid param type id: {}", param_type))
             }
         }
         else {
-            Param::Error(TURING_UNINIT.to_cstr_ptr())
+            Param::Error(TURING_UNINIT.to_string())
         }
     }.into()
 }
@@ -354,17 +364,17 @@ pub extern "C" fn set_wasm_fn_return_type(return_type: u32) -> FfiParam {
         if let Some(state) = &mut STATE {
             let mut s = state.borrow_mut();
             if s.wasm_fns.is_empty() || s.active_wasm_fn.is_none() {
-                Param::Error("no wasm function to add parameter type to".to_cstr_ptr())
+                Param::Error("no wasm function to add parameter type to".to_string())
             } else if (1..=10).contains(&return_type) {
                 let active = s.active_wasm_fn.as_ref().unwrap().clone();
                 let fn_builder = s.wasm_fns.get_mut(&active).unwrap();
                 fn_builder.2.push(return_type);
                 Param::Void
             } else {
-                Param::Error(format!("Invalid param type id: {}", return_type).to_cstr_ptr())
+                Param::Error(format!("Invalid param type id: {}", return_type))
             }
         } else {
-            Param::Error(TURING_UNINIT.to_cstr_ptr())
+            Param::Error(TURING_UNINIT.to_string())
         }
     }.into()
 }
@@ -384,10 +394,10 @@ pub extern "C" fn init_wasm() -> FfiParam {
                 s.wasm = Some(t);
                 Param::Void
             } else {
-                Param::Error("Failed to initialize wasm engine".to_cstr_ptr())
+                Param::Error("Failed to initialize wasm engine".to_string())
             }
         } else {
-            Param::Error(TURING_UNINIT.to_cstr_ptr())
+            Param::Error(TURING_UNINIT.to_string())
         }
     }.into()
 }
@@ -437,6 +447,7 @@ pub extern "C" fn bind_params(params: u32) {
 
 #[unsafe(no_mangle)]
 /// Returns an FfiParam that will either be Error or Void
+/// Strings (from error and string) are copied and you are safe to free them after calling.
 pub extern "C" fn add_param(value: FfiParam) -> FfiParam {
     unsafe {
         if let Some(state) = &mut STATE {
@@ -444,21 +455,22 @@ pub extern "C" fn add_param(value: FfiParam) -> FfiParam {
             let typ_id = value.type_id;
             if let Ok(val) = value.to_param() {
                 if let Err(e) = s.push_param(val) {
-                    Param::Error(e.to_string().to_cstr_ptr())
+                    Param::Error(e.to_string())
                 } else {
                     Param::Void
                 }
             } else {
-                Param::Error(format!("Failed to add parameter. Invalid type id: {}", typ_id).to_cstr_ptr())
+                Param::Error(format!("Failed to add parameter. Invalid type id: {}", typ_id))
             }
         } else {
-            Param::Error(TURING_UNINIT.to_cstr_ptr())
+            Param::Error(TURING_UNINIT.to_string())
         }
     }.into()
 }
 
 #[unsafe(no_mangle)]
 /// Returns an error if the index is out of bounds
+/// Strings (from error and string) are copied and you are safe to free them after calling.
 pub extern "C" fn set_param(index: u32, value: FfiParam) -> FfiParam {
     unsafe {
         if let Some(state) = &mut STATE {
@@ -466,15 +478,15 @@ pub extern "C" fn set_param(index: u32, value: FfiParam) -> FfiParam {
             let typ_id = value.type_id;
             if let Ok(val) = value.to_param() {
                 if let Err(e) = s.set_param(index, val) {
-                    Param::Error(e.to_string().to_cstr_ptr())
+                    Param::Error(e.to_string())
                 } else {
                     Param::Void
                 }
             } else {
-                Param::Error(format!("Failed to set parameter. Invalid type id: {}", typ_id).to_cstr_ptr())
+                Param::Error(format!("Failed to set parameter. Invalid type id: {}", typ_id))
             }
         } else {
-            Param::Error(TURING_UNINIT.to_cstr_ptr())
+            Param::Error(TURING_UNINIT.to_string())
         }
     }.into()
 }
@@ -486,7 +498,7 @@ pub extern "C" fn read_param(index: u32) -> FfiParam {
             let s = state.borrow_mut();
             s.read_param(index)
         } else {
-            Param::Error(TURING_UNINIT.to_cstr_ptr())
+            Param::Error(TURING_UNINIT.to_string())
         }
     }.into()
 }
@@ -503,6 +515,34 @@ pub extern "C" fn delete_params(params: u32) {
         }
     }
 }
+
+#[unsafe(no_mangle)]
+/// Calls a function passing it the specified params object. The underlying params object is
+/// NOT deleted, but its contents are.
+/// If params is 0, calls with an empty parameters object
+pub unsafe extern "C" fn call_wasm_fn(name: *const c_char, params: u32) -> FfiParam {
+    unsafe {
+        if let Some(state) = &mut STATE {
+            let mut s = state.borrow_mut();
+            let params = if params == 0 {
+                Params::new()
+            } else if let Ok(p) = s.swap_params(params) {
+                p
+            } else{
+                return Param::Error("Params object does not exist".to_string()).into();
+            };
+            if let Some(wasm) = &mut s.wasm {
+                let name = CStr::from_ptr(name).to_string_lossy().to_string();
+                wasm.call_fn(&name, params)
+            } else {
+                Param::Error("Wasm engine is not initialized".to_string())
+            }
+        } else {
+            Param::Error(TURING_UNINIT.to_string())
+        }
+    }.into()
+}
+
 
 
 #[unsafe(no_mangle)]
@@ -524,6 +564,36 @@ unsafe extern "C" fn register_function(name: *const c_char, pointer: *const c_vo
         }
     }
 }
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn load_script(source: *const c_char) -> FfiParam {
+    unsafe {
+        let source = CStr::from_ptr(source).to_string_lossy().to_string();
+
+        let source = path::Path::new(&source);
+
+        if !source.exists() {
+            Param::Error("Script path does not exist".to_string())
+        } else {
+            if let Some(state) = &mut STATE {
+                let mut s = state.borrow_mut();
+                if let Some(wasm) = &mut s.wasm {
+                    if let Ok(_) = wasm.load_script(source) {
+                        Param::Void
+                    } else {
+                        Param::Error("Failed to instantiate wasm module".to_string())
+                    }
+                } else {
+                    Param::Error("Wasm engine not initialized".to_string())
+                }
+            } else {
+                Param::Error(TURING_UNINIT.to_string())
+            }
+        }
+
+    }.into()
+}
+
 
 
 pub struct Log {}

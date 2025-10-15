@@ -1,9 +1,25 @@
-use std::ffi::{c_char, c_void};
+use std::ffi::{c_char, c_void, CStr, CString};
 use std::mem;
 
 use anyhow::{anyhow, Result};
+use wasmtime::Val;
 
-#[derive(Debug, Clone, Copy)]
+pub mod param_type {
+    pub const I8: u32 = 1;
+    pub const I16: u32 = 2;
+    pub const I32: u32 = 3;
+    pub const U8: u32 = 4;
+    pub const U16: u32 = 5;
+    pub const U32: u32 = 6;
+    pub const F32: u32 = 7;
+    pub const BOOL: u32 = 8;
+    pub const STRING: u32 = 9;
+    pub const OBJECT: u32 = 10;
+    pub const ERROR: u32 = 11;
+    pub const VOID: u32 = 12;
+}
+
+#[derive(Debug, Clone)]
 pub enum Param {
     I8(i8),
     I16(i16),
@@ -13,9 +29,9 @@ pub enum Param {
     U32(u32),
     F32(f32),
     Bool(bool),
-    String(*const c_char),
+    String(String),
     Object(*const c_void),
-    Error(*const c_char),
+    Error(String),
     Void,
 }
 
@@ -58,12 +74,22 @@ impl Param {
             Param::U32(x)    => FfiParam { type_id: 6,  value: RawParam { u32:    x } },
             Param::F32(x)    => FfiParam { type_id: 7,  value: RawParam { f32:    x } },
             Param::Bool(x)   => FfiParam { type_id: 8,  value: RawParam { bool:   x } },
-            Param::String(x) => FfiParam { type_id: 9,  value: RawParam { string: x } },
+            Param::String(x) => FfiParam { type_id: 9,  value: RawParam { string: CString::new(x).unwrap().into_raw() } },
             Param::Object(x) => FfiParam { type_id: 10, value: RawParam { object: x } },
-            Param::Error(x)  => FfiParam { type_id: 11, value: RawParam { error:  x } },
+            Param::Error(x)  => FfiParam { type_id: 11, value: RawParam { error:  CString::new(x).unwrap().into_raw() } },
             Param::Void      => FfiParam { type_id: 12, value: RawParam { void:   0 } },
         }
     }
+
+    /// if self is an Error value, returns Err, else Ok(())
+    /// If self is a String, it will free the raw pointer (unless null)
+    pub fn to_result(self) -> Result<()> {
+        match self {
+            Param::Error(e) => Err(anyhow!(e)),
+            _ => Ok(())
+        }
+    }
+
 }
 
 impl FfiParam {
@@ -77,9 +103,9 @@ impl FfiParam {
             6  => Param::U32(    unsafe { self.value.u32    } ),
             7  => Param::F32(    unsafe { self.value.f32    } ),
             8  => Param::Bool(   unsafe { self.value.bool   } ),
-            9  => Param::String( unsafe { self.value.string } ),
+            9  => Param::String( unsafe { CStr::from_ptr(self.value.string).to_string_lossy().to_string() } ),
             10 => Param::Object( unsafe { self.value.object } ),
-            11 => Param::Error(  unsafe { self.value.error  } ),
+            11 => Param::Error(  unsafe { CStr::from_ptr(self.value.error).to_string_lossy().to_string() } ),
             12 => Param::Void,
             _  => return Err(anyhow!("Unknown type variant: {}", self.type_id))
         })
@@ -119,8 +145,8 @@ impl Params {
         self.params[index as usize] = param;
     }
 
-    pub fn get(&self, idx: usize) -> Option<Param> {
-        self.params.get(idx).copied()
+    pub fn get(&self, idx: usize) -> Option<&Param> {
+        self.params.get(idx)
     }
 
     pub fn len(&self) -> u32 {

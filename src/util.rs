@@ -1,5 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::ffi::{c_char, CString};
+use std::mem;
 use std::ops::RangeInclusive;
 
 
@@ -68,6 +69,17 @@ impl<T> TrackedHashMap<T> {
             self.insert_free_range(*i);
         }
         self.map.remove(i)
+    }
+
+    /// swaps `value` with the value at index `i` if present, and return Some(value). If `i` isn't
+    /// present, returns None
+    pub fn swap(&mut self, i: &u32, mut value: T) -> Option<T> {
+        if let Some(mut other) = self.map.get_mut(i) {
+            mem::swap(&mut value, &mut other);
+            Some(value)
+        } else {
+            None
+        }
     }
 
     fn insert_free_range(&mut self, i: u32) {

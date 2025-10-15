@@ -8,13 +8,15 @@ use wasmtime::{Config, Engine, ExternRef, Instance, Linker, Module, Store, ValTy
 use wasmtime_wasi::p1::WasiP1Ctx;
 use wasmtime_wasi::WasiCtxBuilder;
 
+use crate::interop::params::{Param, Params};
+use crate::util::ToCStr;
 use crate::TuringState;
 
 pub struct WasmInterpreter {
     engine: Engine,
     store: Store<WasiP1Ctx>,
     linker: Linker<WasiP1Ctx>,
-    script_instance: Option<(Module, Instance)>,
+    script_instance: Option<Instance>,
 }
 
 impl WasmInterpreter {
@@ -54,18 +56,40 @@ impl WasmInterpreter {
         })
     }
 
-    pub fn load_script(&mut self, path: &str) -> Result<()> {
+    pub fn load_script(&mut self, path: &Path) -> Result<()> {
 
-        let path = Path::new(path);
         let wasm = fs::read(path)?;
 
         let module = Module::new(&self.engine, wasm)?;
 
         let instance = self.linker.instantiate(&mut self.store, &module)?;
 
-        self.script_instance = Some((module, instance));
+        self.script_instance = Some(instance);
 
         Ok(())
     }
+
+    pub fn call_fn(&mut self, name: &str, params: Params) -> Param {
+
+        let mut instance = self.script_instance.take();
+
+        let res = if let Some(instance) = &mut instance {
+            if let Some(f) = instance.get_func(&mut self.store, name) {
+
+                
+
+            } else {
+                Param::Error("Function does not exist".to_string())
+            }
+        } else {
+            Param::Error("No script is loaded or reentry was attempted".to_string())
+        };
+
+
+        self.script_instance = instance;
+
+        res
+    }
+
 }
 
