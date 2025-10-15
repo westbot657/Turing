@@ -306,6 +306,7 @@ pub extern "C" fn init_turing() {
     unsafe {
         STATE = Some(RefCell::new(TuringState::new()));
     }
+
 }
 
 

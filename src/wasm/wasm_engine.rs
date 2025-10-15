@@ -1,16 +1,21 @@
 use std::collections::{HashMap, VecDeque};
-use std::fs;
+use std::{fs, mem};
+use std::io::Write;
 use std::ops::RangeInclusive;
 use std::path::Path;
+use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
 use wasmtime::{Config, Engine, ExternRef, Instance, Linker, Module, Store, ValType};
+use wasmtime_wasi::cli::StdoutStream;
 use wasmtime_wasi::p1::WasiP1Ctx;
+use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
+use wasmtime_wasi::p2::{OutputStream, StreamResult};
 use wasmtime_wasi::WasiCtxBuilder;
 
 use crate::interop::params::{Param, Params};
 use crate::util::ToCStr;
-use crate::TuringState;
+use crate::{Log, TuringState};
 
 pub struct WasmInterpreter {
     engine: Engine,
@@ -18,6 +23,31 @@ pub struct WasmInterpreter {
     linker: Linker<WasiP1Ctx>,
     script_instance: Option<Instance>,
 }
+
+pub struct OutBuf {
+    buf: String,
+}
+impl OutBuf {
+    pub fn new() -> Self {
+        Self {
+            buf: String::new(),
+        }
+    }
+}
+impl OutputStream for OutBuf {
+    fn write(&mut self, bytes: Bytes) -> wasmtime_wasi::p2::StreamResult<()> {
+        self.buf += bytes;
+        Ok(())
+    }
+    fn flush(&mut self) -> wasmtime_wasi::p2::StreamResult<()> {
+        Ok(())
+    }
+    fn check_write(&mut self) -> StreamResult<usize> {
+        Ok(2048)
+    }
+}
+
+
 
 impl WasmInterpreter {
     pub fn new(state: &mut TuringState) -> Result<WasmInterpreter> {
@@ -33,7 +63,7 @@ impl WasmInterpreter {
         config.consume_fuel(false);
 
         let wasi = WasiCtxBuilder::new()
-            .inherit_stdio()
+            .stdout()
             .allow_tcp(false)
             .allow_udp(false)
             .build_p1();
@@ -76,7 +106,7 @@ impl WasmInterpreter {
         let res = if let Some(instance) = &mut instance {
             if let Some(f) = instance.get_func(&mut self.store, name) {
 
-                
+                todo!()
 
             } else {
                 Param::Error("Function does not exist".to_string())
