@@ -11,7 +11,7 @@ Registering wasm functions: TODO
 
 Finialize the wasm interpreter via `init_wasm()`  
 
-> ![WARN]
+> [!WARNING]
 > Reentry loops will not work.
 > this means chains of host->wasm->host->wasm are invalid and will error.
 
