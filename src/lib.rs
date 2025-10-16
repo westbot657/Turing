@@ -9,12 +9,11 @@ pub mod tests;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
-use std::error::Error;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::{mem, path};
 
 use anyhow::{anyhow, Result};
-use wasmtime::{Caller, Engine, ExternRef, FuncType, Linker, Memory, Store, Val, ValType};
+use wasmtime::{Caller, Engine, FuncType, Linker, Memory, Val, ValType};
 use wasmtime_wasi::p1::WasiP1Ctx;
 
 use crate::wasm::wasm_engine::WasmInterpreter;
@@ -189,171 +188,166 @@ impl TuringState {
 
     pub fn bind_wasm(&mut self, engine: &Engine, linker: &mut Linker<WasiP1Ctx>) {
         unsafe {
-            if let Some(state) = &mut STATE {
+            // Utility Functions
 
-
-                // Utility Functions
-
-                /// Should only be used in 2 situations:
-                /// 1. after a call to a function that "retuns" a string, the guest
-                ///    is required to allocate the size returned in place of the string, and then
-                ///    call this, passing the allocated pointer and the size.
-                ///    If the size passed in does not exactly match the cached string, or there is no
-                ///    cached string, then 0 is returned, otherwise the input pointer is returned.
-                /// 2. for each argument of a function that expects a string, in linear order,
-                ///    failing to retrieve all param strings in the correct order will invalidate
-                ///    the strings with no way to recover.
-                linker.func_new("env", "retrieve_string",
-                    FuncType::new(engine, vec![ValType::I32, ValType::I32], vec![ValType::I32]),
-                    |mut caller, ps, rs| -> Result<(), wasmtime::Error> {
-                        let ptr = ps[0].i32().unwrap();
-                        let size = ps[1].i32().unwrap();
-                        unsafe {
-                            if let Some(state) = &mut STATE {
-                                let mut s = state.borrow_mut();
-                                if let Some(st) = s.str_cache.pop_front() {
-                                    if st.len() + 1 == size as usize {
-                                        if let Some(memory) = caller.get_export("memory").and_then(|m| m.into_memory()) {
-                                            write_string(ptr as u32, st, &memory, caller);
-                                            rs[0] = Val::I32(ptr);
-                                        }
-                                        return Ok(())
-                                    }
-                                }
-                                rs[0] = Val::I32(0);
-                                Ok(())
-                            } else {
-                                unreachable!("wasm can't be called if state doesn't exist");
-                            }
-                        }
-                    }
-                );
-
-
-
-                // C# wasm bindings
-                let mut fns;
-                {
-                    let mut s = state.borrow_mut();
-                    fns = s.wasm_fns.clone();
-                }
-
-                for (n, (func_ptr, p, r)) in fns.iter() {
-
-                    let func: FfiCallback = mem::transmute(func_ptr);
-
-                    let mut p_types = Vec::new();
-                    let mut r_type = Vec::new();
-                    for pt in p {
-                        let p_type = match pt {
-                            1 | 2 | 3 | 4 | 5 | 6 | 8 | 9 | 10 => ValType::I32,
-                            7 => ValType::F32,
-                            _ => unreachable!("invalid parameter type")
-                        };
-                        p_types.push(p_type);
-                    }
-                    if !r.is_empty() {
-                        let r_typ = match r[0] {
-                            1 | 2 | 3 | 4 | 5 | 6 | 8 | 9 | 10 => ValType::I32,
-                            7 => ValType::F32,
-                            _ => unreachable!("invalid return type")
-                        };
-                        r_type.push(r_typ);
-                    }
-
-                    let ft = FuncType::new(engine, p_types, r_type);
-
-                    let p = p.clone();
-                    let r = r.clone();
-
-                    linker.func_new("env", n.clone().as_str(), ft, move |mut caller, ps, rs| -> Result<(), wasmtime::Error> {
-                        let mut params = Params::new();
-
-                        // set up function parameters
-                        for (exp_typ, value) in p.iter().zip(ps) {
-                            match (exp_typ, value) {
-                                (1, Val::I32(i)) => params.push(Param::I8(*i as i8)),
-                                (2, Val::I32(i)) => params.push(Param::I16(*i as i16)),
-                                (3, Val::I32(i)) => params.push(Param::I32(*i)),
-                                (4, Val::I32(u)) => params.push(Param::U8(*u as u8)),
-                                (5, Val::I32(u)) => params.push(Param::U16(*u as u16)),
-                                (6, Val::I32(u)) => params.push(Param::U32(*u as u32)),
-                                (7, Val::F32(f)) => params.push(Param::F32(f32::from_bits(*f))),
-                                (8, Val::I32(b)) => params.push(Param::Bool(*b != 0)),
-                                (9, Val::I32(ptr)) => {
-                                    if let Some(state) = &mut STATE {
-                                        let ptr = *ptr as u32;
-                                        let s = state.borrow_mut();
-
-                                        if let Some(memory) = caller.get_export("memory").and_then(|e| e.into_memory()) {
-                                            let s = get_string(ptr, memory.data(&caller));
-                                            params.push(Param::String(s));
-                                        } else {
-                                            return Err(anyhow!("wasm does not export memory")).into_wasm();
-                                        }
-
-                                    } else {
-                                        return Err(anyhow!("if you are reading this, something has gone horribly wrong")).into_wasm();
-                                    }
-                                },
-                                (10, Val::I32(p)) => {
-                                    let p = *p as u32;
-                                    if let Some(state) = &mut STATE {
-                                        let s = state.borrow_mut();
-                                        if let Some(true_pointer) = s.opaque_pointers.get(&p) {
-                                            params.push(Param::Object(*true_pointer));
-                                        } else {
-                                            return Err(anyhow!("opaque pointer does not correspond to a real pointer")).into_wasm();
-                                        }
-                                    }
-                                }
-                                _ => params.push(Param::Error("Mismatched parameter type".to_string()))
-                            }
-                        }
-
+            // Should only be used in 2 situations:
+            // 1. after a call to a function that "retuns" a string, the guest
+            //    is required to allocate the size returned in place of the string, and then
+            //    call this, passing the allocated pointer and the size.
+            //    If the size passed in does not exactly match the cached string, or there is no
+            //    cached string, then 0 is returned, otherwise the input pointer is returned.
+            // 2. for each argument of a function that expects a string, in linear order,
+            //    failing to retrieve all param strings in the correct order will invalidate
+            //    the strings with no way to recover.
+            linker.func_new("env", "retrieve_string",
+                FuncType::new(engine, vec![ValType::I32, ValType::I32], vec![ValType::I32]),
+                |mut caller, ps, rs| -> Result<(), wasmtime::Error> {
+                    let ptr = ps[0].i32().unwrap();
+                    let size = ps[1].i32().unwrap();
+                    unsafe {
                         if let Some(state) = &mut STATE {
                             let mut s = state.borrow_mut();
-
-                            let pid = s.param_builders.add(params);
-
-                            let res = func(pid).to_param().into_wasm()?;
-
-                            let rv = match res {
-                                Param::I8(i)  => Val::I32(i as i32),
-                                Param::I16(i) => Val::I32(i as i32),
-                                Param::I32(i) => Val::I32(i),
-                                Param::U8(u)  => Val::I32(u as i32),
-                                Param::U16(u) => Val::I32(u as i32),
-                                Param::U32(u) => Val::I32(u as i32),
-                                Param::F32(f) => Val::F32(f.to_bits()),
-                                Param::Bool(b) => Val::I32(if b { 1 } else { 0 }),
-                                Param::String(st) => {
-                                    let l = st.len() + 1;
-                                    s.str_cache.push_back(st);
-                                    Val::I32(l as i32)
-                                },
-                                Param::Object(p) => {
-                                    let opaque = if let Some(opaque) = s.pointer_backlink.get(&p) {
-                                        *opaque
-                                    } else {
-                                        let op = s.opaque_pointers.add(p);
-                                        s.pointer_backlink.insert(p, op);
-                                        op
-                                    };
-                                    Val::I32(opaque as i32)
-                                },
-                                _ => return Err(anyhow!("Invalid return value")).into_wasm()
-                            };
-
+                            if let Some(st) = s.str_cache.pop_front() {
+                                if st.len() + 1 == size as usize {
+                                    if let Some(memory) = caller.get_export("memory").and_then(|m| m.into_memory()) {
+                                        write_string(ptr as u32, st, &memory, caller);
+                                        rs[0] = Val::I32(ptr);
+                                    }
+                                    return Ok(())
+                                }
+                            }
+                            rs[0] = Val::I32(0);
+                            Ok(())
+                        } else {
+                            unreachable!("wasm can't be called if state doesn't exist");
                         }
+                    }
+                }
+            ).unwrap();
 
-                        Ok(())
 
-                    }).unwrap();
 
+            // C# wasm bindings
+            let fns;
+            {
+                fns = self.wasm_fns.clone();
+            }
+
+            for (n, (func_ptr, p, r)) in fns.iter() {
+
+                let func: FfiCallback = mem::transmute(func_ptr);
+
+                let mut p_types = Vec::new();
+                let mut r_type = Vec::new();
+                for pt in p {
+                    let p_type = match pt {
+                        1 | 2 | 3 | 4 | 5 | 6 | 8 | 9 | 10 => ValType::I32,
+                        7 => ValType::F32,
+                        _ => unreachable!("invalid parameter type")
+                    };
+                    p_types.push(p_type);
+                }
+                if !r.is_empty() {
+                    let r_typ = match r[0] {
+                        1 | 2 | 3 | 4 | 5 | 6 | 8 | 9 | 10 => ValType::I32,
+                        7 => ValType::F32,
+                        _ => unreachable!("invalid return type")
+                    };
+                    r_type.push(r_typ);
                 }
 
+                let ft = FuncType::new(engine, p_types, r_type);
+
+                let p = p.clone();
+                let r = r.clone();
+
+                linker.func_new("env", n.clone().as_str(), ft, move |mut caller, ps, rs| -> Result<(), wasmtime::Error> {
+                    let mut params = Params::new();
+
+                    // set up function parameters
+                    for (exp_typ, value) in p.iter().zip(ps) {
+                        match (exp_typ, value) {
+                            (1, Val::I32(i)) => params.push(Param::I8(*i as i8)),
+                            (2, Val::I32(i)) => params.push(Param::I16(*i as i16)),
+                            (3, Val::I32(i)) => params.push(Param::I32(*i)),
+                            (4, Val::I32(u)) => params.push(Param::U8(*u as u8)),
+                            (5, Val::I32(u)) => params.push(Param::U16(*u as u16)),
+                            (6, Val::I32(u)) => params.push(Param::U32(*u as u32)),
+                            (7, Val::F32(f)) => params.push(Param::F32(f32::from_bits(*f))),
+                            (8, Val::I32(b)) => params.push(Param::Bool(*b != 0)),
+                            (9, Val::I32(ptr)) => {
+                                if let Some(state) = &mut STATE {
+                                    let ptr = *ptr as u32;
+                                    let s = state.borrow_mut();
+
+                                    if let Some(memory) = caller.get_export("memory").and_then(|e| e.into_memory()) {
+                                        let s = get_string(ptr, memory.data(&caller));
+                                        params.push(Param::String(s));
+                                    } else {
+                                        return Err(anyhow!("wasm does not export memory")).into_wasm();
+                                    }
+
+                                } else {
+                                    return Err(anyhow!("if you are reading this, something has gone horribly wrong")).into_wasm();
+                                }
+                            },
+                            (10, Val::I32(p)) => {
+                                let p = *p as u32;
+                                if let Some(state) = &mut STATE {
+                                    let s = state.borrow_mut();
+                                    if let Some(true_pointer) = s.opaque_pointers.get(&p) {
+                                        params.push(Param::Object(*true_pointer));
+                                    } else {
+                                        return Err(anyhow!("opaque pointer does not correspond to a real pointer")).into_wasm();
+                                    }
+                                }
+                            }
+                            _ => params.push(Param::Error("Mismatched parameter type".to_string()))
+                        }
+                    }
+
+                    if let Some(state) = &mut STATE {
+                        let mut s = state.borrow_mut();
+
+                        let pid = s.param_builders.add(params);
+
+                        let res = func(pid).to_param().into_wasm()?;
+
+                        let rv = match res {
+                            Param::I8(i)  => Val::I32(i as i32),
+                            Param::I16(i) => Val::I32(i as i32),
+                            Param::I32(i) => Val::I32(i),
+                            Param::U8(u)  => Val::I32(u as i32),
+                            Param::U16(u) => Val::I32(u as i32),
+                            Param::U32(u) => Val::I32(u as i32),
+                            Param::F32(f) => Val::F32(f.to_bits()),
+                            Param::Bool(b) => Val::I32(if b { 1 } else { 0 }),
+                            Param::String(st) => {
+                                let l = st.len() + 1;
+                                s.str_cache.push_back(st);
+                                Val::I32(l as i32)
+                            },
+                            Param::Object(p) => {
+                                let opaque = if let Some(opaque) = s.pointer_backlink.get(&p) {
+                                    *opaque
+                                } else {
+                                    let op = s.opaque_pointers.add(p);
+                                    s.pointer_backlink.insert(p, op);
+                                    op
+                                };
+                                Val::I32(opaque as i32)
+                            },
+                            _ => return Err(anyhow!("Invalid return value")).into_wasm()
+                        };
+
+                    }
+
+                    Ok(())
+
+                }).unwrap();
+
             }
+
         }
     }
 
@@ -638,8 +632,8 @@ unsafe extern "C" fn load_script(source: *const c_char) -> FfiParam {
 
         let source = path::Path::new(&source);
 
-        if !source.exists() {
-            Param::Error("Script path does not exist".to_string())
+        if let Err(e) = source.metadata() {
+            Param::Error(format!("Script does not exist: {:#?}, {:#?}", source.to_str(), e))
         } else {
             if let Some(state) = &mut STATE {
                 let mut s = state.borrow_mut();

@@ -1,23 +1,17 @@
-use std::cell::{RefCell, RefMut};
-use std::collections::{HashMap, VecDeque};
+use std::cell::RefMut;
 use std::task::Poll;
-use std::{fs, mem};
-use std::io::Write;
-use std::ops::RangeInclusive;
+use std::fs;
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
 use tokio::io::AsyncWrite;
-use wasmtime::{Config, Engine, ExternRef, Instance, Linker, Module, Store, Val, ValType};
+use wasmtime::{Config, Engine, Instance, Linker, Module, Store, Val};
 use wasmtime_wasi::cli::{IsTerminal, StdoutStream};
 use wasmtime_wasi::p1::WasiP1Ctx;
-use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
-use wasmtime_wasi::p2::{OutputStream, StreamResult};
 use wasmtime_wasi::WasiCtxBuilder;
 
 use crate::interop::params::{Param, Params};
-use crate::util::ToCStr;
 use crate::{Log, TuringState};
 
 pub struct WasmInterpreter {
@@ -145,7 +139,11 @@ impl WasmInterpreter {
 
         let mut instance = self.script_instance.take();
 
-        let ret = state.wasm_fns.get(name).unwrap().2.clone();
+        let ret = if let Some(f) = state.wasm_fns.get(name) {
+            f.2.clone()
+        } else {
+            return Param::Error(format!("wasm does not export function {}", name))
+        };
 
         let res = if let Some(instance) = &mut instance {
             if let Some(f) = instance.get_func(&mut self.store, name) {
