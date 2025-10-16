@@ -1,6 +1,4 @@
 /target
 .idea/
-<<<<<<< HEAD
+Cargo.lock
 
-=======
->>>>>>> d538f0a (Swapped to wasmtime + wasi system)
