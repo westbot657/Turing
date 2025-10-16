@@ -18,7 +18,7 @@ use wasmtime_wasi::p1::WasiP1Ctx;
 
 use crate::wasm::wasm_engine::WasmInterpreter;
 
-use crate::interop::params::Params;
+use crate::interop::params::{param_type, Params};
 
 use self::interop::params::{FfiParam, Param};
 use self::util::{free_cstr, ToCStr, TrackedHashMap};
@@ -82,11 +82,11 @@ pub struct TuringState {
     pub active_wasm_fn: Option<String>,
     pub opaque_pointers: TrackedHashMap<*const c_void>,
     pub pointer_backlink: HashMap<*const c_void, u32>,
-    pub cs: CsFns,
     pub str_cache: VecDeque<String>
 }
 
 static mut STATE: Option<RefCell<TuringState>> = None;
+static mut CSFNS: Option<RefCell<CsFns>> = None;
 
 const TURING_UNINIT: &str = "Turing has not been initialized";
 
@@ -133,7 +133,6 @@ impl TuringState {
             active_wasm_fn: None,
             opaque_pointers: TrackedHashMap::starting_at(1),
             pointer_backlink: HashMap::new(),
-            cs: CsFns::new(),
             str_cache: VecDeque::new(),
         }
     }
@@ -362,6 +361,7 @@ impl TuringState {
 pub extern "C" fn init_turing() {
     unsafe {
         STATE = Some(RefCell::new(TuringState::new()));
+        CSFNS = Some(RefCell::new(CsFns::new()));
     }
 
 }
@@ -578,7 +578,15 @@ pub extern "C" fn delete_params(params: u32) {
 /// Calls a function passing it the specified params object. The underlying params object is
 /// NOT deleted, but its contents are.
 /// If params is 0, calls with an empty parameters object
-pub unsafe extern "C" fn call_wasm_fn(name: *const c_char, params: u32) -> FfiParam {
+pub unsafe extern "C" fn call_wasm_fn(name: *const c_char, params: u32, expected_return_type: u32) -> FfiParam {
+    let expected_return_type = if expected_return_type == 0 {
+        param_type::VOID
+    } else {
+        expected_return_type
+    };
+    if !(0..=12u32).contains(&expected_return_type) {
+        return Param::Error(format!("Invalid return type: {}", expected_return_type)).into();
+    }
     unsafe {
         if let Some(state) = &mut STATE {
             let mut s = state.borrow_mut();
@@ -591,7 +599,7 @@ pub unsafe extern "C" fn call_wasm_fn(name: *const c_char, params: u32) -> FfiPa
             };
             if let Some(mut wasm) = s.wasm.take() {
                 let name = CStr::from_ptr(name).to_string_lossy().to_string();
-                let res = wasm.call_fn(&name, params, &mut s);
+                let res = wasm.call_fn(&name, params, &mut s, expected_return_type);
                 s.wasm = Some(wasm);
                 res
             } else {
@@ -618,9 +626,9 @@ pub unsafe extern "C" fn free_string(ptr: *mut c_char) {
 unsafe extern "C" fn register_function(name: *const c_char, pointer: *const c_void) {
     unsafe {
         let cstr = CStr::from_ptr(name).to_string_lossy().to_string();
-        if let Some(state) = &mut STATE {
-            let mut s = state.borrow_mut();
-            s.cs.link(&cstr, pointer);
+        if let Some(csf) = &mut CSFNS {
+            let mut cs = csf.borrow_mut();
+            cs.link(&cstr, pointer);
         }
     }
 }
@@ -660,9 +668,9 @@ pub struct Log {}
 macro_rules! mlog {
     ($f:tt => $msg:tt ) => {
         unsafe {
-            if let Some(state) = &mut STATE {
-                let s = state.borrow();
-                (s.cs.$f)($msg.to_string().to_cstr_ptr());
+            if let Some(csf) = &mut CSFNS {
+                let cs = csf.borrow();
+                (cs.$f)($msg.to_string().to_cstr_ptr());
             }
         }
     };

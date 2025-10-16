@@ -201,6 +201,7 @@ impl Params {
                 Param::U8(u) => Val::I32(u as i32),
                 Param::U16(u) => Val::I32(u as i32),
                 Param::U32(u) => Val::I32(u as i32),
+                Param::F32(f) => Val::F32(f.to_bits()),
                 Param::Bool(b) => Val::I32(if b { 1 } else { 0 }),
                 Param::String(st) => {
                     let l = st.len() + 1;

@@ -1,7 +1,6 @@
 use std::ffi::CString;
 
 use anyhow::{anyhow, Result};
-
 use crate::interop::params::{param_type, Param};
 use crate::*;
 
@@ -38,27 +37,63 @@ pub fn setup_wasm() -> Result<()> {
     Ok(())
 }
 
+pub fn setup_test_script() -> Result<()> {
+    unsafe {
+        let fp = r#"tests/wasm/wasm_tests.wasm"#;
+
+        let c_ptr = CString::new(fp)?.into_raw();
+
+        load_script(c_ptr).to_param()?.to_result()
+    }
+}
 
 #[test]
 pub fn test_file_access() -> Result<()> {
     setup_wasm()?;
 
     unsafe {
-        let fp = r#"/home/westbot/turing/WasmTests/target/wasm32-wasip1/release/wasm_tests.wasm"#;
 
-        let c_ptr = CString::new(fp)?.into_raw();
-
-        load_script(c_ptr).to_param()?.to_result()?;
-
+        setup_test_script()?;
 
         let name = CString::new("file_access_test")?;
 
-        call_wasm_fn(name.as_ptr(), 0).to_param()?.to_result()?;
+        let res = call_wasm_fn(name.as_ptr(), 0, param_type::VOID).to_param()?.to_result();
 
+        assert!(res.is_err())
     }
 
     Ok(())
 }
 
+#[test]
+pub fn test_math() -> Result<()> {
+    setup_wasm()?;
+
+    unsafe {
+
+        setup_test_script()?;
+
+        let name = CString::new("math_ops_test")?;
+
+        let p = create_n_params(2);
+        bind_params(p);
+        set_param(0, Param::F32(3.5).into()).to_param()?.to_result()?;
+        set_param(1, Param::F32(5.0).into()).to_param()?.to_result()?;
+
+        let res = call_wasm_fn(name.as_ptr(), p, param_type::F32).to_param()?;
+
+        match res {
+            Param::F32(f) => {
+                println!("wasm code added 3.5 to 5.0 for {}", f);
+                assert_eq!(f, 3.5 * 5.0)
+            }
+            _ => return Err(anyhow!("Did not multiply numbers"))
+        }
+
+    }
+
+
+    Ok(())
+}
 
 

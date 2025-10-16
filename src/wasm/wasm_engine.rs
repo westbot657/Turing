@@ -47,7 +47,7 @@ impl AsyncWrite for OutputWriter {
             self: std::pin::Pin<&mut Self>,
             cx: &mut std::task::Context<'_>,
             buf: &[u8],
-        ) -> std::task::Poll<std::result::Result<usize, std::io::Error>> {
+        ) -> Poll<std::result::Result<usize, std::io::Error>> {
         self.inner.write().unwrap().extend(buf);
         Poll::Ready(Ok(buf.len()))
     }
@@ -135,15 +135,9 @@ impl WasmInterpreter {
         Ok(())
     }
 
-    pub fn call_fn(&mut self, name: &str, params: Params, state: &mut RefMut<'_, TuringState>) -> Param {
+    pub fn call_fn(&mut self, name: &str, params: Params, state: &mut RefMut<'_, TuringState>, ret_type: u32) -> Param {
 
         let mut instance = self.script_instance.take();
-
-        let ret = if let Some(f) = state.wasm_fns.get(name) {
-            f.2.clone()
-        } else {
-            return Param::Error(format!("wasm does not export function {}", name))
-        };
 
         let res = if let Some(instance) = &mut instance {
             if let Some(f) = instance.get_func(&mut self.store, name) {
@@ -151,20 +145,20 @@ impl WasmInterpreter {
                 let memory = instance.get_export(&mut self.store, "memory").and_then(|m| m.into_memory()).unwrap();
                 let args = params.to_args(state);
 
-                let mut res = Vec::new();
-                for r in &ret {
-                    res.push(match r {
-                        7 => Val::F32(0),
-                        _ => Val::I32(0),
-                    })
-                }
+                let mut res = if ret_type == 12 {
+                    Vec::new()
+                } else if ret_type == 7 {
+                    vec![Val::F32(0)]
+                } else {
+                    vec![Val::I32(0)]
+                };
 
                 if let Err(e) = f.call(&mut self.store, &args, &mut res) {
                     Param::Error(e.to_string())
                 } else {
                     if res.len() > 0 {
                         let rt = res[0];
-                        Param::from_typval(ret[0], rt, state, &memory, &mut self.store)
+                        Param::from_typval(ret_type, rt, state, &memory, &mut self.store)
                     } else {
                         Param::Void
                     }
