@@ -7,7 +7,7 @@ this library behaves similar to OpenGL in how functions are called
 
 Initialize the Turing library via `init_turing()`  
 
-Finialize the wasm interpreter via `init_wasm()`  
+Finalize the wasm interpreter via `init_wasm()`  
 
 > [!WARNING]
 > Reentry loops will not work.
@@ -33,7 +33,7 @@ add param types via `add_wasm_fn_param_type(param_type: u32) -> FfiParam`
 
 set return type via `set_wasm_fn_return_type(return_type: u32) -> FfiParam`  
 
-call a wasm function via `call_wasm_fn(name: *const c_char, params: u32) -> FfiParam`  
+call a wasm function via `call_wasm_fn(name: *const c_char, params: u32, expected_return_type: u32) -> FfiParam`  
 
 
 ### Helpers
