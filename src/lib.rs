@@ -8,13 +8,13 @@ pub mod util;
 pub mod tests;
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::error::Error;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::{mem, path};
 
 use anyhow::{anyhow, Result};
-use wasmtime::{ValType, Caller, Engine, ExternRef, FuncType, Linker, Memory, Val};
+use wasmtime::{Caller, Engine, ExternRef, FuncType, Linker, Memory, Store, Val, ValType};
 use wasmtime_wasi::p1::WasiP1Ctx;
 
 use crate::wasm::wasm_engine::WasmInterpreter;
@@ -82,7 +82,9 @@ pub struct TuringState {
     pub active_builder: u32,
     pub active_wasm_fn: Option<String>,
     pub opaque_pointers: TrackedHashMap<*const c_void>,
+    pub pointer_backlink: HashMap<*const c_void, u32>,
     pub cs: CsFns,
+    pub str_cache: VecDeque<String>
 }
 
 static mut STATE: Option<RefCell<TuringState>> = None;
@@ -106,14 +108,20 @@ where
 }
 
 
-fn get_string(message: u32, memory: &Memory, caller: &Caller<'_, WasiP1Ctx>) -> String {
+fn get_string(message: u32, data: &[u8]) -> String {
     let mut output_string = String::new();
     for i in message..u32::MAX {
-        let byte: &u8 = memory.data(caller).get(i as usize).unwrap();
+        let byte: &u8 = data.get(i as usize).unwrap();
         if *byte == 0u8 { break }
         output_string.push(char::from(*byte));
     }
     output_string
+}
+
+fn write_string(pointer: u32, string: String, memory: &Memory, caller: Caller<'_, WasiP1Ctx>) {
+    let string = CString::new(string).unwrap();
+    let string = string.into_bytes_with_nul();
+    memory.write(caller, pointer as usize, &string);
 }
 
 impl TuringState {
@@ -125,7 +133,9 @@ impl TuringState {
             active_builder: 0,
             active_wasm_fn: None,
             opaque_pointers: TrackedHashMap::starting_at(1),
+            pointer_backlink: HashMap::new(),
             cs: CsFns::new(),
+            str_cache: VecDeque::new(),
         }
     }
 
@@ -181,10 +191,51 @@ impl TuringState {
         unsafe {
             if let Some(state) = &mut STATE {
 
-                let mut fns = HashMap::new();
+
+                // Utility Functions
+
+                /// Should only be used in 2 situations:
+                /// 1. after a call to a function that "retuns" a string, the guest
+                ///    is required to allocate the size returned in place of the string, and then
+                ///    call this, passing the allocated pointer and the size.
+                ///    If the size passed in does not exactly match the cached string, or there is no
+                ///    cached string, then 0 is returned, otherwise the input pointer is returned.
+                /// 2. for each argument of a function that expects a string, in linear order,
+                ///    failing to retrieve all param strings in the correct order will invalidate
+                ///    the strings with no way to recover.
+                linker.func_new("env", "retrieve_string",
+                    FuncType::new(engine, vec![ValType::I32, ValType::I32], vec![ValType::I32]),
+                    |mut caller, ps, rs| -> Result<(), wasmtime::Error> {
+                        let ptr = ps[0].i32().unwrap();
+                        let size = ps[1].i32().unwrap();
+                        unsafe {
+                            if let Some(state) = &mut STATE {
+                                let mut s = state.borrow_mut();
+                                if let Some(st) = s.str_cache.pop_front() {
+                                    if st.len() + 1 == size as usize {
+                                        if let Some(memory) = caller.get_export("memory").and_then(|m| m.into_memory()) {
+                                            write_string(ptr as u32, st, &memory, caller);
+                                            rs[0] = Val::I32(ptr);
+                                        }
+                                        return Ok(())
+                                    }
+                                }
+                                rs[0] = Val::I32(0);
+                                Ok(())
+                            } else {
+                                unreachable!("wasm can't be called if state doesn't exist");
+                            }
+                        }
+                    }
+                );
+
+
+
+                // C# wasm bindings
+                let mut fns;
                 {
                     let mut s = state.borrow_mut();
-                    mem::swap(&mut fns, &mut s.wasm_fns);
+                    fns = s.wasm_fns.clone();
                 }
 
                 for (n, (func_ptr, p, r)) in fns.iter() {
@@ -235,7 +286,7 @@ impl TuringState {
                                         let s = state.borrow_mut();
 
                                         if let Some(memory) = caller.get_export("memory").and_then(|e| e.into_memory()) {
-                                            let s = get_string(ptr, &memory, &caller);
+                                            let s = get_string(ptr, memory.data(&caller));
                                             params.push(Param::String(s));
                                         } else {
                                             return Err(anyhow!("wasm does not export memory")).into_wasm();
@@ -276,11 +327,23 @@ impl TuringState {
                                 Param::U32(u) => Val::I32(u as i32),
                                 Param::F32(f) => Val::F32(f.to_bits()),
                                 Param::Bool(b) => Val::I32(if b { 1 } else { 0 }),
-                                Param::String(s) => { todo!() },
-                                Param::Object(p) => { todo!() },
+                                Param::String(st) => {
+                                    let l = st.len() + 1;
+                                    s.str_cache.push_back(st);
+                                    Val::I32(l as i32)
+                                },
+                                Param::Object(p) => {
+                                    let opaque = if let Some(opaque) = s.pointer_backlink.get(&p) {
+                                        *opaque
+                                    } else {
+                                        let op = s.opaque_pointers.add(p);
+                                        s.pointer_backlink.insert(p, op);
+                                        op
+                                    };
+                                    Val::I32(opaque as i32)
+                                },
                                 _ => return Err(anyhow!("Invalid return value")).into_wasm()
                             };
-
 
                         }
 
@@ -532,9 +595,11 @@ pub unsafe extern "C" fn call_wasm_fn(name: *const c_char, params: u32) -> FfiPa
             } else{
                 return Param::Error("Params object does not exist".to_string()).into();
             };
-            if let Some(wasm) = &mut s.wasm {
+            if let Some(mut wasm) = s.wasm.take() {
                 let name = CStr::from_ptr(name).to_string_lossy().to_string();
-                wasm.call_fn(&name, params)
+                let res = wasm.call_fn(&name, params, &mut s);
+                s.wasm = Some(wasm);
+                res
             } else {
                 Param::Error("Wasm engine is not initialized".to_string())
             }

@@ -1,8 +1,12 @@
+use std::cell::RefMut;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::mem;
 
 use anyhow::{anyhow, Result};
-use wasmtime::Val;
+use wasmtime::{Memory, Store, Val};
+use wasmtime_wasi::p1::WasiP1Ctx;
+
+use crate::{get_string, TuringState};
 
 pub mod param_type {
     pub const I8: u32 = 1;
@@ -90,6 +94,35 @@ impl Param {
         }
     }
 
+    pub fn from_typval(typ: u32, val: Val, state: &RefMut<'_, TuringState>, memory: &Memory, caller: &Store<WasiP1Ctx>) -> Self {
+        match typ {
+            1 => Param::I8(val.unwrap_i32() as i8),
+            2 => Param::I16(val.unwrap_i32() as i16),
+            3 => Param::I32(val.unwrap_i32()),
+            4 => Param::U8(val.unwrap_i32() as u8),
+            5 => Param::U16(val.unwrap_i32() as u16),
+            6 => Param::U32(val.unwrap_i32() as u32),
+            7 => Param::F32(val.unwrap_f32()),
+            8 => Param::Bool(if val.unwrap_i32() == 0 { false } else { true }),
+            9 => {
+                let ptr = val.unwrap_i32() as u32;
+                let st = get_string(ptr, memory.data(caller));
+                Param::String(st)
+            },
+            10 => {
+                let op = val.unwrap_i32() as u32;
+                let real = state.opaque_pointers.get(&op).and_then(|p| Some(*p)).unwrap_or(0 as *const c_void);
+                Param::Object(real)
+            },
+            11 => {
+                let ptr = val.unwrap_i32() as u32;
+                let st = get_string(ptr, memory.data(caller));
+                Param::Error(st)
+            }
+            _ => unreachable!("this is only called after type validation has been done on the type id"),
+        }
+    }
+
 }
 
 impl FfiParam {
@@ -157,6 +190,44 @@ impl Params {
         self.params.is_empty()
     }
 
+    pub fn to_args(self, state: &mut RefMut<'_, TuringState> ) -> Vec<Val> {
+        let mut vals = Vec::new();
+
+        for p in self.params {
+            vals.push(match p {
+                Param::I8(i) => Val::I32(i as i32),
+                Param::I16(i) => Val::I32(i as i32),
+                Param::I32(i) => Val::I32(i),
+                Param::U8(u) => Val::I32(u as i32),
+                Param::U16(u) => Val::I32(u as i32),
+                Param::U32(u) => Val::I32(u as i32),
+                Param::Bool(b) => Val::I32(if b { 1 } else { 0 }),
+                Param::String(st) => {
+                    let l = st.len() + 1;
+                    state.str_cache.push_back(st);
+                    Val::I32(l as i32)
+                },
+                Param::Object(rp) => {
+                    if let Some(op) = state.pointer_backlink.get(&rp) {
+                        Val::I32(*op as i32)
+                    } else {
+                        let op = state.opaque_pointers.add(rp);
+                        state.pointer_backlink.insert(rp, op);
+                        Val::I32(op as i32)
+                    }
+                },
+                Param::Error(st) => {
+                    let l = st.len() + 1;
+                    state.str_cache.push_back(st);
+                    Val::I32(l as i32)
+
+                },
+                _ => unreachable!("Void shouldn't ever be added as an arg")
+            })
+        }
+
+        vals
+    }
 }
 
 

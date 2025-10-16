@@ -7,8 +7,6 @@ this library behaves similar to OpenGL in how functions are called
 
 Initialize the Turing library via `init_turing()`  
 
-Registering wasm functions: TODO  
-
 Finialize the wasm interpreter via `init_wasm()`  
 
 > [!WARNING]

@@ -1,4 +1,6 @@
+use std::cell::{RefCell, RefMut};
 use std::collections::{HashMap, VecDeque};
+use std::task::Poll;
 use std::{fs, mem};
 use std::io::Write;
 use std::ops::RangeInclusive;
@@ -6,8 +8,9 @@ use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
-use wasmtime::{Config, Engine, ExternRef, Instance, Linker, Module, Store, ValType};
-use wasmtime_wasi::cli::StdoutStream;
+use tokio::io::AsyncWrite;
+use wasmtime::{Config, Engine, ExternRef, Instance, Linker, Module, Store, Val, ValType};
+use wasmtime_wasi::cli::{IsTerminal, StdoutStream};
 use wasmtime_wasi::p1::WasiP1Ctx;
 use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
 use wasmtime_wasi::p2::{OutputStream, StreamResult};
@@ -24,29 +27,67 @@ pub struct WasmInterpreter {
     script_instance: Option<Instance>,
 }
 
-pub struct OutBuf {
-    buf: String,
+struct OutputWriter {
+    inner: Arc<RwLock<Vec<u8>>>,
+    is_err: bool,
 }
-impl OutBuf {
-    pub fn new() -> Self {
-        Self {
-            buf: String::new(),
+impl std::io::Write for OutputWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.inner.write().unwrap().extend(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        let s = { str::from_utf8(&self.inner.read().unwrap()).unwrap().to_string() };
+        self.inner.write().unwrap().clear();
+        if self.is_err {
+            Log::error(s);
+        } else {
+            Log::info(s);
         }
-    }
-}
-impl OutputStream for OutBuf {
-    fn write(&mut self, bytes: Bytes) -> wasmtime_wasi::p2::StreamResult<()> {
-        self.buf += bytes;
         Ok(())
-    }
-    fn flush(&mut self) -> wasmtime_wasi::p2::StreamResult<()> {
-        Ok(())
-    }
-    fn check_write(&mut self) -> StreamResult<usize> {
-        Ok(2048)
     }
 }
 
+impl AsyncWrite for OutputWriter {
+    fn poll_write(
+            self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+            buf: &[u8],
+        ) -> std::task::Poll<std::result::Result<usize, std::io::Error>> {
+        self.inner.write().unwrap().extend(buf);
+        Poll::Ready(Ok(buf.len()))
+    }
+    fn poll_flush(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<std::result::Result<(), std::io::Error>> {
+        let s = { str::from_utf8(&self.inner.read().unwrap()).unwrap().to_string() };
+        self.inner.write().unwrap().clear();
+        if self.is_err {
+            Log::error(s);
+        } else {
+            Log::info(s);
+        }
+        Poll::Ready(Ok(()))
+    }
+    fn poll_shutdown(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<std::result::Result<(), std::io::Error>> {
+        Poll::Ready(Ok(()))
+    }
+}
+
+struct WriterInit(Arc<RwLock<Vec<u8>>>, bool);
+
+impl IsTerminal for WriterInit {
+    fn is_terminal(&self) -> bool {
+        false
+    }
+}
+
+impl StdoutStream for WriterInit {
+    fn async_stream(&self) -> Box<dyn AsyncWrite + Send + Sync> {
+        Box::new(OutputWriter {
+            inner: self.0.clone(),
+            is_err: self.1,
+        })
+    }
+}
 
 
 impl WasmInterpreter {
@@ -63,7 +104,8 @@ impl WasmInterpreter {
         config.consume_fuel(false);
 
         let wasi = WasiCtxBuilder::new()
-            .stdout()
+            .stdout(WriterInit(Arc::new(RwLock::new(Vec::new())), false))
+            .stderr(WriterInit(Arc::new(RwLock::new(Vec::new())), true))
             .allow_tcp(false)
             .allow_udp(false)
             .build_p1();
@@ -99,14 +141,37 @@ impl WasmInterpreter {
         Ok(())
     }
 
-    pub fn call_fn(&mut self, name: &str, params: Params) -> Param {
+    pub fn call_fn(&mut self, name: &str, params: Params, state: &mut RefMut<'_, TuringState>) -> Param {
 
         let mut instance = self.script_instance.take();
+
+        let ret = state.wasm_fns.get(name).unwrap().2.clone();
 
         let res = if let Some(instance) = &mut instance {
             if let Some(f) = instance.get_func(&mut self.store, name) {
 
-                todo!()
+                let memory = instance.get_export(&mut self.store, "memory").and_then(|m| m.into_memory()).unwrap();
+                let args = params.to_args(state);
+
+                let mut res = Vec::new();
+                for r in &ret {
+                    res.push(match r {
+                        7 => Val::F32(0),
+                        _ => Val::I32(0),
+                    })
+                }
+
+                if let Err(e) = f.call(&mut self.store, &args, &mut res) {
+                    Param::Error(e.to_string())
+                } else {
+                    if res.len() > 0 {
+                        let rt = res[0];
+                        Param::from_typval(ret[0], rt, state, &memory, &mut self.store)
+                    } else {
+                        Param::Void
+                    }
+
+                }
 
             } else {
                 Param::Error("Function does not exist".to_string())
@@ -114,7 +179,6 @@ impl WasmInterpreter {
         } else {
             Param::Error("No script is loaded or reentry was attempted".to_string())
         };
-
 
         self.script_instance = instance;
 
