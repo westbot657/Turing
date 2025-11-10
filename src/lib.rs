@@ -25,25 +25,29 @@ use self::util::{free_cstr, ToCStr, TrackedHashMap};
 
 type AbortFn = extern "C" fn(*const c_char, *const c_char);
 type LogFn = extern "C" fn(*const c_char);
+type FreeStr = extern "C" fn(*const c_char);
 
 pub struct CsFns {
     pub abort: AbortFn,
     pub log_info: LogFn,
     pub log_warn: LogFn,
-    pub log_error: LogFn,
+    pub log_critical: LogFn,
     pub log_debug: LogFn,
+    pub free_cs_string: FreeStr,
 }
 
 extern "C" fn null_abort(_: *const c_char, _: *const c_char) {}
 extern "C" fn null_log(_: *const c_char) {}
+extern "C" fn null_free(_: *const c_char) {}
 impl CsFns {
     pub fn new() -> Self {
         Self {
             abort: null_abort,
             log_info: null_log,
             log_warn: null_log,
-            log_error: null_log,
+            log_critical: null_log,
             log_debug: null_log,
+            free_cs_string: null_free,
         }
     }
 
@@ -56,8 +60,9 @@ impl CsFns {
                 "abort" => self.abort = mem::transmute(ptr),
                 "log_info" => self.log_info = mem::transmute(ptr),
                 "log_warn" => self.log_warn = mem::transmute(ptr),
-                "log_error" => self.log_error = mem::transmute(ptr),
+                "log_critical" => self.log_critical = mem::transmute(ptr),
                 "log_debug" => self.log_debug = mem::transmute(ptr),
+                "free_cs_string" => self.free_cs_string = mem::transmute(ptr),
                 _ => {}
             }
         }
@@ -682,8 +687,8 @@ impl Log {
     pub fn warn(msg: impl ToString) {
         mlog!(log_warn => msg);
     }
-    pub fn error(msg: impl ToString) {
-        mlog!(log_error => msg);
+    pub fn critical(msg: impl ToString) {
+        mlog!(log_critical => msg);
     }
     pub fn debug(msg: impl ToString) {
         mlog!(log_debug => msg);

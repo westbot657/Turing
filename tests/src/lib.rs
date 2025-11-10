@@ -1,5 +1,5 @@
 use std::ffi::{CString, c_char};
-use std::fs;
+use std::{fs, io};
 
 
 unsafe extern "C" {
@@ -29,7 +29,15 @@ extern "C" fn file_access_test() {
 
 #[unsafe(no_mangle)]
 extern "C" fn math_ops_test(a: f32, b: f32) -> f32 {
+    println!("WASM: Multiplying {} and {}", a, b);
     a * b
 }
 
+#[unsafe(no_mangle)]
+extern "C" fn test_stdin_fail() {
+    println!("trying to read input");
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).expect("Failed to read line");
+    println!("You typed: {}", input.trim());
+}
 

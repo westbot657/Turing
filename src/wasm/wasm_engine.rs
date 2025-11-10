@@ -34,7 +34,7 @@ impl std::io::Write for OutputWriter {
         let s = { str::from_utf8(&self.inner.read().unwrap()).unwrap().to_string() };
         self.inner.write().unwrap().clear();
         if self.is_err {
-            Log::error(s);
+            Log::critical(s);
         } else {
             Log::info(s);
         }
@@ -55,7 +55,7 @@ impl AsyncWrite for OutputWriter {
         let s = { str::from_utf8(&self.inner.read().unwrap()).unwrap().to_string() };
         self.inner.write().unwrap().clear();
         if self.is_err {
-            Log::error(s);
+            Log::critical(s);
         } else {
             Log::info(s);
         }

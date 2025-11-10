@@ -6,7 +6,9 @@ use crate::*;
 
 
 extern "C" fn log_info_stand_in(msg: *const c_char) {
-    
+    unsafe {
+        println!("wasm output: {}", CStr::from_ptr(msg).to_string_lossy().to_string());
+    }
 }
 
 
@@ -73,6 +75,9 @@ pub fn test_math() -> Result<()> {
 
         setup_test_script()?;
 
+        let fname = CString::new("log_info").unwrap();
+        register_function(fname.as_ptr(), log_info_stand_in as *const c_void);
+
         let name = CString::new("math_ops_test")?;
 
         let p = create_n_params(2);
@@ -96,4 +101,22 @@ pub fn test_math() -> Result<()> {
     Ok(())
 }
 
+#[test]
+pub fn test_stdin_fail() -> Result<()> {
+    setup_wasm()?;
+
+    unsafe {
+
+        setup_test_script()?;
+
+        let name = CString::new("test_stdin_fail")?;
+
+        let res = call_wasm_fn(name.as_ptr(), 0, param_type::VOID).to_param()?.to_result();
+
+        println!("stdin test is: {:?}", res);
+        assert!(res.is_err())
+    }
+
+    Ok(())
+}
 
