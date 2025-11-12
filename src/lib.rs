@@ -81,7 +81,7 @@ impl Default for CsFns {
 #[derive(Default)]
 pub struct TuringState {
     pub wasm: Option<WasmInterpreter>,
-    pub wasm_fns: HashMap<String, (*const c_void, Vec<u32>, Vec<u32>)>,
+    pub wasm_fns: HashMap<String, (String, *const c_void, Vec<u32>, Vec<u32>)>,
     pub param_builders: TrackedHashMap<Params>,
     pub active_builder: u32,
     pub active_wasm_fn: Option<String>,
@@ -237,7 +237,7 @@ impl TuringState {
                 fns = self.wasm_fns.clone();
             }
 
-            for (n, (func_ptr, p, r)) in fns.iter() {
+            for (n, (cap, func_ptr, p, r)) in fns.iter() {
 
                 let func: FfiCallback = mem::transmute(func_ptr);
 
@@ -376,9 +376,10 @@ pub extern "C" fn init_turing() {
 /// starts building a new wasm function. May return an error
 /// # Safety
 /// only safe if name: *const c_char points at a valid string
-pub unsafe extern "C" fn create_wasm_fn(name: *const c_char, pointer: *const c_void) -> FfiParam {
+pub unsafe extern "C" fn create_wasm_fn(capability: *const c_char, name: *const c_char, pointer: *const c_void) -> FfiParam {
     unsafe {
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
+        let capability = CStr::from_ptr(capability).to_string_lossy().to_string();
 
         if let Some(state) = &mut STATE {
             let mut s = state.borrow_mut();
@@ -387,7 +388,7 @@ pub unsafe extern "C" fn create_wasm_fn(name: *const c_char, pointer: *const c_v
                 Param::Error(format!("wasm fn is already defined: '{}'", name))
             } else {
                 s.active_wasm_fn = Some(name.clone());
-                s.wasm_fns.insert(name, (pointer, Vec::new(), Vec::new()));
+                s.wasm_fns.insert(name, (capability, pointer, Vec::new(), Vec::new()));
                 Param::Void
             }
         } else {
@@ -408,7 +409,7 @@ pub extern "C" fn add_wasm_fn_param_type(param_type: u32) -> FfiParam {
             } else if (1..=10).contains(&param_type) {
                 let active = s.active_wasm_fn.as_ref().unwrap().clone();
                 let fn_builder = s.wasm_fns.get_mut(&active).unwrap();
-                fn_builder.1.push(param_type);
+                fn_builder.2.push(param_type);
                 Param::Void
             } else {
                 Param::Error(format!("Invalid param type id: {}", param_type))
@@ -431,7 +432,7 @@ pub extern "C" fn set_wasm_fn_return_type(return_type: u32) -> FfiParam {
             } else if (1..=10).contains(&return_type) {
                 let active = s.active_wasm_fn.as_ref().unwrap().clone();
                 let fn_builder = s.wasm_fns.get_mut(&active).unwrap();
-                fn_builder.2.push(return_type);
+                fn_builder.3.push(return_type);
                 Param::Void
             } else {
                 Param::Error(format!("Invalid param type id: {}", return_type))
@@ -510,7 +511,7 @@ pub extern "C" fn bind_params(params: u32) {
 
 #[unsafe(no_mangle)]
 /// Returns an FfiParam that will either be Error or Void
-/// Strings (from error and string) are copied and you are safe to free them after calling.
+/// Strings (from error and string) are copied, and you are safe to free them after calling.
 pub extern "C" fn add_param(value: FfiParam) -> FfiParam {
     unsafe {
         if let Some(state) = &mut STATE {
@@ -533,7 +534,7 @@ pub extern "C" fn add_param(value: FfiParam) -> FfiParam {
 
 #[unsafe(no_mangle)]
 /// Returns an error if the index is out of bounds
-/// Strings (from error and string) are copied and you are safe to free them after calling.
+/// Strings (from error and string) are copied, and you are safe to free them after calling.
 pub extern "C" fn set_param(index: u32, value: FfiParam) -> FfiParam {
     unsafe {
         if let Some(state) = &mut STATE {

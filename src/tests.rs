@@ -17,10 +17,12 @@ pub fn setup_wasm() -> Result<()> {
     unsafe {
         init_turing();
         let cstr = CString::new("log_info")?.into_raw();
+        let cap = CString::new("test")?;
 
         let pointer = log_info_stand_in as *const c_void;
+        let cap_ptr = cap.as_ptr();
 
-        let res = create_wasm_fn(cstr, pointer).to_param()?;
+        let res = create_wasm_fn(cap_ptr, cstr, pointer).to_param()?;
         if let Param::Error(e) = res {
             return Err(anyhow!("Creation of wasm function failed"));
         }
