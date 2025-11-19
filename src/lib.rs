@@ -368,7 +368,14 @@ pub extern "C" fn init_turing() {
         STATE = Some(RefCell::new(TuringState::new()));
         CSFNS = Some(RefCell::new(CsFns::new()));
     }
+}
 
+#[unsafe(no_mangle)]
+pub extern "C" fn uninint_turing() {
+    unsafe {
+        STATE = None;
+        CSFNS = None;
+    }
 }
 
 
@@ -594,27 +601,37 @@ pub unsafe extern "C" fn call_wasm_fn(name: *const c_char, params: u32, expected
         return Param::Error(format!("Invalid return type: {}", expected_return_type)).into();
     }
     unsafe {
+
+        let mut wasm;
+        let params2;
         if let Some(state) = &mut STATE {
             let mut s = state.borrow_mut();
-            let params = if params == 0 {
+            params2 = if params == 0 {
                 Params::new()
             } else if let Ok(p) = s.swap_params(params) {
                 p
             } else{
                 return Param::Error("Params object does not exist".to_string()).into();
             };
-            if let Some(mut wasm) = s.wasm.take() {
-                let name = CStr::from_ptr(name).to_string_lossy().to_string();
-                let res = wasm.call_fn(&name, params, &mut s, expected_return_type);
-                s.wasm = Some(wasm);
-                res
+
+            if let Some(was) = s.wasm.take() {
+                wasm = was;
             } else {
-                Param::Error("Wasm engine is not initialized".to_string())
+                return Param::Error("Wasm engine is not initialized".to_string()).into();
             }
         } else {
-            Param::Error(TURING_UNINIT.to_string())
+            return Param::Error(TURING_UNINIT.to_string()).into();
         }
-    }.into()
+        let name = CStr::from_ptr(name).to_string_lossy().to_string();
+        let res = wasm.call_fn(&name, params2, expected_return_type);
+
+        if let Some(state) = &mut STATE {
+            let mut s = state.borrow_mut();
+            s.wasm = Some(wasm);
+        }
+        return res.into();
+
+    }
 }
 
 

@@ -12,7 +12,7 @@ use wasmtime_wasi::p1::WasiP1Ctx;
 use wasmtime_wasi::WasiCtxBuilder;
 
 use crate::interop::params::{Param, Params};
-use crate::{Log, TuringState};
+use crate::{Log, TuringState, STATE, TURING_UNINIT};
 
 pub struct WasmInterpreter {
     engine: Engine,
@@ -135,7 +135,7 @@ impl WasmInterpreter {
         Ok(())
     }
 
-    pub fn call_fn(&mut self, name: &str, params: Params, state: &mut RefMut<'_, TuringState>, ret_type: u32) -> Param {
+    pub fn call_fn(&mut self, name: &str, params: Params, ret_type: u32) -> Param {
 
         let mut instance = self.script_instance.take();
 
@@ -143,7 +143,16 @@ impl WasmInterpreter {
             if let Some(f) = instance.get_func(&mut self.store, name) {
 
                 let memory = instance.get_export(&mut self.store, "memory").and_then(|m| m.into_memory()).unwrap();
-                let args = params.to_args(state);
+                let args;// = params.to_args(state);
+
+                unsafe {
+                    if let Some(state) = &mut STATE {
+                        let mut s = state.borrow_mut();
+                        args = params.to_args(&mut s);
+                    } else {
+                        return Param::Error(TURING_UNINIT.to_string());
+                    }
+                }
 
                 let mut res = if ret_type == 12 {
                     Vec::new()
@@ -158,7 +167,16 @@ impl WasmInterpreter {
                 } else {
                     if res.len() > 0 {
                         let rt = res[0];
-                        Param::from_typval(ret_type, rt, state, &memory, &mut self.store)
+                        let par = unsafe {
+                            if let Some(state) = &mut STATE {
+                                let s = state.borrow_mut();
+                                let p = Param::from_typval(ret_type, rt, &s, &memory, &mut self.store);
+                                p
+                            } else {
+                                unreachable!("this point can't be reached without STATE being valid");
+                            }
+                        };
+                        par
                     } else {
                         Param::Void
                     }

@@ -9,6 +9,8 @@ Initialize the Turing library via `init_turing()`
 
 Finalize the wasm interpreter via `init_wasm()`  
 
+if things break and you need to reset the state, call `uninit_turing()`, this will reset the state to as if the program just started.  
+
 > [!WARNING]
 > Reentry loops will not work.
 > this means chains of host->wasm->host->wasm are invalid and will error.
