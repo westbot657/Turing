@@ -77,6 +77,8 @@ pub fn test_math() -> Result<()> {
 
         setup_test_script()?;
 
+        println!("Testing math ops?");
+
         let fname = CString::new("log_info").unwrap();
         register_function(fname.as_ptr(), log_info_stand_in as *const c_void);
 

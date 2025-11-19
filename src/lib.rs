@@ -652,10 +652,10 @@ unsafe extern "C" fn load_script(source: *const c_char) -> FfiParam {
             if let Some(state) = &mut STATE {
                 let mut s = state.borrow_mut();
                 if let Some(wasm) = &mut s.wasm {
-                    if let Ok(_) = wasm.load_script(source) {
-                        Param::Void
+                    if let Err(e) = wasm.load_script(source) {
+                        Param::Error(format!("Failed to instantiate wasm module: {}", e.to_string()))
                     } else {
-                        Param::Error("Failed to instantiate wasm module".to_string())
+                        Param::Void
                     }
                 } else {
                     Param::Error("Wasm engine not initialized".to_string())
