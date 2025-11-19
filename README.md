@@ -29,7 +29,7 @@ Delete the params object via `delete_params(params: u32)`
 
 ### wasm functions
 
-create a new function with `create_wasm_fn(name: *const c_char, pointer: *const c_void) -> FfiParam`  
+create a new function with `create_wasm_fn(capability: *const c_char, name: *const c_char, pointer: *const c_void) -> FfiParam`  
 
 add param types via `add_wasm_fn_param_type(param_type: u32) -> FfiParam`  
 
