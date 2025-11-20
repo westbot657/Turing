@@ -10,7 +10,7 @@ pub mod tests;
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::ffi::{c_char, c_void, CStr, CString};
-use std::{mem, path};
+use std::{mem, panic, path};
 
 use anyhow::{anyhow, Result};
 use wasmtime::{Caller, Engine, FuncType, Linker, Memory, Val, ValType};
@@ -63,7 +63,9 @@ impl CsFns {
                 "log_critical" => self.log_critical = mem::transmute(ptr),
                 "log_debug" => self.log_debug = mem::transmute(ptr),
                 "free_cs_string" => self.free_cs_string = mem::transmute(ptr),
-                _ => {}
+                _ => {
+                    eprintln!("Unrecognized function name: {}", fn_name);
+                }
             }
         }
     }
@@ -364,6 +366,12 @@ impl TuringState {
 // Core systems
 #[unsafe(no_mangle)]
 pub extern "C" fn init_turing() {
+
+    panic::set_hook(Box::new(|info| {
+        eprintln!("Caught panic: {}", info);
+        Log::critical(format!("Caught panic: {}", info));
+    }));
+
     unsafe {
         STATE = Some(RefCell::new(TuringState::new()));
         CSFNS = Some(RefCell::new(CsFns::new()));
