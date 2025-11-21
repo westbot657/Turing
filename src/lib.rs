@@ -350,6 +350,7 @@ impl TuringState {
                             },
                             _ => return Err(anyhow!("Invalid return value")).into_wasm()
                         };
+                        rs[0] = rv;
 
                     }
 
