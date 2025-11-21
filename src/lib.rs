@@ -13,7 +13,7 @@ use std::ffi::{c_char, c_void, CStr, CString};
 use std::{mem, panic, path};
 
 use anyhow::{anyhow, Result};
-use wasmtime::{Caller, Engine, FuncType, Linker, Memory, Val, ValType};
+use wasmtime::{Caller, Engine, FuncType, Linker, Memory, MemoryAccessError, Val, ValType};
 use wasmtime_wasi::p1::WasiP1Ctx;
 
 use crate::wasm::wasm_engine::WasmInterpreter;
@@ -124,10 +124,10 @@ fn get_string(message: u32, data: &[u8]) -> String {
     output_string
 }
 
-fn write_string(pointer: u32, string: String, memory: &Memory, caller: Caller<'_, WasiP1Ctx>) {
+fn write_string(pointer: u32, string: String, memory: &Memory, caller: Caller<'_, WasiP1Ctx>) -> Result<(), MemoryAccessError> {
     let string = CString::new(string).unwrap();
     let string = string.into_bytes_with_nul();
-    memory.write(caller, pointer as usize, &string);
+    memory.write(caller, pointer as usize, &string)
 }
 
 impl TuringState {
@@ -184,7 +184,7 @@ impl TuringState {
     }
 
     pub fn swap_params(&mut self, params: u32) -> Result<Params> {
-        let mut p = Params::new();
+        let p = Params::new();
         if let Some(p) = self.param_builders.swap(&params, p) {
             Ok(p)
         } else {
@@ -216,7 +216,7 @@ impl TuringState {
                             if let Some(st) = s.str_cache.pop_front() {
                                 if st.len() + 1 == size as usize {
                                     if let Some(memory) = caller.get_export("memory").and_then(|m| m.into_memory()) {
-                                        write_string(ptr as u32, st, &memory, caller);
+                                        write_string(ptr as u32, st, &memory, caller)?;
                                         rs[0] = Val::I32(ptr);
                                     }
                                     return Ok(())
@@ -269,6 +269,8 @@ impl TuringState {
 
                 linker.func_new("env", n.clone().as_str(), ft, move |mut caller, ps, rs| -> Result<(), wasmtime::Error> {
                     let mut params = Params::new();
+
+                    // TODO: check `cap` against the loaded capabilites before calling to C#
 
                     // set up function parameters
                     for (exp_typ, value) in p.iter().zip(ps) {
@@ -348,6 +350,9 @@ impl TuringState {
                                 };
                                 Val::I32(opaque as i32)
                             },
+                            Param::Error(er) => {
+                                return Err(anyhow!("Error executing C# function: {}", er)).into_wasm()
+                            }
                             _ => return Err(anyhow!("Invalid return value")).into_wasm()
                         };
                         rs[0] = rv;

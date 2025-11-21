@@ -105,7 +105,7 @@ impl WasmInterpreter {
             .build_p1();
 
         let engine = Engine::new(&config)?;
-        let mut store = Store::new(&engine, wasi);
+        let store = Store::new(&engine, wasi);
 
 
         let mut linker = <Linker<WasiP1Ctx>>::new(&engine);
