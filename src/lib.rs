@@ -205,7 +205,7 @@ impl TuringState {
             // 2. for each argument of a function that expects a string, in linear order,
             //    failing to retrieve all param strings in the correct order will invalidate
             //    the strings with no way to recover.
-            linker.func_new("env", "retrieve_string",
+            linker.func_new("env", "_host_strcpy",
                 FuncType::new(engine, vec![ValType::I32, ValType::I32], vec![ValType::I32]),
                 |mut caller, ps, rs| -> Result<(), wasmtime::Error> {
                     let ptr = ps[0].i32().unwrap();
