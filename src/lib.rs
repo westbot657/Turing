@@ -241,7 +241,7 @@ impl TuringState {
 
             for (n, (cap, func_ptr, p, r)) in fns.iter() {
 
-                let func: FfiCallback = mem::transmute(func_ptr);
+                let func: FfiCallback = mem::transmute(*func_ptr);
 
                 let mut p_types = Vec::new();
                 let mut r_type = Vec::new();
