@@ -312,13 +312,18 @@ impl TuringState {
                         }
                     }
 
-                    if let Some(state) = &mut STATE {
+                    let pid = if let Some(state) = &mut STATE {
                         let mut s = state.borrow_mut();
 
-                        let pid = s.param_builders.add(params);
+                        s.param_builders.add(params)
+                    } else {
+                        unreachable!("This cannot happen (probably)")
+                    };
 
-                        let res = func(pid).to_param().into_wasm()?;
+                    let res = func(pid).to_param().into_wasm()?;
 
+                    if let Some(state) = &mut STATE {
+                        let mut s = state.borrow_mut();
                         let rv = match res {
                             Param::I8(i)  => Val::I32(i as i32),
                             Param::I16(i) => Val::I32(i as i32),
