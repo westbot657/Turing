@@ -352,9 +352,14 @@ impl TuringState {
                             },
                             Param::Error(er) => {
                                 return Err(anyhow!("Error executing C# function: {}", er)).into_wasm()
+                            },
+                            Param::Void => {
+                                return Ok(())
+
                             }
                             _ => return Err(anyhow!("Invalid return value")).into_wasm()
                         };
+
                         rs[0] = rv;
 
                     }
