@@ -681,7 +681,7 @@ unsafe extern "C" fn register_function(name: *const c_char, pointer: *const c_vo
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn load_script(source: *const c_char) -> FfiParam {
+unsafe extern "C" fn load_script(source: *const c_char, loaded_capabilites: u32) -> FfiParam {
     unsafe {
         let source = CStr::from_ptr(source).to_string_lossy().to_string();
 

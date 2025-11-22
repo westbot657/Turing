@@ -41,6 +41,7 @@ The previous 2 functions always operate on the last created function.
 
 call a wasm function via `call_wasm_fn(name: *const c_char, params: u32, expected_return_type: u32) -> FfiParam`  
 
+load a script with `load_script(source: *const c_char, loaded_capabilites: u32) -> FfiParam`, with loaded_capabilities being a Params object id
 
 ### Helpers
 
