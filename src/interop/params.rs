@@ -8,6 +8,7 @@ use wasmtime_wasi::p1::WasiP1Ctx;
 
 use crate::{get_string, TuringState};
 
+/// These ids must remain consistent on both sides of ffi.
 pub mod param_type {
     pub const I8: u32 = 1;
     pub const I16: u32 = 2;
@@ -23,6 +24,7 @@ pub mod param_type {
     pub const VOID: u32 = 12;
 }
 
+/// local repr of ffi data
 #[derive(Debug, Clone)]
 pub enum Param {
     I8(i8),
@@ -39,6 +41,7 @@ pub enum Param {
     Void,
 }
 
+/// C repr of ffi data
 #[repr(C)]
 pub union RawParam {
     i8: i8,
@@ -55,6 +58,7 @@ pub union RawParam {
     void: u32
 }
 
+/// C tagged repr of ffi data
 #[repr(C)]
 pub struct FfiParam {
     pub type_id: u32,
@@ -85,7 +89,7 @@ impl Param {
         }
     }
 
-    /// if self is an Error value, returns Err, else Ok(())
+    /// If self is an Error value, returns Err, else Ok(())
     /// If self is a String, it will free the raw pointer (unless null)
     pub fn to_result(self) -> Result<()> {
         match self {

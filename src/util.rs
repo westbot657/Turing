@@ -3,7 +3,8 @@ use std::ffi::{c_char, CString};
 use std::mem;
 use std::ops::RangeInclusive;
 
-
+/// Acts as a heap, mapping ids to objects and keeping a list of free regions.
+/// only used for wasm opaque pointers and for FfiParam ids, shouldn't need to be used elsewhere
 #[derive(Default, Debug)]
 pub struct TrackedHashMap<T> {
     map: HashMap<u32, T>,

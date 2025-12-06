@@ -27,6 +27,7 @@ type AbortFn = extern "C" fn(*const c_char, *const c_char);
 type LogFn = extern "C" fn(*const c_char);
 type FreeStr = extern "C" fn(*const c_char);
 
+/// pre-defined functions that turing.rs uses directly.
 pub struct CsFns {
     pub abort: AbortFn,
     pub log_info: LogFn,
@@ -79,7 +80,6 @@ impl Default for CsFns {
 }
 
 
-
 #[derive(Default)]
 pub struct TuringState {
     pub wasm: Option<WasmInterpreter>,
@@ -113,7 +113,7 @@ where
     }
 }
 
-
+/// gets a string out of wasm memory into rust memory.
 fn get_string(message: u32, data: &[u8]) -> String {
     let mut output_string = String::new();
     for i in message..u32::MAX {
@@ -124,6 +124,7 @@ fn get_string(message: u32, data: &[u8]) -> String {
     output_string
 }
 
+/// writes a string from rust memory to wasm memory.
 fn write_string(pointer: u32, string: String, memory: &Memory, caller: Caller<'_, WasiP1Ctx>) -> Result<(), MemoryAccessError> {
     let string = CString::new(string).unwrap();
     let string = string.into_bytes_with_nul();
@@ -196,6 +197,7 @@ impl TuringState {
         unsafe {
             // Utility Functions
 
+            // _host_strcpy(location: *const c_char, size: u32);
             // Should only be used in 2 situations:
             // 1. after a call to a function that "retuns" a string, the guest
             //    is required to allocate the size returned in place of the string, and then
@@ -239,10 +241,12 @@ impl TuringState {
                 fns = self.wasm_fns.clone();
             }
 
+            // n: wasm name, cap: capability (mod), p: param types, r: return type.
             for (n, (cap, func_ptr, p, r)) in fns.iter() {
 
                 let func: FfiCallback = mem::transmute(*func_ptr);
 
+                // unpack ffi type ids into wasm types
                 let mut p_types = Vec::new();
                 let mut r_type = Vec::new();
                 for pt in p {
@@ -262,11 +266,10 @@ impl TuringState {
                     r_type.push(r_typ);
                 }
 
+                // register function to wasm.
                 let ft = FuncType::new(engine, p_types, r_type);
-
                 let p = p.clone();
                 let r = r.clone();
-
                 linker.func_new("env", n.clone().as_str(), ft, move |mut caller, ps, rs| -> Result<(), wasmtime::Error> {
                     let mut params = Params::new();
 
@@ -314,6 +317,7 @@ impl TuringState {
                         }
                     }
 
+                    // push parameters into an FfiParams
                     let pid = if let Some(state) = &mut STATE {
                         let mut s = state.borrow_mut();
 
@@ -322,8 +326,10 @@ impl TuringState {
                         unreachable!("This cannot happen (probably)")
                     };
 
+                    // Call to C#/rust's provided callback
                     let res = func(pid).to_param().into_wasm()?;
 
+                    // coerce C# return value into wasm
                     if let Some(state) = &mut STATE {
                         let mut s = state.borrow_mut();
                         let rv = match res {
@@ -381,6 +387,7 @@ impl TuringState {
 
 // Core systems
 #[unsafe(no_mangle)]
+/// Initialize all turing state.
 pub extern "C" fn init_turing() {
 
     panic::set_hook(Box::new(|info| {
@@ -395,6 +402,7 @@ pub extern "C" fn init_turing() {
 }
 
 #[unsafe(no_mangle)]
+/// Clear out all state. wipes memory, should be clean to use after a second init.
 pub extern "C" fn uninint_turing() {
     unsafe {
         STATE = None;
@@ -517,6 +525,7 @@ pub extern "C" fn create_params() -> u32 {
 }
 
 #[unsafe(no_mangle)]
+/// Creates a param builder with a set length.
 pub extern "C" fn create_n_params(size: u32) -> u32 {
     unsafe {
         if let Some(state) = &mut STATE {
@@ -531,6 +540,7 @@ pub extern "C" fn create_n_params(size: u32) -> u32 {
 }
 
 #[unsafe(no_mangle)]
+/// Binds a param object for use or modification.
 pub extern "C" fn bind_params(params: u32) {
     unsafe {
         if let Some(state) = &mut STATE {
@@ -587,6 +597,8 @@ pub extern "C" fn set_param(index: u32, value: FfiParam) -> FfiParam {
 }
 
 #[unsafe(no_mangle)]
+/// returns the param at the specified index. the param will be an error value if the index is out
+/// of bounds or the state is not initialized.
 pub extern "C" fn read_param(index: u32) -> FfiParam {
     unsafe {
         if let Some(state) = &mut STATE {
@@ -599,6 +611,7 @@ pub extern "C" fn read_param(index: u32) -> FfiParam {
 }
 
 #[unsafe(no_mangle)]
+/// frees the params object tied to an id if present, otherwise does nothing.
 pub extern "C" fn delete_params(params: u32) {
     unsafe {
         if let Some(state) = &mut STATE {
@@ -668,8 +681,8 @@ pub unsafe extern "C" fn free_string(ptr: *mut c_char) {
     unsafe { free_cstr(ptr) };
 }
 
-
 #[unsafe(no_mangle)]
+/// Registers one of the functions that rust uses directly. this is not for wasm functions.
 unsafe extern "C" fn register_function(name: *const c_char, pointer: *const c_void) {
     unsafe {
         let cstr = CStr::from_ptr(name).to_string_lossy().to_string();
@@ -681,6 +694,7 @@ unsafe extern "C" fn register_function(name: *const c_char, pointer: *const c_vo
 }
 
 #[unsafe(no_mangle)]
+/// Loads a script by path, also takes an FfiParam id which acts as a list of the loaded mods.
 unsafe extern "C" fn load_script(source: *const c_char, loaded_capabilites: u32) -> FfiParam {
     unsafe {
         let source = CStr::from_ptr(source).to_string_lossy().to_string();
@@ -710,7 +724,7 @@ unsafe extern "C" fn load_script(source: *const c_char, loaded_capabilites: u32)
 }
 
 
-
+/// turing.rs internal Log system, not used by wasm.
 pub struct Log {}
 macro_rules! mlog {
     ($f:tt => $msg:tt ) => {
