@@ -1,7 +1,7 @@
 use std::cell::RefMut;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::fmt::Display;
-use std::{mem, slice};
+use std::mem;
 
 use anyhow::{Result, anyhow};
 use wasmtime::{Memory, Store, Val};
@@ -198,7 +198,7 @@ impl Param {
 }
 
 impl FfiParam {
-    pub fn to_param(&self) -> Result<Param> {
+    pub fn to_param(self) -> Result<Param> {
         Ok(match self.type_id {
             1 => Param::I8(unsafe { self.value.i8 }),
             2 => Param::I16(unsafe { self.value.i16 }),
@@ -337,8 +337,9 @@ impl TryFrom<FfiParamArray> for Vec<Param> {
         }
 
         unsafe {
-            let raw_vec = slice::from_raw_parts(
+            let raw_vec = Vec::from_raw_parts(
                 array.ptr as *mut FfiParam,
+                array.count as usize,
                 array.count as usize,
             );
 
