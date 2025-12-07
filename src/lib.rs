@@ -23,6 +23,8 @@ use crate::interop::params::{ParamType, Params};
 use self::interop::params::{FfiParam, Param};
 use self::util::{ToCStr, TrackedHashMap, free_cstr};
 
+pub type ParamKey = u32;
+
 type AbortFn = extern "C" fn(*const c_char, *const c_char);
 type LogFn = extern "C" fn(*const c_char);
 type FreeStr = extern "C" fn(*const c_char);
@@ -197,7 +199,7 @@ impl TuringState {
         }
     }
 
-    pub fn swap_params(&mut self, params: u32) -> Result<Params> {
+    pub fn swap_params(&mut self, params: ParamKey) -> Result<Params> {
         let p = Params::new();
         if let Some(p) = self.param_builders.swap(&params, p) {
             Ok(p)
@@ -212,7 +214,7 @@ impl TuringState {
 
             // _host_strcpy(location: *const c_char, size: u32);
             // Should only be used in 2 situations:
-            // 1. after a call to a function that "retuns" a string, the guest
+            // 1. after a call to a function that "returns" a string, the guest
             //    is required to allocate the size returned in place of the string, and then
             //    call this, passing the allocated pointer and the size.
             //    If the size passed in does not exactly match the cached string, or there is no
@@ -565,7 +567,7 @@ pub extern "C" fn init_wasm() -> FfiParam {
 
 #[unsafe(no_mangle)]
 /// Creates a param builder and returns it's uid
-pub extern "C" fn create_params() -> u32 {
+pub extern "C" fn create_params() -> ParamKey {
     unsafe {
         let Some(state) = &mut STATE else {
             return 0;
@@ -580,7 +582,7 @@ pub extern "C" fn create_params() -> u32 {
 
 #[unsafe(no_mangle)]
 /// Creates a param builder with a set length.
-pub extern "C" fn create_n_params(size: u32) -> u32 {
+pub extern "C" fn create_n_params(size: u32) -> ParamKey {
     unsafe {
         let Some(state) = &mut STATE else {
             return 0;
@@ -594,7 +596,7 @@ pub extern "C" fn create_n_params(size: u32) -> u32 {
 
 #[unsafe(no_mangle)]
 /// Binds a param object for use or modification.
-pub extern "C" fn bind_params(params: u32) {
+pub extern "C" fn bind_params(params: ParamKey) {
     unsafe {
         if let Some(state) = &mut STATE {
             let mut s = state.borrow_mut();
@@ -666,7 +668,7 @@ pub extern "C" fn read_param(index: u32) -> FfiParam {
 
 #[unsafe(no_mangle)]
 /// frees the params object tied to an id if present, otherwise does nothing.
-pub extern "C" fn delete_params(params: u32) {
+pub extern "C" fn delete_params(params: ParamKey) {
     unsafe {
         if let Some(state) = &mut STATE {
             let mut s = state.borrow_mut();
@@ -684,7 +686,7 @@ pub extern "C" fn delete_params(params: u32) {
 /// If params is 0, calls with an empty parameters object
 pub unsafe extern "C" fn call_wasm_fn(
     name: *const c_char,
-    params: u32,
+    params: ParamKey,
     expected_return_type: ParamType,
 ) -> FfiParam {
     if !expected_return_type.is_valid() {
@@ -737,7 +739,7 @@ unsafe extern "C" fn register_function(name: *const c_char, pointer: *const c_vo
 
 #[unsafe(no_mangle)]
 /// Loads a script by path, also takes an FfiParam id which acts as a list of the loaded mods.
-unsafe extern "C" fn load_script(source: *const c_char, loaded_capabilites: u32) -> FfiParam {
+unsafe extern "C" fn load_script(source: *const c_char, loaded_capabilites: ParamKey) -> FfiParam {
     unsafe {
         let source = CStr::from_ptr(source).to_string_lossy().to_string();
 
