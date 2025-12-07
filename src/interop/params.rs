@@ -322,6 +322,7 @@ impl From<Vec<Param>> for FfiParamArray {
         let count = ffi_params.len() as u32;
         let ptr = ffi_params.as_ptr() as *const c_void;
 
+        // cleaned up by the caller via TryFrom<FfiParamArray> for Vec<Param>
         mem::forget(ffi_params);
 
         FfiParamArray { count, ptr }
@@ -337,6 +338,7 @@ impl TryFrom<FfiParamArray> for Vec<Param> {
         }
 
         unsafe {
+            // take ownership of the raw parts allocated by `From<Vec<Param>> for FfiParamArray`
             let raw_vec = Vec::from_raw_parts(
                 array.ptr as *mut FfiParam,
                 array.count as usize,
