@@ -126,60 +126,21 @@ pub struct FfiParamArray {
 }
 
 impl Param {
+    #[rustfmt::skip]
     pub fn to_ffi_param(self) -> FfiParam {
         match self {
-            Param::I8(x) => FfiParam {
-                type_id: 1,
-                value: RawParam { i8: x },
-            },
-            Param::I16(x) => FfiParam {
-                type_id: 2,
-                value: RawParam { i16: x },
-            },
-            Param::I32(x) => FfiParam {
-                type_id: 3,
-                value: RawParam { i32: x },
-            },
-            Param::U8(x) => FfiParam {
-                type_id: 4,
-                value: RawParam { u8: x },
-            },
-            Param::U16(x) => FfiParam {
-                type_id: 5,
-                value: RawParam { u16: x },
-            },
-            Param::U32(x) => FfiParam {
-                type_id: 6,
-                value: RawParam { u32: x },
-            },
-            Param::F32(x) => FfiParam {
-                type_id: 7,
-                value: RawParam { f32: x },
-            },
-            Param::Bool(x) => FfiParam {
-                type_id: 8,
-                value: RawParam { bool: x },
-            },
-            Param::String(x) => FfiParam {
-                type_id: 9,
-                value: RawParam {
-                    string: CString::new(x).unwrap().into_raw(),
-                },
-            },
-            Param::Object(x) => FfiParam {
-                type_id: 10,
-                value: RawParam { object: x },
-            },
-            Param::Error(x) => FfiParam {
-                type_id: 11,
-                value: RawParam {
-                    error: CString::new(x).unwrap().into_raw(),
-                },
-            },
-            Param::Void => FfiParam {
-                type_id: 12,
-                value: RawParam { void: 0 },
-            },
+            Param::I8(x) => FfiParam { type_id: 1, value: RawParam { i8: x } },
+            Param::I16(x) => FfiParam { type_id: 2, value: RawParam { i16: x } },
+            Param::I32(x) => FfiParam { type_id: 3, value: RawParam { i32: x } },
+            Param::U8(x) => FfiParam { type_id: 4, value: RawParam { u8: x } },
+            Param::U16(x) => FfiParam { type_id: 5, value: RawParam { u16: x } },
+            Param::U32(x) => FfiParam { type_id: 6, value: RawParam { u32: x } },
+            Param::F32(x) => FfiParam { type_id: 7, value: RawParam { f32: x } },
+            Param::Bool(x) => FfiParam { type_id: 8, value: RawParam { bool: x } },
+            Param::String(x) => FfiParam { type_id: 9, value: RawParam { string: CString::new(x).unwrap().into_raw() } },
+            Param::Object(x) => FfiParam { type_id: 10, value: RawParam { object: x } },
+            Param::Error(x) => FfiParam { type_id: 11, value: RawParam { error: CString::new(x).unwrap().into_raw() } },
+            Param::Void => FfiParam { type_id: 12, value: RawParam { void: 0 } },
         }
     }
 
