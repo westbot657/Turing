@@ -47,7 +47,10 @@ pub fn setup_test_script() -> Result<()> {
 
         let c_ptr = CString::new(fp)?.into_raw();
 
-        load_script(c_ptr).to_param()?.to_result()
+        let capabilities = create_n_params(1);
+        add_param(Param::String("turing".to_string()));
+
+        load_script(c_ptr, capabilities).to_param()?.to_result()
     }
 }
 
