@@ -122,6 +122,7 @@ fn get_string(message: u32, data: &[u8]) -> String {
         output_string.push(char::from(*byte));
     }
     output_string
+
 }
 
 /// writes a string from rust memory to wasm memory.
