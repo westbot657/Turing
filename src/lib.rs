@@ -82,15 +82,20 @@ type WasmFunctionMetadata = (String, *const c_void, Vec<ParamType>, Vec<ParamTyp
 
 #[derive(Default)]
 pub struct TuringState {
+    /// The WASM engine
     pub wasm: Option<WasmInterpreter>,
+    /// collection of functions to link to wasm. Only used during the initialization phase
     pub wasm_fns: HashMap<String, WasmFunctionMetadata>,
+    /// id-tracking map of param objects for ffi.
     pub param_builders: TrackedHashMap<Params>,
     pub active_builder: u32,
+    /// active WASM function definition for use in the initialization phase
     pub active_wasm_fn: Option<String>,
     /// maps opaque pointer ids to real pointers
     pub opaque_pointers: TrackedHashMap<*const c_void>,
     /// maps real pointers back to their opaque pointer ids
     pub pointer_backlink: HashMap<*const c_void, u32>,
+    /// queue of strings for wasm to fetch (needed due to reentrancy limitations)
     pub str_cache: VecDeque<String>,
 }
 
