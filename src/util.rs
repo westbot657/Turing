@@ -1,5 +1,5 @@
 use std::collections::{HashMap, VecDeque};
-use std::ffi::{c_char, CString};
+use std::ffi::{CString, c_char};
 use std::mem;
 use std::ops::RangeInclusive;
 
@@ -76,7 +76,7 @@ impl<T> TrackedHashMap<T> {
     /// present, returns None
     pub fn swap(&mut self, i: &u32, mut value: T) -> Option<T> {
         if let Some(mut other) = self.map.get_mut(i) {
-            mem::swap(&mut value, &mut other);
+            mem::swap(&mut value, other);
             Some(value)
         } else {
             None
@@ -127,7 +127,6 @@ impl<T> TrackedHashMap<T> {
     }
 }
 
-
 pub trait ToCStr {
     fn to_cstr_ptr(self) -> *const c_char;
 }
@@ -156,9 +155,4 @@ pub unsafe fn free_cstr(ptr: *mut c_char) {
     unsafe {
         let _ = CString::from_raw(ptr);
     }
-
 }
-
-
-
-
