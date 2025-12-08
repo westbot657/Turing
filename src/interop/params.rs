@@ -319,6 +319,8 @@ impl From<Vec<Param>> for FfiParamArray {
 
         let ffi_params: Vec<FfiParam> = vec.into_iter().map(Into::into).collect();
 
+        let ffi_params = ffi_params.into_boxed_slice();
+
         let count = ffi_params.len() as u32;
         let ptr = ffi_params.as_ptr() as *const c_void;
 
@@ -339,11 +341,9 @@ impl TryFrom<FfiParamArray> for Vec<Param> {
 
         unsafe {
             // take ownership of the raw parts allocated by `From<Vec<Param>> for FfiParamArray`
-            let raw_vec = Vec::from_raw_parts(
-                array.ptr as *mut FfiParam,
-                array.count as usize,
-                array.count as usize,
-            );
+
+            let raw_vec = std::ptr::slice_from_raw_parts_mut(array.ptr as *mut FfiParam, array.count as usize);
+            let raw_vec = Box::from_raw(raw_vec);
 
             let mut result = Vec::with_capacity(raw_vec.len());
             for ffi_param in raw_vec {
