@@ -454,7 +454,7 @@ pub unsafe extern "C" fn create_wasm_fn(
 
         let mut s = state.borrow_mut();
 
-        if !s.wasm_fns.contains_key(&name) {
+        if s.wasm_fns.contains_key(&name) {
             return Param::Error(format!("wasm fn is already defined: '{}'", name)).into();
         }
         s.active_wasm_fn = Some(name.clone());
