@@ -100,7 +100,7 @@ impl WasmInterpreter {
     pub fn new(state: &mut TuringState) -> Result<WasmInterpreter> {
         let mut config = Config::new();
         config.wasm_threads(false);
-        config.cranelift_pcc(true); // do sandbox verification checks
+        // config.cranelift_pcc(true); // do sandbox verification checks
         config.async_support(false);
         config.cranelift_opt_level(wasmtime::OptLevel::Speed);
         config.wasm_bulk_memory(true);

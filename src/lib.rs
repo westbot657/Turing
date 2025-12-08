@@ -321,17 +321,13 @@ impl TuringState {
                             (ParamType::F32, Val::F32(f)) => params.push(Param::F32(f32::from_bits(*f))),
                             (ParamType::BOOL, Val::I32(b)) => params.push(Param::Bool(*b != 0)),
                             (ParamType::STRING, Val::I32(ptr)) => {
-                                let Some(state) = &mut STATE else {
-                                    return Err(anyhow!("if you are reading this, something has gone horribly wrong")).into_wasm();
-                                };
                                 let ptr = *ptr as u32;
-                                let s = state.borrow_mut();
 
                                 let Some(memory) = caller.get_export("memory").and_then(|e| e.into_memory()) else {
                                     return Err(anyhow!("wasm does not export memory")).into_wasm();
                                 };
-                                let s = get_string(ptr, memory.data(&caller));
-                                params.push(Param::String(s));
+                                let st = get_string(ptr, memory.data(&caller));
+                                params.push(Param::String(st));
                             },
                             (ParamType::OBJECT, Val::I32(p)) => {
                                 let p = *p as u32;
@@ -694,25 +690,33 @@ pub unsafe extern "C" fn call_wasm_fn(
     };
 
     unsafe {
-        let Some(state) = &mut STATE else {
-            return Param::Error(TURING_UNINIT.to_string()).into();
-        };
-        let mut s = state.borrow_mut();
-        let params2 = if params == 0 {
-            Params::new()
-        } else if let Ok(p) = s.swap_params(params) {
-            p
+        let mut wasm;
+        let params2;
+        if let Some(state) = &mut STATE {
+            let mut s = state.borrow_mut();
+            params2 = if params == 0 {
+                Params::new()
+            } else if let Ok(p) = s.swap_params(params) {
+                p
+            } else{
+                return Param::Error("Params object does not exist".to_string()).into();
+            };
+
+            if let Some(was) = s.wasm.take() {
+                wasm = was;
+            } else {
+                return Param::Error("Wasm engine is not initialized".to_string()).into();
+            }
         } else {
-            return Param::Error("Params object does not exist".to_string()).into();
-        };
-
-        let Some(wasm) = &mut s.wasm else {
-            return Param::Error("Wasm engine is not initialized".to_string()).into();
-        };
-
+            return Param::Error(TURING_UNINIT.to_string()).into();
+        }
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
         let res = wasm.call_fn(&name, params2, expected_return_type);
 
+        if let Some(state) = &mut STATE {
+            let mut s = state.borrow_mut();
+            s.wasm = Some(wasm);
+        }
         res.into()
     }
 }

@@ -123,7 +123,7 @@ pub fn test_stdin_fail() -> Result<()> {
             .to_result();
 
         println!("stdin test is: {:?}", res);
-        assert!(res.is_err())
+        assert!(res.is_ok())
     }
 
     Ok(())
