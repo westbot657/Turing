@@ -10,6 +10,7 @@ pub mod tests;
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::ffi::{CStr, CString, c_char, c_void};
+use std::sync::Mutex;
 use std::{mem, panic, path};
 
 use anyhow::{Result, anyhow};
@@ -93,16 +94,22 @@ pub struct TuringState {
     pub active_builder: u32,
     /// active WASM function definition for use in the initialization phase
     pub active_wasm_fn: Option<String>,
-    /// maps opaque pointer ids to real pointers
-    pub opaque_pointers: TrackedHashMap<*const c_void>,
-    /// maps real pointers back to their opaque pointer ids
-    pub pointer_backlink: HashMap<*const c_void, u32>,
+
+    pub pointer_map: PointerMap,
     /// queue of strings for wasm to fetch (needed due to reentrancy limitations)
     pub str_cache: VecDeque<String>,
 }
 
-static mut STATE: Option<RefCell<TuringState>> = None;
-static mut CSFNS: Option<RefCell<CsFns>> = None;
+#[derive(Default)]
+pub struct PointerMap {
+    /// maps opaque pointer ids to real pointers
+    pub opaque_pointers: TrackedHashMap<*const c_void>,
+    /// maps real pointers back to their opaque pointer ids
+    pub pointer_backlink: HashMap<*const c_void, u32>,
+}
+
+static mut STATE: Option<Mutex<TuringState>> = None;
+static mut CSFNS: Option<Mutex<CsFns>> = None;
 
 const TURING_UNINIT: &str = "Turing has not been initialized";
 
@@ -154,8 +161,7 @@ impl TuringState {
             param_builders: TrackedHashMap::starting_at(1),
             active_builder: 0,
             active_wasm_fn: None,
-            opaque_pointers: TrackedHashMap::starting_at(1),
-            pointer_backlink: HashMap::new(),
+            pointer_map: Default::default(),
             str_cache: VecDeque::new(),
         }
     }
@@ -234,7 +240,7 @@ impl TuringState {
                             let Some(state) = &mut STATE else {
                                 unreachable!("wasm can't be called if state doesn't exist");
                             };
-                            let mut s = state.borrow_mut();
+                            let mut s = state.lock().unwrap();
                             if let Some(st) = s.str_cache.pop_front()
                                 && st.len() + 1 == size as usize
                             {
@@ -331,14 +337,14 @@ impl TuringState {
                             },
                             (ParamType::OBJECT, Val::I32(p)) => {
                                 let p = *p as u32;
-                                if let Some(state) = &mut STATE {
-                                    let s = state.borrow_mut();
-                                    if let Some(true_pointer) = s.opaque_pointers.get(&p) {
-                                        params.push(Param::Object(*true_pointer));
-                                    } else {
-                                        return Err(anyhow!("opaque pointer does not correspond to a real pointer")).into_wasm();
-                                    }
-                                }
+                                let Some(state) = &mut STATE  else {
+                                    return Err(anyhow!(""))
+                                };
+                                let s = state.lock().unwrap();
+                                let Some(true_pointer) = s.pointer_map.opaque_pointers.get(&p) else {
+                                    return Err(anyhow!("opaque pointer does not correspond to a real pointer")).into_wasm();
+                                };
+                                params.push(Param::Object(*true_pointer));
                             }
                             _ => params.push(Param::Error("Mismatched parameter type".to_string()))
                         }
@@ -346,7 +352,7 @@ impl TuringState {
 
                     // push parameters into an FfiParams
                     let pid = if let Some(state) = &mut STATE {
-                        let mut s = state.borrow_mut();
+                        let mut s = state.lock().unwrap();
 
                         s.param_builders.add(params)
                     } else {
@@ -358,7 +364,7 @@ impl TuringState {
 
                     // coerce C# return value into wasm
                     if let Some(state) = &mut STATE {
-                        let mut s = state.borrow_mut();
+                        let mut s = state.lock().unwrap();
                         let rv = match res {
                             Param::I8(i)  => Val::I32(i as i32),
                             Param::I16(i) => Val::I32(i as i32),
@@ -374,12 +380,13 @@ impl TuringState {
                                 Val::I32(l as i32)
                             },
                             Param::Object(p) => {
-                                let opaque = if let Some(opaque) = s.pointer_backlink.get(&p) {
-                                    *opaque
-                                } else {
-                                    let op = s.opaque_pointers.add(p);
-                                    s.pointer_backlink.insert(p, op);
-                                    op
+                                let opaque = match s.pointer_map.pointer_backlink.get(&p) {
+                                    Some(opaque) => *opaque,
+                                    None => {
+                                        let op = s.pointer_map.opaque_pointers.add(p);
+                                        s.pointer_map.pointer_backlink.insert(p, op);
+                                        op
+                                    }
                                 };
                                 Val::I32(opaque as i32)
                             },
@@ -417,8 +424,8 @@ pub extern "C" fn init_turing() {
     }));
 
     unsafe {
-        STATE = Some(RefCell::new(TuringState::new()));
-        CSFNS = Some(RefCell::new(CsFns::new()));
+        STATE = Some(Mutex::new(TuringState::new()));
+        CSFNS = Some(Mutex::new(CsFns::new()));
     }
 }
 
@@ -448,7 +455,7 @@ pub unsafe extern "C" fn create_wasm_fn(
             return Param::Error(TURING_UNINIT.to_string()).into();
         };
 
-        let mut s = state.borrow_mut();
+        let mut s = state.lock().unwrap();
 
         if s.wasm_fns.contains_key(&name) {
             return Param::Error(format!("wasm fn is already defined: '{}'", name)).into();
@@ -468,7 +475,7 @@ pub extern "C" fn add_wasm_fn_param_type(param_type: ParamType) -> FfiParam {
         let Some(state) = &mut STATE else {
             return Param::Error(TURING_UNINIT.to_string()).into();
         };
-        let mut s = state.borrow_mut();
+        let mut s = state.lock().unwrap();
         if s.wasm_fns.is_empty() || s.active_wasm_fn.is_none() {
             return Param::Error("no wasm function to add parameter type to".to_string()).into();
         }
@@ -506,7 +513,7 @@ pub extern "C" fn set_wasm_fn_return_type(return_type: ParamType) -> FfiParam {
         let Some(state) = &mut STATE else {
             return Param::Error(TURING_UNINIT.to_string()).into();
         };
-        let mut s = state.borrow_mut();
+        let mut s = state.lock().unwrap();
         if s.wasm_fns.is_empty() || s.active_wasm_fn.is_none() {
             return Param::Error("no wasm function to add parameter type to".to_string()).into();
         }
@@ -546,10 +553,10 @@ pub extern "C" fn init_wasm() -> FfiParam {
             return Param::Error(TURING_UNINIT.to_string()).into();
         };
         let interp = {
-            let mut s = state.borrow_mut();
+            let mut s = state.lock().unwrap();
             WasmInterpreter::new(&mut s).ok()
         };
-        let mut s = state.borrow_mut();
+        let mut s = state.lock().unwrap();
         let Some(t) = interp else {
             return Param::Error("Failed to initialize wasm engine".to_string()).into();
         };
@@ -569,7 +576,7 @@ pub extern "C" fn create_params() -> ParamKey {
             return 0;
         };
 
-        let mut s = state.borrow_mut();
+        let mut s = state.lock().unwrap();
         let x = s.param_builders.add(Params::new());
         s.active_builder = x;
         x
@@ -583,7 +590,7 @@ pub extern "C" fn create_n_params(size: u32) -> ParamKey {
         let Some(state) = &mut STATE else {
             return 0;
         };
-        let mut s = state.borrow_mut();
+        let mut s = state.lock().unwrap();
         let x = s.param_builders.add(Params::of_size(size));
         s.active_builder = x;
         x
@@ -595,7 +602,7 @@ pub extern "C" fn create_n_params(size: u32) -> ParamKey {
 pub extern "C" fn bind_params(params: ParamKey) {
     unsafe {
         if let Some(state) = &mut STATE {
-            let mut s = state.borrow_mut();
+            let mut s = state.lock().unwrap();
             s.active_builder = params;
         }
     }
@@ -609,7 +616,7 @@ pub extern "C" fn add_param(value: FfiParam) -> FfiParam {
         let Some(state) = &mut STATE else {
             return Param::Error(TURING_UNINIT.to_string()).into();
         };
-        let mut s = state.borrow_mut();
+        let mut s = state.lock().unwrap();
         let typ_id = value.type_id;
         let Ok(val) = value.to_param() else {
             return Param::Error(format!(
@@ -633,7 +640,7 @@ pub extern "C" fn set_param(index: u32, value: FfiParam) -> FfiParam {
         let Some(state) = &mut STATE else {
             return Param::Error(TURING_UNINIT.to_string()).into();
         };
-        let mut s = state.borrow_mut();
+        let mut s = state.lock().unwrap();
         let typ_id = value.type_id;
         let Ok(val) = value.to_param() else {
             return Param::Error(format!(
@@ -657,7 +664,7 @@ pub extern "C" fn read_param(index: u32) -> FfiParam {
         let Some(state) = &mut STATE else {
             return Param::Error(TURING_UNINIT.to_string()).into();
         };
-        let s = state.borrow_mut();
+        let s = state.lock().unwrap();
         s.read_param(index).into()
     }
 }
@@ -667,7 +674,7 @@ pub extern "C" fn read_param(index: u32) -> FfiParam {
 pub extern "C" fn delete_params(params: ParamKey) {
     unsafe {
         if let Some(state) = &mut STATE {
-            let mut s = state.borrow_mut();
+            let mut s = state.lock().unwrap();
             s.param_builders.remove(&params);
             if s.active_builder == params {
                 s.active_builder = 0;
@@ -690,33 +697,25 @@ pub unsafe extern "C" fn call_wasm_fn(
     };
 
     unsafe {
-        let mut wasm;
-        let params2;
-        if let Some(state) = &mut STATE {
-            let mut s = state.borrow_mut();
-            params2 = if params == 0 {
-                Params::new()
-            } else if let Ok(p) = s.swap_params(params) {
-                p
-            } else{
-                return Param::Error("Params object does not exist".to_string()).into();
-            };
-
-            if let Some(was) = s.wasm.take() {
-                wasm = was;
-            } else {
-                return Param::Error("Wasm engine is not initialized".to_string()).into();
-            }
-        } else {
+        let Some(state) = &mut STATE else {
             return Param::Error(TURING_UNINIT.to_string()).into();
-        }
+        };
+        let mut state = state.lock().unwrap();
+        let params2 = if params == 0 {
+            Params::new()
+        } else if let Ok(p) = state.swap_params(params) {
+            p
+        } else {
+            return Param::Error("Params object does not exist".to_string()).into();
+        };
+
+        let Some(wasm) = &mut state.wasm else {
+            return Param::Error("Wasm engine is not initialized".to_string()).into();
+        };
+
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
         let res = wasm.call_fn(&name, params2, expected_return_type);
 
-        if let Some(state) = &mut STATE {
-            let mut s = state.borrow_mut();
-            s.wasm = Some(wasm);
-        }
         res.into()
     }
 }
@@ -735,7 +734,7 @@ unsafe extern "C" fn register_function(name: *const c_char, pointer: *const c_vo
     unsafe {
         let cstr = CStr::from_ptr(name).to_string_lossy().to_string();
         if let Some(csf) = &mut CSFNS {
-            let mut cs = csf.borrow_mut();
+            let mut cs = csf.lock().unwrap();
             cs.link(&cstr, pointer);
         }
     }
@@ -760,7 +759,7 @@ unsafe extern "C" fn load_script(source: *const c_char, loaded_capabilites: Para
         let Some(state) = &mut STATE else {
             return Param::Error(TURING_UNINIT.to_string()).into();
         };
-        let mut s = state.borrow_mut();
+        let mut s = state.lock().unwrap();
         let Some(wasm) = &mut s.wasm else {
             return Param::Error("Wasm engine not initialized".to_string()).into();
         };
@@ -778,7 +777,7 @@ macro_rules! mlog {
     ($f:tt => $msg:tt ) => {
         unsafe {
             if let Some(csf) = &mut CSFNS {
-                let cs = csf.borrow();
+                let cs = csf.lock().unwrap();
                 (cs.$f)($msg.to_string().to_cstr_ptr());
             }
         }

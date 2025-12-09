@@ -7,7 +7,7 @@ use anyhow::{Result, anyhow};
 use wasmtime::{Memory, Store, Val};
 use wasmtime_wasi::p1::WasiP1Ctx;
 
-use crate::{TuringState, get_string};
+use crate::{PointerMap, TuringState, get_string};
 
 /// These ids must remain consistent on both sides of ffi.
 #[repr(u32)]
@@ -157,7 +157,7 @@ impl Param {
     pub fn from_typval(
         typ: ParamType,
         val: Val,
-        state: &RefMut<'_, TuringState>,
+        pointer_map: &PointerMap,
         memory: &Memory,
         caller: &Store<WasiP1Ctx>,
     ) -> Self {
@@ -177,7 +177,7 @@ impl Param {
             }
             ParamType::OBJECT => {
                 let op = val.unwrap_i32() as u32;
-                let real = state
+                let real = pointer_map
                     .opaque_pointers
                     .get(&op)
                     .copied()
@@ -269,7 +269,7 @@ impl Params {
     }
 
     /// Converts the Params into a vector of Wasmtime Val types for function calling.
-    pub fn to_args(self, state: &mut RefMut<'_, TuringState>) -> Vec<Val> {
+    pub fn to_args(self, state: &mut TuringState) -> Vec<Val> {
         let mut vals = Vec::new();
 
         for p in self.params {
@@ -287,11 +287,11 @@ impl Params {
                     state.str_cache.push_back(st);
                     Val::I32(l as i32)
                 }
-                Param::Object(rp) => match state.pointer_backlink.get(&rp) {
+                Param::Object(rp) => match state.pointer_map.pointer_backlink.get(&rp) {
                     Some(op) => Val::I32(*op as i32),
                     None => {
-                        let op = state.opaque_pointers.add(rp);
-                        state.pointer_backlink.insert(rp, op);
+                        let op = state.pointer_map.opaque_pointers.add(rp);
+                        state.pointer_map.pointer_backlink.insert(rp, op);
                         Val::I32(op as i32)
                     }
                 },
@@ -342,7 +342,10 @@ impl TryFrom<FfiParamArray> for Vec<Param> {
         unsafe {
             // take ownership of the raw parts allocated by `From<Vec<Param>> for FfiParamArray`
 
-            let raw_vec = std::ptr::slice_from_raw_parts_mut(array.ptr as *mut FfiParam, array.count as usize);
+            let raw_vec = std::ptr::slice_from_raw_parts_mut(
+                array.ptr as *mut FfiParam,
+                array.count as usize,
+            );
             let raw_vec = Box::from_raw(raw_vec);
 
             let mut result = Vec::with_capacity(raw_vec.len());

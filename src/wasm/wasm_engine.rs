@@ -100,7 +100,7 @@ impl WasmInterpreter {
     pub fn new(state: &mut TuringState) -> Result<WasmInterpreter> {
         let mut config = Config::new();
         config.wasm_threads(false);
-        // config.cranelift_pcc(true); // do sandbox verification checks
+        config.cranelift_pcc(true); // do sandbox verification checks
         config.async_support(false);
         config.cranelift_opt_level(wasmtime::OptLevel::Speed);
         config.wasm_bulk_memory(true);
@@ -161,12 +161,11 @@ impl WasmInterpreter {
         let args; // = params.to_args(state);
 
         unsafe {
-            if let Some(state) = &mut STATE {
-                let mut s = state.borrow_mut();
-                args = params.to_args(&mut s);
-            } else {
+            let Some(state) = &mut STATE else {
                 return Param::Error(TURING_UNINIT.to_string());
-            }
+            };
+            let mut s = state.lock().unwrap();
+            args = params.to_args(&mut s);
         }
 
         let mut res = match ret_type {
@@ -189,9 +188,14 @@ impl WasmInterpreter {
             let Some(state) = &mut STATE else {
                 unreachable!("this point can't be reached without STATE being valid");
             };
-            let s = state.borrow_mut();
 
-            Param::from_typval(ret_type, rt, &s, &memory, &self.store)
+            Param::from_typval(
+                ret_type,
+                rt,
+                &state.lock().unwrap().pointer_map,
+                &memory,
+                &self.store,
+            )
         }
     }
 }
