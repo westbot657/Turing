@@ -424,7 +424,7 @@ pub extern "C" fn init_turing() {
 
 #[unsafe(no_mangle)]
 /// Clear out all state. wipes memory, should be clean to use after a second init.
-pub extern "C" fn uninint_turing() {
+pub extern "C" fn uninit_turing() {
     unsafe {
         STATE = None;
         CSFNS = None;

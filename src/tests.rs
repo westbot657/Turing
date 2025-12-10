@@ -3,6 +3,8 @@ use crate::*;
 use anyhow::{Result, anyhow};
 use std::ffi::CString;
 use std::fs;
+use serial_test::serial;
+
 
 extern "C" fn log_info_stand_in(msg: *const c_char) {
     unsafe {
@@ -13,9 +15,9 @@ extern "C" fn log_info_stand_in(msg: *const c_char) {
     }
 }
 
-//#[test]
 pub fn setup_wasm() -> Result<()> {
     unsafe {
+        uninit_turing();
         init_turing();
         let cstr = CString::new("log_info")?.into_raw();
         let cap = CString::new("test")?;
@@ -54,6 +56,7 @@ pub fn setup_test_script() -> Result<()> {
 }
 
 #[test]
+#[serial]
 pub fn test_file_access() -> Result<()> {
     setup_wasm()?;
 
@@ -73,6 +76,7 @@ pub fn test_file_access() -> Result<()> {
 }
 
 #[test]
+#[serial]
 pub fn test_math() -> Result<()> {
     setup_wasm()?;
 
@@ -110,6 +114,7 @@ pub fn test_math() -> Result<()> {
 }
 
 #[test]
+#[serial]
 pub fn test_stdin_fail() -> Result<()> {
     setup_wasm()?;
 
