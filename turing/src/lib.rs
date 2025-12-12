@@ -106,7 +106,7 @@ static mut CSFNS: Option<RefCell<CsFns>> = None;
 
 const TURING_UNINIT: &str = "Turing has not been initialized";
 
-type FfiCallback = extern "C" fn(u32) -> FfiParam;
+type FfiCallback = extern "C" fn(ParamKey) -> FfiParam;
 
 trait IntoWasm<T> {
     fn into_wasm(self) -> Result<T, wasmtime::Error>;
@@ -432,7 +432,8 @@ pub extern "C" fn uninit_turing() {
 #[unsafe(no_mangle)]
 /// starts building a new wasm function. May return an error
 /// # Safety
-/// only safe if name: *const c_char points at a valid string
+/// only safe if `name: *const c_char` points at a valid string
+/// and `pointer: *const c_void` points at a function with the signature `Fn(ParamKey) -> FfiParam`
 pub unsafe extern "C" fn create_wasm_fn(
     capability: *const c_char,
     name: *const c_char,
