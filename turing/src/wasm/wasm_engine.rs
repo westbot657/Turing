@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::fs;
 use std::path::Path;
 use std::sync::{Arc, RwLock};
@@ -10,8 +11,9 @@ use wasmtime_wasi::WasiCtxBuilder;
 use wasmtime_wasi::cli::{IsTerminal, StdoutStream};
 use wasmtime_wasi::p1::WasiP1Ctx;
 
+use crate::ffi::Log;
 use crate::interop::params::{Param, ParamType, Params};
-use crate::{Log, STATE, TURING_UNINIT, TuringState};
+use crate::{TuringDataState, TuringState};
 
 pub struct WasmInterpreter {
     engine: Engine,
@@ -146,7 +148,14 @@ impl WasmInterpreter {
     }
 
     /// Calls a function in the loaded wasm script with the given parameters and return type.
-    pub fn call_fn(&mut self, name: &str, params: Params, ret_type: ParamType) -> Param {
+    pub fn call_fn(
+        &mut self,
+        name: &str,
+        params: Params,
+        ret_type: ParamType,
+        // use a refcell to avoid borrow issues
+        state: &RefCell<TuringState>,
+    ) -> Param {
         let Some(instance) = &mut self.script_instance else {
             return Param::Error("No script is loaded or reentry was attempted".to_string());
         };
@@ -158,16 +167,7 @@ impl WasmInterpreter {
             .get_export(&mut self.store, "memory")
             .and_then(|m| m.into_memory())
             .unwrap();
-        let args; // = params.to_args(state);
-
-        unsafe {
-            if let Some(state) = &mut STATE {
-                let mut s = state.borrow_mut();
-                args = params.to_args(&mut s);
-            } else {
-                return Param::Error(TURING_UNINIT.to_string());
-            }
-        }
+        let args = params.to_args(&mut state.borrow_mut().turing_mini_ctx);
 
         let mut res = match ret_type {
             ParamType::VOID => Vec::new(),
@@ -185,13 +185,6 @@ impl WasmInterpreter {
         let rt = res[0];
 
         // convert Val to Param
-        unsafe {
-            let Some(state) = &mut STATE else {
-                unreachable!("this point can't be reached without STATE being valid");
-            };
-            let s = state.borrow_mut();
-
-            Param::from_typval(ret_type, rt, &s, &memory, &self.store)
-        }
+        Param::from_typval(ret_type, rt, &state.borrow().turing_mini_ctx, &memory, &self.store)
     }
 }

@@ -144,15 +144,3 @@ impl ToCStr for &str {
     }
 }
 
-/// Frees a rust-allocated C String.
-/// # Safety
-/// safety was never an option.
-pub unsafe fn free_cstr(ptr: *mut c_char) {
-    if ptr.is_null() {
-        return;
-    }
-
-    unsafe {
-        let _ = CString::from_raw(ptr);
-    }
-}
