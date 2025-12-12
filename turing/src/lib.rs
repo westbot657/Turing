@@ -127,15 +127,19 @@ where
 
 /// gets a string out of wasm memory into rust memory.
 fn get_string(message: u32, data: &[u8]) -> String {
-    let mut output_string = String::new();
-    for i in message..u32::MAX {
-        let byte: &u8 = data.get(i as usize).unwrap();
-        if *byte == 0u8 {
-            break;
-        }
-        output_string.push(char::from(*byte));
-    }
-    output_string
+    CStr::from_bytes_until_nul(&data[message as usize..])
+        .expect("Not a valid CStr")
+        .to_string_lossy()
+        .to_string()
+    // let mut output_string = String::new();
+    // for i in message..u32::MAX {
+    //     let byte: &u8 = data.get(i as usize).unwrap();
+    //     if *byte == 0u8 {
+    //         break;
+    //     }
+    //     output_string.push(char::from(*byte));
+    // }
+    // output_string
 }
 
 /// writes a string from rust memory to wasm memory.
