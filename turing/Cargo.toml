@@ -1,0 +1,29 @@
+[package]
+name = "turing"
+version = "0.5.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+anyhow = "1.0.100"
+ffi = "0.1.1"
+glam = "0.30.8"
+serde_json = "1.0.145"
+wasmtime = "39.0.1"
+wasmtime-wasi = "39.0.1"
+wat = "1.239.0"
+tokio = "1.48.0"
+
+[dev-dependencies]
+wasmprinter = "0.243.0"
+serial_test = "3.2.0"
+
+[profile.release]
+strip = true
+lto = true
+opt-level = 3
+
+
+
