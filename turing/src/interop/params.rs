@@ -109,13 +109,13 @@ pub union RawParam {
     string: *const c_char,
     object: *const c_void,
     error: *const c_char,
-    void: u32,
+    void: (),
 }
 
 /// C tagged repr of ffi data
 #[repr(C)]
 pub struct FfiParam {
-    pub type_id: u32,
+    pub type_id: ParamType,
     pub value: RawParam,
 }
 
@@ -129,18 +129,18 @@ impl Param {
     #[rustfmt::skip]
     pub fn to_ffi_param(self) -> FfiParam {
         match self {
-            Param::I8(x) => FfiParam { type_id: 1, value: RawParam { i8: x } },
-            Param::I16(x) => FfiParam { type_id: 2, value: RawParam { i16: x } },
-            Param::I32(x) => FfiParam { type_id: 3, value: RawParam { i32: x } },
-            Param::U8(x) => FfiParam { type_id: 4, value: RawParam { u8: x } },
-            Param::U16(x) => FfiParam { type_id: 5, value: RawParam { u16: x } },
-            Param::U32(x) => FfiParam { type_id: 6, value: RawParam { u32: x } },
-            Param::F32(x) => FfiParam { type_id: 7, value: RawParam { f32: x } },
-            Param::Bool(x) => FfiParam { type_id: 8, value: RawParam { bool: x } },
-            Param::String(x) => FfiParam { type_id: 9, value: RawParam { string: CString::new(x).unwrap().into_raw() } },
-            Param::Object(x) => FfiParam { type_id: 10, value: RawParam { object: x } },
-            Param::Error(x) => FfiParam { type_id: 11, value: RawParam { error: CString::new(x).unwrap().into_raw() } },
-            Param::Void => FfiParam { type_id: 12, value: RawParam { void: 0 } },
+            Param::I8(x) => FfiParam { type_id: ParamType::I8, value: RawParam { i8: x } },
+            Param::I16(x) => FfiParam { type_id: ParamType::I16, value: RawParam { i16: x } },
+            Param::I32(x) => FfiParam { type_id: ParamType::I32, value: RawParam { i32: x } },
+            Param::U8(x) => FfiParam { type_id: ParamType::U8, value: RawParam { u8: x } },
+            Param::U16(x) => FfiParam { type_id: ParamType::U16, value: RawParam { u16: x } },
+            Param::U32(x) => FfiParam { type_id: ParamType::U32, value: RawParam { u32: x } },
+            Param::F32(x) => FfiParam { type_id: ParamType::F32, value: RawParam { f32: x } },
+            Param::Bool(x) => FfiParam { type_id: ParamType::BOOL, value: RawParam { bool: x } },
+            Param::String(x) => FfiParam { type_id: ParamType::STRING, value: RawParam { string: CString::new(x).unwrap().into_raw() } },
+            Param::Object(x) => FfiParam { type_id: ParamType::OBJECT, value: RawParam { object: x } },
+            Param::Error(x) => FfiParam { type_id: ParamType::ERROR, value: RawParam { error: CString::new(x).unwrap().into_raw() } },
+            Param::Void => FfiParam { type_id: ParamType::VOID, value: RawParam { void: () } },
         }
     }
 
@@ -200,26 +200,26 @@ impl Param {
 impl FfiParam {
     pub fn to_param(self) -> Result<Param> {
         Ok(match self.type_id {
-            1 => Param::I8(unsafe { self.value.i8 }),
-            2 => Param::I16(unsafe { self.value.i16 }),
-            3 => Param::I32(unsafe { self.value.i32 }),
-            4 => Param::U8(unsafe { self.value.u8 }),
-            5 => Param::U16(unsafe { self.value.u16 }),
-            6 => Param::U32(unsafe { self.value.u32 }),
-            7 => Param::F32(unsafe { self.value.f32 }),
-            8 => Param::Bool(unsafe { self.value.bool }),
-            9 => Param::String(unsafe {
+            ParamType::I8 => Param::I8(unsafe { self.value.i8 }),
+            ParamType::I16 => Param::I16(unsafe { self.value.i16 }),
+            ParamType::I32 => Param::I32(unsafe { self.value.i32 }),
+            ParamType::U8 => Param::U8(unsafe { self.value.u8 }),
+            ParamType::U16 => Param::U16(unsafe { self.value.u16 }),
+            ParamType::U32 => Param::U32(unsafe { self.value.u32 }),
+            ParamType::F32 => Param::F32(unsafe { self.value.f32 }),
+            ParamType::BOOL => Param::Bool(unsafe { self.value.bool }),
+            ParamType::STRING => Param::String(unsafe {
                 CStr::from_ptr(self.value.string)
                     .to_string_lossy()
                     .to_string()
             }),
-            10 => Param::Object(unsafe { self.value.object }),
-            11 => Param::Error(unsafe {
+            ParamType::OBJECT => Param::Object(unsafe { self.value.object }),
+            ParamType::ERROR => Param::Error(unsafe {
                 CStr::from_ptr(self.value.error)
                     .to_string_lossy()
                     .to_string()
             }),
-            12 => Param::Void,
+            ParamType::VOID => Param::Void,
             _ => return Err(anyhow!("Unknown type variant: {}", self.type_id)),
         })
     }
