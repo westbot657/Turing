@@ -350,15 +350,12 @@ pub unsafe extern "C" fn call_wasm_fn(
         let Some(mut wasm) = s.wasm.take() else {
             return Param::Error("Wasm engine not initialized".to_string()).into();
         };
-        let mut mini_ctx = std::mem::take(&mut s.turing_mini_ctx);
         drop(s); // release borrow before calling wasm
 
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
-        let res = wasm.call_fn(&name, params2, expected_return_type, &mut mini_ctx);
+        let res = wasm.call_fn(&name, params2, expected_return_type, state);
 
-        let mut s = state.borrow_mut();
-        s.turing_mini_ctx = mini_ctx;
-        s.wasm = Some(wasm);
+        state.borrow_mut().wasm = Some(wasm);
 
         res.into()
     }
@@ -386,7 +383,10 @@ pub unsafe extern "C" fn register_function(name: *const c_char, pointer: *const 
 
 #[unsafe(no_mangle)]
 /// Loads a script by path, also takes an FfiParam id which acts as a list of the loaded mods.
-pub unsafe extern "C" fn load_script(source: *const c_char, loaded_capabilites: ParamKey) -> FfiParam {
+pub unsafe extern "C" fn load_script(
+    source: *const c_char,
+    loaded_capabilites: ParamKey,
+) -> FfiParam {
     unsafe {
         let source = CStr::from_ptr(source).to_string_lossy().to_string();
 

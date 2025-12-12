@@ -7,7 +7,7 @@ use anyhow::{Result, anyhow};
 use wasmtime::{Memory, Store, Val};
 use wasmtime_wasi::p1::WasiP1Ctx;
 
-use crate::{TuringMiniState, TuringState, get_string};
+use crate::{TuringDataState, TuringState, get_string};
 
 /// These ids must remain consistent on both sides of ffi.
 #[repr(u32)]
@@ -157,7 +157,7 @@ impl Param {
     pub fn from_typval(
         typ: ParamType,
         val: Val,
-        context: &TuringMiniState,
+        context: &TuringDataState,
         memory: &Memory,
         caller: &Store<WasiP1Ctx>,
     ) -> Self {
@@ -266,7 +266,7 @@ impl Params {
     }
 
     /// Converts the Params into a vector of Wasmtime Val types for function calling.
-    pub fn to_args(self, state: &mut TuringMiniState) -> Vec<Val> {
+    pub fn to_args(self, state: &mut TuringDataState) -> Vec<Val> {
         let mut vals = Vec::new();
 
         for p in self.params {

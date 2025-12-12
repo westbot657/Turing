@@ -99,11 +99,11 @@ pub struct TuringState {
     pub active_wasm_fn: Option<String>,
 
     /// Stores state that is passed around
-    pub turing_mini_ctx: TuringMiniState,
+    pub turing_mini_ctx: TuringDataState,
 }
 
 #[derive(Default)]
-pub struct TuringMiniState {
+pub struct TuringDataState {
     /// maps opaque pointer ids to real pointers
     pub opaque_pointers: TrackedHashMap<*const c_void>,
     /// maps real pointers back to their opaque pointer ids
@@ -162,7 +162,7 @@ impl TuringState {
             param_builders: TrackedHashMap::starting_at(1),
             active_builder: 0,
             active_wasm_fn: None,
-            turing_mini_ctx: TuringMiniState::default(),
+            turing_mini_ctx: TuringDataState::default(),
         }
     }
 

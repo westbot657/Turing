@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::fs;
 use std::path::Path;
 use std::sync::{Arc, RwLock};
@@ -12,7 +13,7 @@ use wasmtime_wasi::p1::WasiP1Ctx;
 
 use crate::ffi::Log;
 use crate::interop::params::{Param, ParamType, Params};
-use crate::{TuringMiniState, TuringState};
+use crate::{TuringDataState, TuringState};
 
 pub struct WasmInterpreter {
     engine: Engine,
@@ -152,7 +153,8 @@ impl WasmInterpreter {
         name: &str,
         params: Params,
         ret_type: ParamType,
-        state: &mut TuringMiniState,
+        // use a refcell to avoid borrow issues
+        state: &RefCell<TuringState>,
     ) -> Param {
         let Some(instance) = &mut self.script_instance else {
             return Param::Error("No script is loaded or reentry was attempted".to_string());
@@ -165,7 +167,7 @@ impl WasmInterpreter {
             .get_export(&mut self.store, "memory")
             .and_then(|m| m.into_memory())
             .unwrap();
-        let args = params.to_args(state);
+        let args = params.to_args(&mut state.borrow_mut().turing_mini_ctx);
 
         let mut res = match ret_type {
             ParamType::VOID => Vec::new(),
@@ -183,6 +185,6 @@ impl WasmInterpreter {
         let rt = res[0];
 
         // convert Val to Param
-        Param::from_typval(ret_type, rt, &state, &memory, &self.store)
+        Param::from_typval(ret_type, rt, &state.borrow().turing_mini_ctx, &memory, &self.store)
     }
 }
