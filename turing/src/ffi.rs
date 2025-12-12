@@ -7,11 +7,13 @@ use std::{
 };
 
 use anyhow::anyhow;
+use slotmap::KeyData;
 use wasmtime::{Caller, Val};
 use wasmtime_wasi::p1::WasiP1Ctx;
 
 use crate::{
-    CsFns, IntoWasm, PARAM_KEY_INVALID, ParamKey, ToCStr, TuringState, get_string,
+    CsFns, IntoWasm, OpaquePointerKey, PARAM_KEY_INVALID, ParamKey, ParamsKey, ToCStr, TuringState,
+    get_string,
     interop::params::{FfiParam, Param, ParamType, Params},
     wasm::wasm_engine::WasmInterpreter,
     write_string,
@@ -215,9 +217,9 @@ pub extern "C" fn create_params() -> ParamKey {
         };
 
         let mut s = state.borrow_mut();
-        let x = s.param_builders.add(Params::new());
-        s.active_builder = x;
-        x
+        let x = s.param_builders.insert(Params::new());
+        s.active_builder = Some(x);
+        x.0.as_ffi() as ParamKey
     }
 }
 
@@ -229,9 +231,9 @@ pub extern "C" fn create_n_params(size: u32) -> ParamKey {
             return 0;
         };
         let mut s = state.borrow_mut();
-        let x = s.param_builders.add(Params::of_size(size));
-        s.active_builder = x;
-        x
+        let x = s.param_builders.insert(Params::of_size(size));
+        s.active_builder = Some(x);
+        x.0.as_ffi() as ParamKey
     }
 }
 
@@ -241,7 +243,7 @@ pub extern "C" fn bind_params(params: ParamKey) {
     unsafe {
         if let Some(state) = &mut STATE {
             let mut s = state.borrow_mut();
-            s.active_builder = params;
+            s.active_builder = Some(ParamsKey::from(KeyData::from_ffi(params.into())));
         }
     }
 }
@@ -311,11 +313,12 @@ pub extern "C" fn read_param(index: u32) -> FfiParam {
 /// frees the params object tied to an id if present, otherwise does nothing.
 pub extern "C" fn delete_params(params: ParamKey) {
     unsafe {
+        let param_key = ParamsKey::from(KeyData::from_ffi(params as u64));
         if let Some(state) = &mut STATE {
             let mut s = state.borrow_mut();
-            s.param_builders.remove(&params);
-            if s.active_builder == params {
-                s.active_builder = 0;
+            s.param_builders.remove(param_key);
+            if s.active_builder == Some(param_key) {
+                s.active_builder = None;
             }
         }
     }
@@ -341,7 +344,7 @@ pub unsafe extern "C" fn call_wasm_fn(
         let mut s = state.borrow_mut();
         let params2 = if params == PARAM_KEY_INVALID {
             Params::new()
-        } else if let Ok(p) = s.swap_params(params) {
+        } else if let Ok(p) = s.swap_params(ParamsKey::from(KeyData::from_ffi(params as u64))) {
             p
         } else {
             return Param::Error("Params object does not exist".to_string()).into();
@@ -470,7 +473,7 @@ pub fn wasm_bind_env(
     ps: &[Val],
     rs: &mut [Val],
     p: Vec<ParamType>,
-    func: extern "C" fn(u32) -> FfiParam,
+    func: extern "C" fn(ParamKey) -> FfiParam,
 ) -> std::result::Result<(), anyhow::Error> {
     let mut params = Params::new();
 
@@ -496,11 +499,12 @@ pub fn wasm_bind_env(
                 let st = get_string(ptr, memory.data(&caller));
                 params.push(Param::String(st));
             }
-            (ParamType::OBJECT, Val::I32(p)) => {
-                let p = *p as u32;
+            (ParamType::OBJECT, Val::I32(pointer_id)) => {
+                let pointer_key = OpaquePointerKey::from(KeyData::from_ffi(*pointer_id as u64));
+
                 if let Some(state) = unsafe { &mut STATE } {
                     let s = state.borrow_mut();
-                    if let Some(true_pointer) = s.turing_mini_ctx.opaque_pointers.get(&p) {
+                    if let Some(true_pointer) = s.turing_mini_ctx.opaque_pointers.get(pointer_key) {
                         params.push(Param::Object(*true_pointer));
                     } else {
                         return Err(anyhow!(
@@ -518,13 +522,13 @@ pub fn wasm_bind_env(
     let pid = if let Some(state) = unsafe { &mut STATE } {
         let mut s = state.borrow_mut();
 
-        s.param_builders.add(params)
+        s.param_builders.insert(params)
     } else {
         unreachable!("This cannot happen (probably)")
     };
 
     // Call to C#/rust's provided callback
-    let res = func(pid).to_param().into_wasm()?;
+    let res = func(pid.0.as_ffi() as ParamKey).to_param().into_wasm()?;
 
     // coerce C# return value into wasm
     if let Some(state) = unsafe { &mut STATE } {
@@ -547,11 +551,11 @@ pub fn wasm_bind_env(
                 let opaque = if let Some(opaque) = s.turing_mini_ctx.pointer_backlink.get(&p) {
                     *opaque
                 } else {
-                    let op = s.turing_mini_ctx.opaque_pointers.add(p);
+                    let op = s.turing_mini_ctx.opaque_pointers.insert(p);
                     s.turing_mini_ctx.pointer_backlink.insert(p, op);
                     op
                 };
-                Val::I32(opaque as i32)
+                Val::I32(opaque.0.as_ffi() as i32)
             }
             Param::Error(er) => {
                 return Err(anyhow!("Error executing C# function: {}", er)).into_wasm();

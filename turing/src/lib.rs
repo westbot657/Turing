@@ -15,6 +15,7 @@ use std::ffi::{CStr, CString, c_char, c_void};
 use std::{mem, panic, path};
 
 use anyhow::{Result, anyhow};
+use slotmap::{SlotMap, new_key_type};
 use wasmtime::{Caller, Engine, FuncType, Linker, Memory, MemoryAccessError, Val, ValType};
 use wasmtime_wasi::p1::WasiP1Ctx;
 
@@ -93,8 +94,8 @@ pub struct TuringState {
     /// collection of functions to link to wasm. Only used during the initialization phase
     pub wasm_fns: HashMap<String, WasmFunctionMetadata>,
     /// id-tracking map of param objects for ffi.
-    pub param_builders: TrackedHashMap<Params>,
-    pub active_builder: u32,
+    pub param_builders: SlotMap<ParamsKey, Params>,
+    pub active_builder: Option<ParamsKey>,
     /// active WASM function definition for use in the initialization phase
     pub active_wasm_fn: Option<String>,
 
@@ -105,11 +106,16 @@ pub struct TuringState {
 #[derive(Default)]
 pub struct TuringDataState {
     /// maps opaque pointer ids to real pointers
-    pub opaque_pointers: TrackedHashMap<*const c_void>,
+    pub opaque_pointers: SlotMap<OpaquePointerKey, *const c_void>,
     /// maps real pointers back to their opaque pointer ids
-    pub pointer_backlink: HashMap<*const c_void, u32>,
+    pub pointer_backlink: HashMap<*const c_void, OpaquePointerKey>,
     /// queue of strings for wasm to fetch (needed due to reentrancy limitations)
     pub str_cache: VecDeque<String>,
+}
+
+new_key_type! {
+    pub struct ParamsKey;
+    pub struct OpaquePointerKey;
 }
 
 trait IntoWasm<T> {
@@ -159,15 +165,19 @@ impl TuringState {
         Self {
             wasm: None,
             wasm_fns: HashMap::new(),
-            param_builders: TrackedHashMap::starting_at(1),
-            active_builder: 0,
+            param_builders: SlotMap::with_key(),
+            active_builder: None,
             active_wasm_fn: None,
             turing_mini_ctx: TuringDataState::default(),
         }
     }
 
     pub fn push_param(&mut self, param: Param) -> Result<()> {
-        match self.param_builders.get_mut(&self.active_builder) {
+        let Some(builder) = self.active_builder else {
+            return Err(anyhow!("param object does not exist"));
+        };
+
+        match self.param_builders.get_mut(builder) {
             Some(builder) => {
                 builder.push(param);
                 Ok(())
@@ -177,7 +187,11 @@ impl TuringState {
     }
 
     pub fn set_param(&mut self, index: u32, value: Param) -> Result<()> {
-        let Some(builder) = self.param_builders.get_mut(&self.active_builder) else {
+        let Some(builder) = self.active_builder else {
+            return Err(anyhow!("param object does not exist"));
+        };
+
+        let Some(builder) = self.param_builders.get_mut(builder) else {
             return Err(anyhow!("param object does not exist"));
         };
         if builder.len() > index {
@@ -192,7 +206,11 @@ impl TuringState {
     }
 
     pub fn read_param(&self, index: u32) -> Param {
-        if let Some(builder) = self.param_builders.get(&self.active_builder) {
+        let Some(builder) = self.active_builder else {
+            return Param::Error("param object does not exist".to_string());
+        };
+
+        if let Some(builder) = self.param_builders.get(builder) {
             if index >= builder.len() {
                 Param::Error("Index out of bounds".to_string())
             } else if let Some(val) = builder.get(index as usize) {
@@ -205,10 +223,11 @@ impl TuringState {
         }
     }
 
-    pub fn swap_params(&mut self, params: ParamKey) -> Result<Params> {
+    pub fn swap_params(&mut self, params: ParamsKey) -> Result<Params> {
         let p = Params::new();
-        if let Some(p) = self.param_builders.swap(&params, p) {
-            Ok(p)
+        if let Some(slot) = self.param_builders.get_mut(params) {
+            let old = mem::replace(slot, p);
+            Ok(old)
         } else {
             Err(anyhow!("Params object does not exist"))
         }

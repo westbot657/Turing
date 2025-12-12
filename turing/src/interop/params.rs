@@ -4,10 +4,11 @@ use std::fmt::Display;
 use std::mem;
 
 use anyhow::{Result, anyhow};
+use slotmap::KeyData;
 use wasmtime::{Memory, Store, Val};
 use wasmtime_wasi::p1::WasiP1Ctx;
 
-use crate::{TuringDataState, TuringState, get_string};
+use crate::{OpaquePointerKey, ParamsKey, TuringDataState, TuringState, get_string};
 
 /// These ids must remain consistent on both sides of ffi.
 #[repr(u32)]
@@ -177,9 +178,11 @@ impl Param {
             }
             ParamType::OBJECT => {
                 let op = val.unwrap_i32() as u32;
+                let key = OpaquePointerKey::from(KeyData::from_ffi(op as u64));
+
                 let real = context
                     .opaque_pointers
-                    .get(&op)
+                    .get(key)
                     .copied()
                     .unwrap_or(std::ptr::null::<c_void>());
                 Param::Object(real)
@@ -229,6 +232,8 @@ impl From<Param> for FfiParam {
 }
 
 /// A collection of parameters to be passed to a wasm function.
+/// These get converted to WASM Vals when calling and
+/// are built up in the host environment.
 #[derive(Debug, Clone, Default)]
 pub struct Params {
     params: Vec<Param>,
@@ -285,11 +290,11 @@ impl Params {
                     Val::I32(l as i32)
                 }
                 Param::Object(rp) => match state.pointer_backlink.get(&rp) {
-                    Some(op) => Val::I32(*op as i32),
+                    Some(op) => Val::I32(op.0.as_ffi() as i32),
                     None => {
-                        let op = state.opaque_pointers.add(rp);
+                        let op = state.opaque_pointers.insert(rp);
                         state.pointer_backlink.insert(rp, op);
-                        Val::I32(op as i32)
+                        Val::I32(op.0.as_ffi() as i32)
                     }
                 },
                 Param::Error(st) => {
