@@ -1,11 +1,7 @@
 // Export functions
 
-use std::{
-    cell::RefCell,
-    ffi::{CStr, CString, c_char, c_void},
-    panic, path,
-};
-
+use std::{cell::RefCell, ffi::{CStr, CString, c_char, c_void}, mem, panic, path};
+use std::collections::HashSet;
 use anyhow::anyhow;
 use slotmap::KeyData;
 use wasmtime::{Caller, Val};
@@ -50,6 +46,16 @@ impl Log {
     }
     pub fn debug(msg: impl ToString) {
         mlog!(log_debug => msg);
+    }
+}
+
+pub struct Cs {}
+impl Cs {
+    pub fn free_string(ptr: *const c_char) {
+        if let Some(csf) = unsafe { &mut CSFNS } {
+            let cs = csf.borrow_mut();
+            (cs.free_cs_string)(ptr);
+        }
     }
 }
 
@@ -386,9 +392,10 @@ pub unsafe extern "C" fn register_function(name: *const c_char, pointer: *const 
 
 #[unsafe(no_mangle)]
 /// Loads a script by path, also takes an FfiParam id which acts as a list of the loaded mods.
+/// Note: the params object is emptied but not deleted.
 pub unsafe extern "C" fn load_script(
     source: *const c_char,
-    loaded_capabilites: ParamKey,
+    loaded_capabilities: ParamKey,
 ) -> FfiParam {
     unsafe {
         let source = CStr::from_ptr(source).to_string_lossy().to_string();
@@ -400,19 +407,37 @@ pub unsafe extern "C" fn load_script(
                 "Script does not exist: {:#?}, {:#?}",
                 source.to_str(),
                 e
-            ))
-            .into();
+            )).into();
         }
         let Some(state) = &mut STATE else {
             return Param::Error(TURING_UNINIT.to_string()).into();
         };
         let mut s = state.borrow_mut();
-        let Some(wasm) = &mut s.wasm else {
-            return Param::Error("Wasm engine not initialized".to_string()).into();
-        };
-        if let Err(e) = wasm.load_script(source) {
-            return Param::Error(format!("Failed to instantiate wasm module: {}", e)).into();
-        };
+        {
+            let Some(wasm) = &mut s.wasm else {
+                return Param::Error("Wasm engine not initialized".to_string()).into();
+            };
+            if let Err(e) = wasm.load_script(source) {
+                return Param::Error(format!("Failed to instantiate wasm module: {}", e)).into();
+            };
+        }
+        s.turing_mini_ctx.active_capabilities.clear();
+        let mut caps = HashSet::new();
+        {
+            let Some(list) = s.param_builders.get(ParamsKey::from(KeyData::from_ffi(loaded_capabilities as u64))) else {
+                return Param::Error(format!("No params object associated with given ParamKey: {}", loaded_capabilities)).into();
+            };
+            for i in 0..list.len() {
+                let Some(p) = list.get(i as usize) else {
+                    return Param::Error(format!("Unexpected end of params list at index {}", i)).into();
+                };
+                let Param::String(s) = p else {
+                    return Param::Error(format!("capability at index {} is not a string value", i)).into();
+                };
+                caps.insert(s.clone());
+            }
+        }
+        mem::swap(&mut caps, &mut s.turing_mini_ctx.active_capabilities);
 
         Param::Void.into()
     }
@@ -446,7 +471,7 @@ pub fn wasm_host_strcpy(
     mut caller: Caller<'_, WasiP1Ctx>,
     ps: &[Val],
     rs: &mut [Val],
-) -> std::result::Result<(), anyhow::Error> {
+) -> Result<(), anyhow::Error> {
     let ptr = ps[0].i32().unwrap();
     let size = ps[1].i32().unwrap();
     unsafe {
@@ -470,14 +495,20 @@ pub fn wasm_host_strcpy(
 }
 pub fn wasm_bind_env(
     mut caller: Caller<'_, WasiP1Ctx>,
+    cap: &String,
     ps: &[Val],
     rs: &mut [Val],
     p: Vec<ParamType>,
     func: extern "C" fn(ParamKey) -> FfiParam,
-) -> std::result::Result<(), anyhow::Error> {
+) -> Result<(), anyhow::Error> {
     let mut params = Params::new();
 
-    // TODO: check `cap` against the loaded capabilites before calling to C#
+    if let Some(state) = unsafe { &mut STATE } {
+        let s = state.borrow_mut();
+        if !s.turing_mini_ctx.active_capabilities.contains(cap) {
+            return Err(anyhow!("Mod capability '{}' is not loaded", cap))
+        }
+    }
 
     // set up function parameters
     for (exp_typ, value) in p.iter().zip(ps) {
@@ -542,6 +573,8 @@ pub fn wasm_bind_env(
             Param::U32(u) => Val::I32(u as i32),
             Param::F32(f) => Val::F32(f.to_bits()),
             Param::Bool(b) => Val::I32(if b { 1 } else { 0 }),
+            Param::U64(u) => Val::I64(u as i64),
+            Param::F64(f) => Val::F64(f.to_bits()),
             Param::String(st) => {
                 let l = st.len() + 1;
                 s.turing_mini_ctx.str_cache.push_back(st);

@@ -9,6 +9,7 @@ use wasmtime::{Memory, Store, Val};
 use wasmtime_wasi::p1::WasiP1Ctx;
 
 use crate::{OpaquePointerKey, ParamsKey, TuringDataState, TuringState, get_string};
+use crate::ffi::Cs;
 
 /// These ids must remain consistent on both sides of ffi.
 #[repr(u32)]
@@ -26,6 +27,8 @@ pub enum ParamType {
     OBJECT = 10,
     ERROR = 11,
     VOID = 12,
+    U64 = 13,
+    F64 = 14,
 }
 
 impl Display for ParamType {
@@ -43,6 +46,8 @@ impl Display for ParamType {
             ParamType::OBJECT => "OBJECT",
             ParamType::ERROR => "ERROR",
             ParamType::VOID => "VOID",
+            ParamType::U64 => "U64",
+            ParamType::F64 => "F64"
         };
         write!(f, "{}", s)
     }
@@ -66,6 +71,8 @@ impl TryFrom<u32> for ParamType {
             10 => Ok(ParamType::OBJECT),
             11 => Ok(ParamType::ERROR),
             0 | 12 => Ok(ParamType::VOID),
+            13 => Ok(ParamType::U64),
+            14 => Ok(ParamType::F64),
             _ => Err(anyhow!("Unknown ParamType id: {}", value)),
         }
     }
@@ -94,6 +101,8 @@ pub enum Param {
     Object(*const c_void),
     Error(String),
     Void,
+    U64(u64),
+    F64(f64)
 }
 
 /// C repr of ffi data
@@ -111,6 +120,8 @@ pub union RawParam {
     object: *const c_void,
     error: *const c_char,
     void: (),
+    u64: u64,
+    f64: f64
 }
 
 /// C tagged repr of ffi data
@@ -138,6 +149,8 @@ impl Param {
             Param::U32(x) => FfiParam { type_id: ParamType::U32, value: RawParam { u32: x } },
             Param::F32(x) => FfiParam { type_id: ParamType::F32, value: RawParam { f32: x } },
             Param::Bool(x) => FfiParam { type_id: ParamType::BOOL, value: RawParam { bool: x } },
+            Param::U64(x) => FfiParam { type_id: ParamType::U64, value: RawParam { u64: x } },
+            Param::F64(x) => FfiParam { type_id: ParamType::F64, value: RawParam { f64: x } },
             Param::String(x) => FfiParam { type_id: ParamType::STRING, value: RawParam { string: CString::new(x).unwrap().into_raw() } },
             Param::Object(x) => FfiParam { type_id: ParamType::OBJECT, value: RawParam { object: x } },
             Param::Error(x) => FfiParam { type_id: ParamType::ERROR, value: RawParam { error: CString::new(x).unwrap().into_raw() } },
@@ -171,6 +184,8 @@ impl Param {
             ParamType::U32 => Param::U32(val.unwrap_i32() as u32),
             ParamType::F32 => Param::F32(val.unwrap_f32()),
             ParamType::BOOL => Param::Bool(val.unwrap_i32() != 0),
+            ParamType::U64 => Param::U64(val.unwrap_i64() as u64),
+            ParamType::F64 => Param::F64(val.unwrap_f64()),
             ParamType::STRING => {
                 let ptr = val.unwrap_i32() as u32;
                 let st = get_string(ptr, memory.data(caller));
@@ -209,15 +224,19 @@ impl FfiParam {
             ParamType::F32 => Param::F32(unsafe { self.value.f32 }),
             ParamType::BOOL => Param::Bool(unsafe { self.value.bool }),
             ParamType::STRING => Param::String(unsafe {
-                CStr::from_ptr(self.value.string)
+                let str = CStr::from_ptr(self.value.string)
                     .to_string_lossy()
-                    .to_string()
+                    .to_string();
+                Cs::free_string(self.value.string);
+                str
             }),
             ParamType::OBJECT => Param::Object(unsafe { self.value.object }),
             ParamType::ERROR => Param::Error(unsafe {
-                CStr::from_ptr(self.value.error)
+                let str = CStr::from_ptr(self.value.error)
                     .to_string_lossy()
-                    .to_string()
+                    .to_string();
+                Cs::free_string(self.value.string);
+                str
             }),
             ParamType::VOID => Param::Void,
             _ => return Err(anyhow!("Unknown type variant: {}", self.type_id)),
