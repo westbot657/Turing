@@ -288,7 +288,6 @@ impl TuringState {
                 // register function to wasm.
                 let ft = FuncType::new(engine, p_types, r_type);
                 let p = p.clone();
-                let r = r.clone();
 
                 linker
                     .func_new(

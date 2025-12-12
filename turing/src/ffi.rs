@@ -22,7 +22,7 @@ static mut CSFNS: Option<RefCell<CsFns>> = None;
 
 const TURING_UNINIT: &str = "Turing has not been initialized";
 
-pub type FfiCallback = extern "C" fn(u32) -> FfiParam;
+pub type FfiCallback = extern "C" fn(ParamKey) -> FfiParam;
 
 /// turing.rs internal Log system, not used by wasm.
 pub struct Log {}
@@ -552,7 +552,6 @@ pub fn wasm_bind_env(
                 return Err(anyhow!("Error executing C# function: {}", er)).into_wasm();
             }
             Param::Void => return Ok(()),
-            _ => return Err(anyhow!("Invalid return value")).into_wasm(),
         };
 
         rs[0] = rv;

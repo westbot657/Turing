@@ -49,7 +49,7 @@ impl std::io::Write for OutputWriter {
 impl AsyncWrite for OutputWriter {
     fn poll_write(
         self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        _cx: &mut std::task::Context<'_>,
         buf: &[u8],
     ) -> Poll<std::result::Result<usize, std::io::Error>> {
         self.inner.write().unwrap().extend(buf);
@@ -57,7 +57,7 @@ impl AsyncWrite for OutputWriter {
     }
     fn poll_flush(
         self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        _cx: &mut std::task::Context<'_>,
     ) -> Poll<std::result::Result<(), std::io::Error>> {
         let s = {
             str::from_utf8(&self.inner.read().unwrap())
@@ -74,7 +74,7 @@ impl AsyncWrite for OutputWriter {
     }
     fn poll_shutdown(
         self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        _cx: &mut std::task::Context<'_>,
     ) -> Poll<std::result::Result<(), std::io::Error>> {
         Poll::Ready(Ok(()))
     }
