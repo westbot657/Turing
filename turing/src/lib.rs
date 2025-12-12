@@ -15,7 +15,7 @@ use std::ffi::{CStr, CString, c_char, c_void};
 use std::{mem, panic, path};
 
 use anyhow::{Result, anyhow};
-use slotmap::{SlotMap, new_key_type};
+use slotmap::{Key, SlotMap, new_key_type};
 use wasmtime::{Caller, Engine, FuncType, Linker, Memory, MemoryAccessError, Val, ValType};
 use wasmtime_wasi::p1::WasiP1Ctx;
 
@@ -27,8 +27,7 @@ use crate::interop::params::{ParamType, Params};
 use self::interop::params::{FfiParam, Param};
 use self::util::{ToCStr, TrackedHashMap};
 
-pub type ParamKey = u32;
-pub const PARAM_KEY_INVALID: ParamKey = 0;
+
 
 type AbortFn = extern "C" fn(*const c_char, *const c_char);
 type LogFn = extern "C" fn(*const c_char);
@@ -113,6 +112,9 @@ pub struct TuringDataState {
     pub str_cache: VecDeque<String>,
 }
 
+pub type ParamKey = u64;
+pub const PARAM_KEY_INVALID: ParamKey = 0;
+
 new_key_type! {
     pub struct ParamsKey;
     pub struct OpaquePointerKey;
@@ -174,7 +176,7 @@ impl TuringState {
 
     pub fn push_param(&mut self, param: Param) -> Result<()> {
         let Some(builder) = self.active_builder else {
-            return Err(anyhow!("param object does not exist"));
+            return Err(anyhow!("active builder not set"));
         };
 
         match self.param_builders.get_mut(builder) {
@@ -188,7 +190,7 @@ impl TuringState {
 
     pub fn set_param(&mut self, index: u32, value: Param) -> Result<()> {
         let Some(builder) = self.active_builder else {
-            return Err(anyhow!("param object does not exist"));
+            return Err(anyhow!("active builder not set"));
         };
 
         let Some(builder) = self.param_builders.get_mut(builder) else {
@@ -207,7 +209,7 @@ impl TuringState {
 
     pub fn read_param(&self, index: u32) -> Param {
         let Some(builder) = self.active_builder else {
-            return Param::Error("param object does not exist".to_string());
+            return Param::Error("active builder not set".to_string());
         };
 
         if let Some(builder) = self.param_builders.get(builder) {

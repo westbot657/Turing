@@ -1,9 +1,13 @@
-use crate::ffi::{add_param, add_wasm_fn_param_type, bind_params, call_wasm_fn, create_n_params, create_wasm_fn, init_turing, init_wasm, load_script, read_param, register_function, set_param, set_wasm_fn_return_type, uninit_turing};
+use crate::ffi::{
+    add_param, add_wasm_fn_param_type, bind_params, call_wasm_fn, create_n_params, create_wasm_fn,
+    delete_params, init_turing, init_wasm, load_script, read_param, register_function, set_param,
+    set_wasm_fn_return_type, uninit_turing,
+};
 use crate::interop::params::Param;
 use crate::*;
 use anyhow::{Result, anyhow};
-use std::ffi::CString;
 use serial_test::serial;
+use std::ffi::CString;
 
 extern "C" fn log_info_stand_in(msg: *const c_char) {
     unsafe {
@@ -26,7 +30,7 @@ extern "C" fn log_info_wasm(params: ParamKey) -> FfiParam {
         }
         Err(e) => {
             eprintln!("[error/cs]: {}", e)
-        },
+        }
         _ => {
             println!("Unexpected param in log_info_wasm")
         }
@@ -65,15 +69,13 @@ pub fn setup_wasm() -> Result<()> {
         }
         let res = set_wasm_fn_return_type(ParamType::STRING).to_param()?;
         if let Param::Error(e) = res {
-            return Err(anyhow!("Setting return type failed: {}", e))
+            return Err(anyhow!("Setting return type failed: {}", e));
         }
-
 
         let res = init_wasm().to_param()?;
         if let Param::Error(e) = res {
             return Err(anyhow!("Failed to initialize wasm engine: {}", e));
         }
-
     }
     Ok(())
 }
@@ -89,6 +91,35 @@ pub fn setup_test_script() -> Result<()> {
 
         load_script(c_ptr, capabilities).to_param()?.to_result()
     }
+}
+
+#[test]
+#[serial]
+pub fn test_add_read_string_param() -> Result<()> {
+    setup_wasm()?; // ensure state is initialized
+
+    // create params and add a string param
+    let p = create_n_params(1);
+    bind_params(p);
+
+    let original = "hello from test".to_string();
+    let f: FfiParam = Param::String(original.clone()).into();
+
+    let res = add_param(f).to_param()?;
+    if let Param::Error(e) = res {
+        return Err(anyhow!("add_param failed: {}", e));
+    }
+
+    // read back
+    let ret = read_param(0).to_param()?;
+    match ret {
+        Param::String(s) => assert_eq!(s, original),
+        other => return Err(anyhow!("unexpected param: {:?}", other)),
+    }
+
+    delete_params(p);
+
+    Ok(())
 }
 
 #[test]
@@ -191,7 +222,6 @@ pub fn test_string_fetch() -> Result<()> {
 
         println!("[test/cs]: string fetch result is {:?}", res);
         assert!(res.is_ok());
-
     }
 
     Ok(())

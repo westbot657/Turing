@@ -8,7 +8,7 @@ use slotmap::KeyData;
 use wasmtime::{Memory, Store, Val};
 use wasmtime_wasi::p1::WasiP1Ctx;
 
-use crate::{OpaquePointerKey, ParamsKey, TuringDataState, TuringState, get_string};
+use crate::{OpaquePointerKey, ParamKey, ParamsKey, TuringDataState, TuringState, get_string};
 
 /// These ids must remain consistent on both sides of ffi.
 #[repr(u32)]
@@ -80,7 +80,7 @@ impl ParamType {
 
 /// local repr of ffi data
 /// FFI friendly enum for passing parameters to/from wasm functions
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Param {
     I8(i8),
     I16(i16),
@@ -177,8 +177,8 @@ impl Param {
                 Param::String(st)
             }
             ParamType::OBJECT => {
-                let op = val.unwrap_i32() as u32;
-                let key = OpaquePointerKey::from(KeyData::from_ffi(op as u64));
+                let op = val.unwrap_i64() as ParamKey;
+                let key = OpaquePointerKey::from(KeyData::from_ffi(op));
 
                 let real = context
                     .opaque_pointers
