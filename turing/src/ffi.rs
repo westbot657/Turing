@@ -78,7 +78,8 @@ pub extern "C" fn uninit_turing() {
 #[unsafe(no_mangle)]
 /// starts building a new wasm function. May return an error
 /// # Safety
-/// only safe if name: *const c_char points at a valid string
+/// only safe if `name: *const c_char` points at a valid string
+/// and `pointer: *const c_void` points at a function with the signature `Fn(ParamKey) -> FfiParam`
 pub unsafe extern "C" fn create_wasm_fn(
     capability: *const c_char,
     name: *const c_char,
@@ -349,10 +350,14 @@ pub unsafe extern "C" fn call_wasm_fn(
         let Some(mut wasm) = s.wasm.take() else {
             return Param::Error("Wasm engine not initialized".to_string()).into();
         };
+        let mut mini_ctx = std::mem::take(&mut s.turing_mini_ctx);
+        drop(s); // release borrow before calling wasm
 
         let name = CStr::from_ptr(name).to_string_lossy().to_string();
-        let res = wasm.call_fn(&name, params2, expected_return_type, &mut s.turing_mini_ctx);
+        let res = wasm.call_fn(&name, params2, expected_return_type, &mut mini_ctx);
 
+        let mut s = state.borrow_mut();
+        s.turing_mini_ctx = mini_ctx;
         s.wasm = Some(wasm);
 
         res.into()
