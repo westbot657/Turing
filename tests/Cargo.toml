@@ -6,12 +6,4 @@ edition = "2024"
 [lib]
 crate-type = ["cdylib"]
 
-[profile.release]
-opt-level = "z"
-# 0 = no optimization
-# 1 = some
-# 2 = balanced
-# 3 = speed
-# s = small size
-# z = small size, sacrifices speed
 

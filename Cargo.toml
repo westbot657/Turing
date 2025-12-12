@@ -4,6 +4,19 @@ members = [
     "xtask",
     "tests"
 ]
+resolver = "3"
 
-[alias]
-x = "run -p xtask --"
+
+[turing.profile.release]
+strip = true
+lto = true
+opt-level = 3
+
+[tests.profile.release]
+opt-level = "z"
+# 0 = no optimization
+# 1 = some
+# 2 = balanced
+# 3 = speed
+# s = small size
+# z = small size, sacrifices speed
