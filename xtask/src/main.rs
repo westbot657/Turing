@@ -37,10 +37,17 @@ fn compile_package(target: &str, crate_name: &str, mode: &str) {
 
     let cargo_bin = env::var("CARGO").unwrap_or("cargo".to_string());
 
-    let status = Command::new(cargo_bin)
-        .args(["build", mode, "--target", target, "-p", crate_name])
-        .status()
+    let mut status = Command::new(cargo_bin);
+    if mode == "--debug" {
+        status.args(["build", "--target", target, "-p", crate_name]);
+    } else {
+        status.args(["build", mode, "--target", target, "-p", crate_name]);
+    }
+
+    let status = status.status()
         .expect("Failed to build Turing");
+
+
 
     if !status.success() {
         eprintln!("Failed to compile {} crate", crate_name);
@@ -78,14 +85,14 @@ fn build_windows() {
 
 fn test_run() {
     compile_package(
-        "wasm32-wasi",
-        "tests",
+        "wasm32-wasip1",
+        "wasm_tests",
         "--debug"
     );
 
-    fs::remove_file("tests/wasm/wasm_tests.wasm").expect("Failed to delete old wasm test file");
+    let _ = fs::remove_file("tests/wasm/wasm_tests.wasm");
     fs::copy(
-        "tests/target/wasm32-wasip1/release/wasm_tests.wasm",
+        "target/wasm32-wasip1/debug/wasm_tests.wasm",
         "tests/wasm/wasm_tests.wasm"
     ).unwrap_or_else(|e| panic!("Failed to copy wasm file for testing: {}", e));
 
@@ -94,7 +101,7 @@ fn test_run() {
     let cargo_bin = env::var("CARGO").unwrap_or("cargo".to_string());
 
     let status = Command::new(cargo_bin)
-        .args(["test", "-p", "tests"])
+        .args(["test", "-p", "turing"])
         .status()
         .expect("Failed to run tests");
 

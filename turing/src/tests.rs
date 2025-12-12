@@ -44,7 +44,7 @@ pub fn setup_wasm() -> Result<()> {
 
 pub fn setup_test_script() -> Result<()> {
     unsafe {
-        let fp = r#"tests/wasm/wasm_tests.wasm"#;
+        let fp = r#"../tests/wasm/wasm_tests.wasm"#;
 
         let c_ptr = CString::new(fp)?.into_raw();
 
