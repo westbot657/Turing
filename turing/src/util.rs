@@ -75,7 +75,7 @@ impl<T> TrackedHashMap<T> {
     /// swaps `value` with the value at index `i` if present, and return Some(value). If `i` isn't
     /// present, returns None
     pub fn swap(&mut self, i: &u32, mut value: T) -> Option<T> {
-        if let Some(mut other) = self.map.get_mut(i) {
+        if let Some(other) = self.map.get_mut(i) {
             mem::swap(&mut value, other);
             Some(value)
         } else {

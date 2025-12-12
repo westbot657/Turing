@@ -2,9 +2,7 @@ use crate::interop::params::Param;
 use crate::*;
 use anyhow::{Result, anyhow};
 use std::ffi::CString;
-use std::fs;
 use serial_test::serial;
-
 
 extern "C" fn log_info_stand_in(msg: *const c_char) {
     unsafe {
@@ -15,6 +13,31 @@ extern "C" fn log_info_stand_in(msg: *const c_char) {
     }
 }
 
+extern "C" fn log_info_wasm(params: ParamKey) -> FfiParam {
+    bind_params(params);
+    let s = read_param(0).to_param();
+    match s {
+        Ok(Param::String(s)) => {
+            println!("[wasm/info]: {}", s)
+        }
+        Ok(Param::Error(e)) => {
+            eprintln!("[error/wasm]: {}", e)
+        }
+        Err(e) => {
+            eprintln!("[error/cs]: {}", e)
+        },
+        _ => {
+            println!("Unexpected param in log_info_wasm")
+        }
+    }
+
+    Param::Void.into()
+}
+
+extern "C" fn fetch_string(_params: ParamKey) -> FfiParam {
+    Param::String("this is a host provided string!".to_string()).into()
+}
+
 pub fn setup_wasm() -> Result<()> {
     unsafe {
         uninit_turing();
@@ -22,22 +45,34 @@ pub fn setup_wasm() -> Result<()> {
         let cstr = CString::new("log_info")?.into_raw();
         let cap = CString::new("test")?;
 
-        let pointer = log_info_stand_in as *const c_void;
+        let pointer = log_info_wasm as *const c_void;
         let cap_ptr = cap.as_ptr();
-
         let res = create_wasm_fn(cap_ptr, cstr, pointer).to_param()?;
         if let Param::Error(e) = res {
-            return Err(anyhow!("Creation of wasm function failed"));
+            return Err(anyhow!("Creation of wasm function failed: {}", e));
         }
         let res = add_wasm_fn_param_type(ParamType::STRING).to_param()?;
         if let Param::Error(e) = res {
-            return Err(anyhow!("Addition of function parameter type failed"));
+            return Err(anyhow!("Addition of function parameter type failed: {}", e));
         }
+
+        let cstr = CString::new("fetch_string")?.into_raw();
+        let pointer = fetch_string as *const c_void;
+        let res = create_wasm_fn(cap_ptr, cstr, pointer).to_param()?;
+        if let Param::Error(e) = res {
+            return Err(anyhow!("Creation of wasm function failed: {}", e));
+        }
+        let res = set_wasm_fn_return_type(ParamType::STRING).to_param()?;
+        if let Param::Error(e) = res {
+            return Err(anyhow!("Setting return type failed: {}", e))
+        }
+
 
         let res = init_wasm().to_param()?;
         if let Param::Error(e) = res {
-            return Err(anyhow!("Failed to initialize wasm engine"));
+            return Err(anyhow!("Failed to initialize wasm engine: {}", e));
         }
+
     }
     Ok(())
 }
@@ -59,6 +94,7 @@ pub fn setup_test_script() -> Result<()> {
 #[serial]
 pub fn test_file_access() -> Result<()> {
     setup_wasm()?;
+    println!("======================");
 
     unsafe {
         setup_test_script()?;
@@ -69,6 +105,7 @@ pub fn test_file_access() -> Result<()> {
             .to_param()?
             .to_result();
 
+        println!("[test/cs]: file access result is err: {}", res.is_err());
         assert!(res.is_err())
     }
 
@@ -80,10 +117,11 @@ pub fn test_file_access() -> Result<()> {
 pub fn test_math() -> Result<()> {
     setup_wasm()?;
 
+    println!("======================");
     unsafe {
         setup_test_script()?;
 
-        println!("Testing math ops?");
+        println!("[test/cs]: Testing math ops?");
 
         let fname = CString::new("log_info").unwrap();
         register_function(fname.as_ptr(), log_info_stand_in as *const c_void);
@@ -103,7 +141,7 @@ pub fn test_math() -> Result<()> {
 
         match res {
             Param::F32(f) => {
-                println!("wasm code added 3.5 to 5.0 for {}", f);
+                println!("[test/cs]: wasm code added 3.5 to 5.0 for {}", f);
                 assert_eq!(f, 3.5 * 5.0)
             }
             _ => return Err(anyhow!("Did not multiply numbers")),
@@ -117,6 +155,7 @@ pub fn test_math() -> Result<()> {
 #[serial]
 pub fn test_stdin_fail() -> Result<()> {
     setup_wasm()?;
+    println!("======================");
 
     unsafe {
         setup_test_script()?;
@@ -127,8 +166,31 @@ pub fn test_stdin_fail() -> Result<()> {
             .to_param()?
             .to_result();
 
-        println!("stdin test is: {:?}", res);
+        println!("[test/cs]: stdin test is: {:?}", res);
         assert!(res.is_ok())
+    }
+
+    Ok(())
+}
+
+#[test]
+#[serial]
+pub fn test_string_fetch() -> Result<()> {
+    setup_wasm()?;
+    println!("======================");
+
+    unsafe {
+        setup_test_script()?;
+
+        let name = CString::new("test_string_fetch")?;
+
+        let res = call_wasm_fn(name.as_ptr(), 0, ParamType::VOID)
+            .to_param()?
+            .to_result();
+
+        println!("[test/cs]: string fetch result is {:?}", res);
+        assert!(res.is_ok());
+
     }
 
     Ok(())

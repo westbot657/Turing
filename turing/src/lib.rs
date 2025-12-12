@@ -303,7 +303,6 @@ impl TuringState {
                 // register function to wasm.
                 let ft = FuncType::new(engine, p_types, r_type);
                 let p = p.clone();
-                let r = r.clone();
                 linker.func_new("env", n.clone().as_str(), ft, move |mut caller, ps, rs| -> Result<(), wasmtime::Error> {
                     let mut params = Params::new();
 
@@ -390,7 +389,6 @@ impl TuringState {
                                 return Ok(())
 
                             }
-                            _ => return Err(anyhow!("Invalid return value")).into_wasm()
                         };
 
                         rs[0] = rv;

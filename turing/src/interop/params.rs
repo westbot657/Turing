@@ -190,9 +190,6 @@ impl Param {
                 Param::Error(st)
             }
             ParamType::VOID => Param::Void,
-            _ => unreachable!(
-                "this is only called after type validation has been done on the type id"
-            ),
         }
     }
 }
