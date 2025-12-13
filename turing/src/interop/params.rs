@@ -9,6 +9,7 @@ use wasmtime::{Memory, Store, Val};
 use wasmtime_wasi::p1::WasiP1Ctx;
 
 use crate::ffi::Ext;
+use crate::interop::types::ExtString;
 use crate::{OpaquePointerKey, ParamKey, ParamsKey, TuringDataState, TuringState, get_string};
 
 /// These ids must remain consistent on both sides of ffi.
@@ -227,13 +228,9 @@ impl FfiParam {
                     .expect("Rust invalid string")
                     .to_string()
             }),
-            ParamType::ExtString => Param::String(unsafe {
-                let str = CStr::from_ptr(self.value.string)
-                    .to_string_lossy()
-                    .to_string();
-                Ext::free_string(self.value.string);
-                str
-            }),
+            ParamType::ExtString => {
+                Param::String(unsafe { ExtString::from(self.value.string).to_string() })
+            }
             ParamType::OBJECT => Param::Object(unsafe { self.value.object }),
             ParamType::RustError => Param::Error(unsafe {
                 CString::from_raw(self.value.error as *mut c_char)
@@ -241,13 +238,9 @@ impl FfiParam {
                     .expect("Rust invalid string")
                     .to_string()
             }),
-            ParamType::ExtError => Param::Error(unsafe {
-                let str = CStr::from_ptr(self.value.error)
-                    .to_string_lossy()
-                    .to_string();
-                Ext::free_string(self.value.string);
-                str
-            }),
+            ParamType::ExtError => {
+                Param::Error(unsafe { ExtString::from(self.value.error).to_string() })
+            }
             ParamType::VOID => Param::Void,
         })
     }
