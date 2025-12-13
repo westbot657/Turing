@@ -62,21 +62,23 @@ Failing to register these 5 functions is technically fine since they all have an
 ### Interop Structs
 ```rs
 pub union RawParam {
-    I8: i8,                // id: 1
-    I16: i16,              //     2
-    I32: i32,              //     3
-    I64: i64,              //     4
-    U8: u8,                //     5
-    U16: u16,              //     6
-    U32: u32,              //     7
-    U64: u64,              //     8
-    F32: f32,              //     9
-    F64: f64,              //    10
-    Bool: bool,            //    11
-    String: *const c_char, //    12
-    Object: *const c_void, //    13
-    Error: *const c_char,  //    14
-    Void: (),              //    15 or 0
+    I8: i8,                    // id: 1
+    I16: i16,                  //     2
+    I32: i32,                  //     3
+    I64: i64,                  //     4
+    U8: u8,                    //     5
+    U16: u16,                  //     6
+    U32: u32,                  //     7
+    U64: u64,                  //     8
+    F32: f32,                  //     9
+    F64: f64,                  //    10
+    Bool: bool,                //    11
+    RustString: *const c_char, //    12
+    ExtString: *const c_char,  //    13
+    Object: *const c_void,     //    14
+    RustError: *const c_char,  //    15
+    ExtError: *const c_char,   //    16
+    Void: (),                  //    17 or 0
 }
 
 pub struct FfiParam {
