@@ -17,7 +17,7 @@ if things break, and you need to reset the state, call `uninit_turing()`, this w
 
 
 ### Parameters
-Note: the type `ParamKey` is an alias of `u32`  
+Note: the type `ParamKey` is an alias of `u64`  
 
 Create a new parameters builder with `create_params() -> ParamKey` or `create_n_params(count: u32) -> ParamKey`  
 
