@@ -4,7 +4,11 @@ version = "0.5.0"
 edition = "2024"
 
 [lib]
-crate-type = ["cdylib", "rlib", "staticlib"]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[[bench]]
+name = "ffi_api_bench"
+harness = false
 
 [dependencies]
 anyhow = "1.0.100"
@@ -20,6 +24,4 @@ slotmap = "1"
 [dev-dependencies]
 wasmprinter = "0.243.0"
 serial_test = "3.2.0"
-
-
-
+criterion = "0.8"

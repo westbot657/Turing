@@ -144,7 +144,7 @@ pub extern "C" fn add_wasm_fn_param_type(param_type: ParamType) -> FfiParam {
         ) {
             return Param::Error(format!(
                 "Invalid param type id: {} {}",
-                param_type, param_type as u32
+                param_type, param_type
             ))
             .into();
         }
@@ -185,7 +185,7 @@ pub extern "C" fn set_wasm_fn_return_type(return_type: ParamType) -> FfiParam {
         ) {
             return Param::Error(format!(
                 "Invalid param type id: {} {}",
-                return_type, return_type as u32
+                return_type, return_type
             ))
             .into();
         }
@@ -225,7 +225,7 @@ pub extern "C" fn init_wasm() -> FfiParam {
 pub extern "C" fn create_params() -> ParamKey {
     unsafe {
         let Some(state) = &mut STATE else {
-            return 0;
+            return PARAM_KEY_INVALID;
         };
 
         let mut s = state.borrow_mut();
@@ -255,7 +255,7 @@ pub extern "C" fn bind_params(params: ParamKey) {
     unsafe {
         if let Some(state) = &mut STATE {
             let mut s = state.borrow_mut();
-            s.active_builder = Some(ParamsKey::from(KeyData::from_ffi(params.into())));
+            s.active_builder = Some(ParamsKey::from(KeyData::from_ffi(params)));
         }
     }
 }
@@ -325,10 +325,11 @@ pub extern "C" fn read_param(index: u32) -> FfiParam {
 /// frees the params object tied to an id if present, otherwise does nothing.
 pub extern "C" fn delete_params(params: ParamKey) {
     unsafe {
-        let param_key = ParamsKey::from(KeyData::from_ffi(params as u64));
+        let param_key = ParamsKey::from(KeyData::from_ffi(params));
         if let Some(state) = &mut STATE {
             let mut s = state.borrow_mut();
             s.param_builders.remove(param_key);
+            // clear active builder if it was this one
             if s.active_builder == Some(param_key) {
                 s.active_builder = None;
             }
@@ -356,7 +357,7 @@ pub unsafe extern "C" fn call_wasm_fn(
         let mut s = state.borrow_mut();
         let params2 = if params == PARAM_KEY_INVALID {
             Params::new()
-        } else if let Ok(p) = s.swap_params(ParamsKey::from(KeyData::from_ffi(params as u64))) {
+        } else if let Ok(p) = s.swap_params(ParamsKey::from(KeyData::from_ffi(params))) {
             p
         } else {
             return Param::Error("Params object does not exist".to_string()).into();
@@ -539,8 +540,8 @@ pub fn wasm_bind_env(
                 let st = get_string(ptr, memory.data(&caller));
                 params.push(Param::String(st));
             }
-            (ParamType::OBJECT, Val::I32(pointer_id)) => {
-                let pointer_key = OpaquePointerKey::from(KeyData::from_ffi(*pointer_id as u64));
+            (ParamType::OBJECT, Val::I64(pointer_id)) => {
+                let pointer_key = OpaquePointerKey::from(KeyData::from_ffi(*pointer_id as ParamKey));
 
                 if let Some(state) = unsafe { &mut STATE } {
                     let s = state.borrow_mut();
