@@ -9,11 +9,11 @@ Initialize the Turing library via `init_turing()`
 
 Finalize the wasm interpreter via `init_wasm()`  
 
-if things break and you need to reset the state, call `uninit_turing()`, this will reset the state to as if the program just started.  
+if things break, and you need to reset the state, call `uninit_turing()`, this will reset the state to as if the program just started.  
 
 > [!WARNING]
 > Reentry loops will not work.
-> this means chains of host->wasm->host->wasm are invalid and will error.
+> this means chains of host → wasm → host → wasm are invalid and will error.
 
 
 ### Parameters
@@ -47,14 +47,14 @@ load a script with `load_script(source: *const c_char, loaded_capabilites: u32) 
 
 `free_string(ptr: *const c_char)`  
 
-register rust <-> C# functions with `register_function(name: *const c_char, pointer: *const c_void)`  
+register C# functions that rust uses directly with `register_function(name: *const c_char, pointer: *const c_void)`  
 rust expects these functions to be registered after `init_turing` and before anything else
 - `abort(error_code: *const c_char, error_message: *const c_char) -> !`
 - `log_info(msg: *const c_char)`
 - `log_warn(msg: *const c_char)`
 - `log_critical(msg: *const c_char)`
 - `log_debug(msg: *const c_char)`
-Failing to register these is technically fine since they all have an empty fallback implementation  
+Failing to register these 5 functions is technically fine since they all have an empty fallback implementation, though it is not recommended  
 
 
 ### Interop Structs
@@ -63,15 +63,18 @@ pub union RawParam {
     I8: i8,                // id: 1
     I16: i16,              //     2
     I32: i32,              //     3
-    U8: u8,                //     4
-    U16: u16,              //     5
-    U32: u32,              //     6
-    F32: f32,              //     7
-    Bool: bool,            //     8
-    String: *const c_char, //     9
-    Object: *const c_void, //    10
-    Error: *const c_char,  //    11
-    Void: u32,             //    12 // value is always 0
+    I64: i64,              //     4
+    U8: u8,                //     5
+    U16: u16,              //     6
+    U32: u32,              //     7
+    U64: u64,              //     8
+    F32: f32,              //     9
+    F64: f64,              //    10
+    Bool: bool,            //    11
+    String: *const c_char, //    12
+    Object: *const c_void, //    13
+    Error: *const c_char,  //    14
+    Void: (),              //    15 or 0
 }
 
 pub struct FfiParam {

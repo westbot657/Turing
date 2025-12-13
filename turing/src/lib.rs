@@ -9,10 +9,9 @@ pub mod ffi;
 #[cfg(test)]
 pub mod tests;
 
-use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::{CStr, CString, c_char, c_void};
-use std::{mem, panic, path};
+use std::mem;
 
 use anyhow::{Result, anyhow};
 use slotmap::{Key, SlotMap, new_key_type};
@@ -24,8 +23,8 @@ use crate::wasm::wasm_engine::WasmInterpreter;
 
 use crate::interop::params::{ParamType, Params};
 
-use self::interop::params::{FfiParam, Param};
-use self::util::{ToCStr, TrackedHashMap};
+use self::interop::params::Param;
+use self::util::ToCStr;
 
 
 
@@ -110,6 +109,8 @@ pub struct TuringDataState {
     pub pointer_backlink: HashMap<*const c_void, OpaquePointerKey>,
     /// queue of strings for wasm to fetch (needed due to reentrancy limitations)
     pub str_cache: VecDeque<String>,
+    /// which mods are currently active
+    pub active_capabilities: HashSet<String>
 }
 
 pub type ParamKey = u64;
@@ -284,7 +285,11 @@ impl TuringState {
                         | ParamType::STRING
                         | ParamType::OBJECT => ValType::I32,
 
+                        ParamType::I64
+                        | ParamType::U64 => ValType::I64,
+                        
                         ParamType::F32 => ValType::F32,
+                        ParamType::F64 => ValType::F64,
                         _ => unreachable!("invalid parameter type"),
                     };
                     p_types.push(p_type);
@@ -300,7 +305,12 @@ impl TuringState {
                         | ParamType::BOOL
                         | ParamType::STRING
                         | ParamType::OBJECT => ValType::I32,
+
+                        ParamType::I64
+                        | ParamType::U64 => ValType::I64,
+
                         ParamType::F32 => ValType::F32,
+                        ParamType::F64 => ValType::F64,
                         _ => unreachable!("invalid return type"),
                     };
                     r_type.push(r_typ);
@@ -310,13 +320,14 @@ impl TuringState {
                 let ft = FuncType::new(engine, p_types, r_type);
                 let p = p.clone();
 
+                let cap = cap.clone();
                 linker
                     .func_new(
                         "env",
                         n.clone().as_str(),
                         ft,
                         move |caller: Caller<'_, WasiP1Ctx>, ps: &[Val], rs: &mut [Val]| {
-                            wasm_bind_env(caller, ps, rs, p.clone(), func)
+                            wasm_bind_env(caller, &cap, ps, rs, p.clone(), func)
                         },
                     )
                     .unwrap();

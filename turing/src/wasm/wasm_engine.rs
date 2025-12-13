@@ -13,7 +13,7 @@ use wasmtime_wasi::p1::WasiP1Ctx;
 
 use crate::ffi::Log;
 use crate::interop::params::{Param, ParamType, Params};
-use crate::{TuringDataState, TuringState};
+use crate::TuringState;
 
 pub struct WasmInterpreter {
     engine: Engine,
@@ -172,6 +172,9 @@ impl WasmInterpreter {
         let mut res = match ret_type {
             ParamType::VOID => Vec::new(),
             ParamType::F32 => vec![Val::F32(0)],
+            ParamType::F64 => vec![Val::F64(0)],
+            ParamType::I64
+            | ParamType::U64 => vec![Val::I64(0)],
             _ => vec![Val::I32(0)],
         };
 

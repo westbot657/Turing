@@ -47,12 +47,17 @@ pub fn setup_wasm() -> Result<()> {
     unsafe {
         uninit_turing();
         init_turing();
-        let cstr = CString::new("log_info")?.into_raw();
+
+        let cstr = CString::new("free_cs_string")?;
+        register_function(cstr.as_ptr(), free_string as *const c_void);
+
+        let cstr = CString::new("log_info")?;
+        register_function(cstr.as_ptr(), log_info_stand_in as *const c_void);
+
         let cap = CString::new("test")?;
 
-        let pointer = log_info_wasm as *const c_void;
         let cap_ptr = cap.as_ptr();
-        let res = create_wasm_fn(cap_ptr, cstr, pointer).to_param()?;
+        let res = create_wasm_fn(cap_ptr, cstr.as_ptr(), log_info_wasm as *const c_void).to_param()?;
         if let Param::Error(e) = res {
             return Err(anyhow!("Creation of wasm function failed: {}", e));
         }
@@ -61,9 +66,9 @@ pub fn setup_wasm() -> Result<()> {
             return Err(anyhow!("Addition of function parameter type failed: {}", e));
         }
 
-        let cstr = CString::new("fetch_string")?.into_raw();
+        let cstr = CString::new("fetch_string")?;
         let pointer = fetch_string as *const c_void;
-        let res = create_wasm_fn(cap_ptr, cstr, pointer).to_param()?;
+        let res = create_wasm_fn(cap_ptr, cstr.as_ptr(), pointer).to_param()?;
         if let Param::Error(e) = res {
             return Err(anyhow!("Creation of wasm function failed: {}", e));
         }
@@ -84,12 +89,13 @@ pub fn setup_test_script() -> Result<()> {
     unsafe {
         let fp = r#"../tests/wasm/wasm_tests.wasm"#;
 
-        let c_ptr = CString::new(fp)?.into_raw();
+        let c_ptr = CString::new(fp)?;
 
-        let capabilities = create_n_params(1);
+        let capabilities = create_n_params(2);
         add_param(Param::String("turing".to_string()).to_ffi_param());
+        add_param(Param::String("test".to_string()).to_ffi_param());
 
-        load_script(c_ptr, capabilities).to_param()?.to_result()
+        load_script(c_ptr.as_ptr(), capabilities).to_param()?.to_result()
     }
 }
 
@@ -155,7 +161,7 @@ pub fn test_math() -> Result<()> {
 
         println!("[test/cs]: Testing math ops?");
 
-        let fname = CString::new("log_info").unwrap();
+        let fname = CString::new("log_info")?;
         register_function(fname.as_ptr(), log_info_stand_in as *const c_void);
 
         let name = CString::new("math_ops_test")?;
