@@ -3,16 +3,17 @@ use std::fmt::Display;
 use std::mem;
 
 use anyhow::{Result, anyhow};
+use num_enum::TryFromPrimitive;
 use slotmap::KeyData;
 use wasmtime::{Memory, Store, Val};
 use wasmtime_wasi::p1::WasiP1Ctx;
 
+use crate::ffi::Ext;
 use crate::{OpaquePointerKey, ParamKey, ParamsKey, TuringDataState, TuringState, get_string};
-use crate::ffi::Cs;
 
 /// These ids must remain consistent on both sides of ffi.
 #[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFromPrimitive)]
 pub enum ParamType {
     I8 = 1,
     I16 = 2,
@@ -25,10 +26,17 @@ pub enum ParamType {
     F32 = 9,
     F64 = 10,
     BOOL = 11,
-    STRING = 12,
-    OBJECT = 13,
-    ERROR = 14,
-    VOID = 15,
+    /// allocated via CString, must be freed via CString::from_raw
+    RustString = 12,
+    /// allocated externally, handled via Cs::free_string
+    ExtString = 13,
+    /// Represents an object ID, which is mapped by the pointer backlink system.
+    OBJECT = 14,
+    // Allocated via CString, must be freed via CString::from_raw
+    RustError = 15,
+    // Allocated externally, handled via Cs::free_string
+    ExtError = 16,
+    VOID = 17,
 }
 
 impl Display for ParamType {
@@ -45,38 +53,14 @@ impl Display for ParamType {
             ParamType::F32 => "F32",
             ParamType::F64 => "F64",
             ParamType::BOOL => "BOOL",
-            ParamType::STRING => "STRING",
+            ParamType::RustString => "RUST_STRING",
+            ParamType::ExtString => "EXT_STRING",
             ParamType::OBJECT => "OBJECT",
-            ParamType::ERROR => "ERROR",
+            ParamType::RustError => "RUST_ERROR",
+            ParamType::ExtError => "EXT_ERROR",
             ParamType::VOID => "VOID",
         };
         write!(f, "{}", s)
-    }
-}
-
-impl TryFrom<u32> for ParamType {
-    type Error = anyhow::Error;
-
-    fn try_from(value: u32) -> Result<Self> {
-        // if 0, we return void too
-        match value {
-            1 => Ok(ParamType::I8),
-            2 => Ok(ParamType::I16),
-            3 => Ok(ParamType::I32),
-            4 => Ok(ParamType::I64),
-            5 => Ok(ParamType::U8),
-            6 => Ok(ParamType::U16),
-            7 => Ok(ParamType::U32),
-            8 => Ok(ParamType::U64),
-            9 => Ok(ParamType::F32),
-            10 => Ok(ParamType::F64),
-            11 => Ok(ParamType::BOOL),
-            12 => Ok(ParamType::STRING),
-            13 => Ok(ParamType::OBJECT),
-            14 => Ok(ParamType::ERROR),
-            0 | 15 => Ok(ParamType::VOID),
-            _ => Err(anyhow!("Unknown ParamType id: {}", value)),
-        }
     }
 }
 
@@ -122,6 +106,7 @@ pub union RawParam {
     f32: f32,
     f64: f64,
     bool: bool,
+    // represented by either RustString or ExtString
     string: *const c_char,
     object: *const c_void,
     error: *const c_char,
@@ -156,9 +141,10 @@ impl Param {
             Param::F32(x) => FfiParam { type_id: ParamType::F32, value: RawParam { f32: x } },
             Param::F64(x) => FfiParam { type_id: ParamType::F64, value: RawParam { f64: x } },
             Param::Bool(x) => FfiParam { type_id: ParamType::BOOL, value: RawParam { bool: x } },
-            Param::String(x) => FfiParam { type_id: ParamType::STRING, value: RawParam { string: CString::new(x).unwrap().into_raw() } },
+            // allocated via CString, must be freed via CString::from_raw
+            Param::String(x) => FfiParam { type_id: ParamType::RustString, value: RawParam { string: CString::new(x).unwrap().into_raw() } },
             Param::Object(x) => FfiParam { type_id: ParamType::OBJECT, value: RawParam { object: x } },
-            Param::Error(x) => FfiParam { type_id: ParamType::ERROR, value: RawParam { error: CString::new(x).unwrap().into_raw() } },
+            Param::Error(x) => FfiParam { type_id: ParamType::RustError, value: RawParam { error: CString::new(x).unwrap().into_raw() } },
             Param::Void => FfiParam { type_id: ParamType::VOID, value: RawParam { void: () } },
         }
     }
@@ -192,11 +178,13 @@ impl Param {
             ParamType::F32 => Param::F32(val.unwrap_f32()),
             ParamType::F64 => Param::F64(val.unwrap_f64()),
             ParamType::BOOL => Param::Bool(val.unwrap_i32() != 0),
-            ParamType::STRING => {
+            // allocated externally, we copy the string
+            ParamType::ExtString => {
                 let ptr = val.unwrap_i32() as u32;
                 let st = get_string(ptr, memory.data(caller));
                 Param::String(st)
             }
+            ParamType::RustString => unreachable!("RustString should not be used in from_typval"),
             ParamType::OBJECT => {
                 let op = val.unwrap_i64() as ParamKey;
                 let key = OpaquePointerKey::from(KeyData::from_ffi(op));
@@ -208,11 +196,12 @@ impl Param {
                     .unwrap_or(std::ptr::null::<c_void>());
                 Param::Object(real)
             }
-            ParamType::ERROR => {
+            ParamType::ExtError => {
                 let ptr = val.unwrap_i32() as u32;
                 let st = get_string(ptr, memory.data(caller));
                 Param::Error(st)
             }
+            ParamType::RustError => unreachable!("RustError should not be used in from_typval"),
             ParamType::VOID => Param::Void,
         }
     }
@@ -232,19 +221,31 @@ impl FfiParam {
             ParamType::F32 => Param::F32(unsafe { self.value.f32 }),
             ParamType::F64 => Param::F64(unsafe { self.value.f64 }),
             ParamType::BOOL => Param::Bool(unsafe { self.value.bool }),
-            ParamType::STRING => Param::String(unsafe {
+            ParamType::RustString => Param::String(unsafe {
+                CString::from_raw(self.value.string as *mut c_char)
+                    .to_str()
+                    .expect("Rust invalid string")
+                    .to_string()
+            }),
+            ParamType::ExtString => Param::String(unsafe {
                 let str = CStr::from_ptr(self.value.string)
                     .to_string_lossy()
                     .to_string();
-                Cs::free_string(self.value.string);
+                Ext::free_string(self.value.string);
                 str
             }),
             ParamType::OBJECT => Param::Object(unsafe { self.value.object }),
-            ParamType::ERROR => Param::Error(unsafe {
+            ParamType::RustError => Param::Error(unsafe {
+                CString::from_raw(self.value.error as *mut c_char)
+                    .to_str()
+                    .expect("Rust invalid string")
+                    .to_string()
+            }),
+            ParamType::ExtError => Param::Error(unsafe {
                 let str = CStr::from_ptr(self.value.error)
                     .to_string_lossy()
                     .to_string();
-                Cs::free_string(self.value.string);
+                Ext::free_string(self.value.string);
                 str
             }),
             ParamType::VOID => Param::Void,

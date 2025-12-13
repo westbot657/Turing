@@ -72,9 +72,9 @@ fn bench_ffi_add_read_string(c: &mut Criterion) {
 
             // Create a Param::String and convert to FfiParam (this allocates a C string pointer).
             let c_str = CString::new(black_box(original_s.clone())).unwrap();
-            let raw_val: RawParam = std::mem::transmute(c_str.as_ptr() as *mut c_char);
+            let raw_val: RawParam = std::mem::transmute(c_str.into_raw() as *mut c_char);
             let f = FfiParam {
-                type_id: ParamType::STRING,
+                type_id: ParamType::RustString,
                 value: raw_val,
             };
 
@@ -142,13 +142,13 @@ fn bench_call_tests_wasm_math(c: &mut Criterion) {
     let name_fetch = CString::new("fetch_string").unwrap();
     unsafe {
         let _ = create_wasm_fn(cap_ptr, name_log.as_ptr(), bench_log_info as *const c_void);
-        let _ = add_wasm_fn_param_type(ParamType::STRING);
+        let _ = add_wasm_fn_param_type(ParamType::RustString);
         let _ = create_wasm_fn(
             cap_ptr,
             name_fetch.as_ptr(),
             bench_fetch_string as *const c_void,
         );
-        let _ = set_wasm_fn_return_type(ParamType::STRING);
+        let _ = set_wasm_fn_return_type(ParamType::RustString);
         let _ = init_wasm();
 
         let path = CString::new("../tests/wasm/wasm_tests.wasm").unwrap();

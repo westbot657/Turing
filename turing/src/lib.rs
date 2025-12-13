@@ -26,14 +26,12 @@ use crate::interop::params::{ParamType, Params};
 use self::interop::params::Param;
 use self::util::ToCStr;
 
-
-
 type AbortFn = extern "C" fn(*const c_char, *const c_char);
 type LogFn = extern "C" fn(*const c_char);
 type FreeStr = extern "C" fn(*const c_char);
 
 /// pre-defined functions that turing.rs uses directly.
-pub struct CsFns {
+pub struct ExtFns {
     pub abort: AbortFn,
     pub log_info: LogFn,
     pub log_warn: LogFn,
@@ -45,7 +43,7 @@ pub struct CsFns {
 extern "C" fn null_abort(_: *const c_char, _: *const c_char) {}
 extern "C" fn null_log(_: *const c_char) {}
 extern "C" fn null_free(_: *const c_char) {}
-impl CsFns {
+impl ExtFns {
     pub fn new() -> Self {
         Self {
             abort: null_abort,
@@ -77,7 +75,7 @@ impl CsFns {
     }
 }
 
-impl Default for CsFns {
+impl Default for ExtFns {
     fn default() -> Self {
         Self::new()
     }
@@ -110,7 +108,7 @@ pub struct TuringDataState {
     /// queue of strings for wasm to fetch (needed due to reentrancy limitations)
     pub str_cache: VecDeque<String>,
     /// which mods are currently active
-    pub active_capabilities: HashSet<String>
+    pub active_capabilities: HashSet<String>,
 }
 
 pub type ParamKey = u64;
@@ -282,12 +280,12 @@ impl TuringState {
                         | ParamType::U16
                         | ParamType::U32
                         | ParamType::BOOL
-                        | ParamType::STRING
+                        | ParamType::RustString
+                        | ParamType::ExtString
                         | ParamType::OBJECT => ValType::I32,
 
-                        ParamType::I64
-                        | ParamType::U64 => ValType::I64,
-                        
+                        ParamType::I64 | ParamType::U64 => ValType::I64,
+
                         ParamType::F32 => ValType::F32,
                         ParamType::F64 => ValType::F64,
                         _ => unreachable!("invalid parameter type"),
@@ -303,11 +301,11 @@ impl TuringState {
                         | ParamType::U16
                         | ParamType::U32
                         | ParamType::BOOL
-                        | ParamType::STRING
+                        | ParamType::RustString
+                        | ParamType::ExtString
                         | ParamType::OBJECT => ValType::I32,
 
-                        ParamType::I64
-                        | ParamType::U64 => ValType::I64,
+                        ParamType::I64 | ParamType::U64 => ValType::I64,
 
                         ParamType::F32 => ValType::F32,
                         ParamType::F64 => ValType::F64,
