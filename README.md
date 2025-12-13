@@ -17,9 +17,11 @@ if things break, and you need to reset the state, call `uninit_turing()`, this w
 
 
 ### Parameters
-Create a new parameters builder with `create_params() -> u32` or `create_n_params(count: u32) -> u32`  
+Note: the type `ParamKey` is an alias of `u32`  
 
-Select a params object for future calls via `bind_params(params: u32)`  
+Create a new parameters builder with `create_params() -> ParamKey` or `create_n_params(count: u32) -> ParamKey`  
+
+Select a params object for future calls via `bind_params(params: ParamKey)`  
 
 Add params via `add_param(param: FfiParam)`  
 
@@ -27,7 +29,7 @@ Set a specific param via `set_param(index: u32, param: FfiParam)`
 
 Read params via `read_param(index: u32) -> FfiParam`  
 
-Delete the params object via `delete_params(params: u32)`  
+Delete the params object via `delete_params(params: ParamKey)`  
 
 ### wasm functions
 
@@ -39,9 +41,9 @@ set return type via `set_wasm_fn_return_type(return_type: u32) -> FfiParam`
 
 The previous 2 functions always operate on the last created function.
 
-call a wasm function via `call_wasm_fn(name: *const c_char, params: u32, expected_return_type: u32) -> FfiParam`  
+call a wasm function via `call_wasm_fn(name: *const c_char, params: ParamKey, expected_return_type: u32) -> FfiParam`  
 
-load a script with `load_script(source: *const c_char, loaded_capabilites: u32) -> FfiParam`, with loaded_capabilities being a Params object id
+load a script with `load_script(source: *const c_char, loaded_capabilites: ParamKey) -> FfiParam`, where the loaded_capabilities Param object is used as a list of strings
 
 ### Helpers
 
