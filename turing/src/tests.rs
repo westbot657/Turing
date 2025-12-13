@@ -1,9 +1,5 @@
-use crate::ffi::{
-    add_param, add_wasm_fn_param_type, bind_params, call_wasm_fn, create_n_params, create_wasm_fn,
-    delete_params, init_turing, init_wasm, load_script, read_param, register_function, set_param,
-    set_wasm_fn_return_type, uninit_turing,
-};
-use crate::interop::params::Param;
+use crate::ffi::*;
+use crate::interop::params::{FfiParam, Param};
 use crate::*;
 use anyhow::{Result, anyhow};
 use serial_test::serial;
