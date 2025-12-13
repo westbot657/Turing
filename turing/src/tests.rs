@@ -1,5 +1,5 @@
 use crate::ffi::{add_param, add_wasm_fn_param_type, bind_params, call_wasm_fn, create_n_params, create_wasm_fn, free_string, init_turing, init_wasm, load_script, read_param, register_function, set_param, set_wasm_fn_return_type, uninit_turing};
-use crate::interop::params::Param;
+use crate::interop::params::{Param, FfiParam};
 use crate::*;
 use anyhow::{Result, anyhow};
 use std::ffi::CString;
@@ -44,8 +44,8 @@ pub fn setup_wasm() -> Result<()> {
         uninit_turing();
         init_turing();
 
-        // let cstr = CString::new("free_cs_string")?;
-        // register_function(cstr.as_ptr(), free_string as *const c_void);
+        let cstr = CString::new("free_cs_string")?;
+        register_function(cstr.as_ptr(), free_string as *const c_void);
 
         let cstr = CString::new("log_info")?;
         register_function(cstr.as_ptr(), log_info_stand_in as *const c_void);

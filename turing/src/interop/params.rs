@@ -1,4 +1,3 @@
-use std::cell::RefMut;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::fmt::Display;
 use std::mem;
@@ -8,7 +7,7 @@ use slotmap::KeyData;
 use wasmtime::{Memory, Store, Val};
 use wasmtime_wasi::p1::WasiP1Ctx;
 
-use crate::{OpaquePointerKey, ParamsKey, TuringDataState, TuringState, get_string};
+use crate::{OpaquePointerKey, TuringDataState, get_string};
 use crate::ffi::Cs;
 
 /// These ids must remain consistent on both sides of ffi.
@@ -249,7 +248,6 @@ impl FfiParam {
                 str
             }),
             ParamType::VOID => Param::Void,
-            _ => return Err(anyhow!("Unknown type variant: {}", self.type_id)),
         })
     }
 }

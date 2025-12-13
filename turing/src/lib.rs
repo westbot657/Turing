@@ -23,7 +23,7 @@ use crate::wasm::wasm_engine::WasmInterpreter;
 
 use crate::interop::params::{ParamType, Params};
 
-use self::interop::params::{FfiParam, Param};
+use self::interop::params::Param;
 use self::util::ToCStr;
 
 pub type ParamKey = u32;

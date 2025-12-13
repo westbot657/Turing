@@ -13,7 +13,7 @@ use wasmtime_wasi::p1::WasiP1Ctx;
 
 use crate::ffi::Log;
 use crate::interop::params::{Param, ParamType, Params};
-use crate::{TuringDataState, TuringState};
+use crate::TuringState;
 
 pub struct WasmInterpreter {
     engine: Engine,
