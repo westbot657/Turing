@@ -172,6 +172,9 @@ impl WasmInterpreter {
         let mut res = match ret_type {
             ParamType::VOID => Vec::new(),
             ParamType::F32 => vec![Val::F32(0)],
+            ParamType::F64 => vec![Val::F64(0)],
+            ParamType::I64
+            | ParamType::U64 => vec![Val::I64(0)],
             _ => vec![Val::I32(0)],
         };
 

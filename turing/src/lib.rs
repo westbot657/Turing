@@ -283,7 +283,11 @@ impl TuringState {
                         | ParamType::STRING
                         | ParamType::OBJECT => ValType::I32,
 
+                        ParamType::I64
+                        | ParamType::U64 => ValType::I64,
+                        
                         ParamType::F32 => ValType::F32,
+                        ParamType::F64 => ValType::F64,
                         _ => unreachable!("invalid parameter type"),
                     };
                     p_types.push(p_type);
@@ -299,7 +303,12 @@ impl TuringState {
                         | ParamType::BOOL
                         | ParamType::STRING
                         | ParamType::OBJECT => ValType::I32,
+
+                        ParamType::I64
+                        | ParamType::U64 => ValType::I64,
+
                         ParamType::F32 => ValType::F32,
+                        ParamType::F64 => ValType::F64,
                         _ => unreachable!("invalid return type"),
                     };
                     r_type.push(r_typ);

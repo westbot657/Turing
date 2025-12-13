@@ -131,10 +131,13 @@ pub extern "C" fn add_wasm_fn_param_type(param_type: ParamType) -> FfiParam {
             ParamType::I8
                 | ParamType::I16
                 | ParamType::I32
+                | ParamType::I64
                 | ParamType::U8
                 | ParamType::U16
                 | ParamType::U32
+                | ParamType::U64
                 | ParamType::F32
+                | ParamType::F64
                 | ParamType::BOOL
                 | ParamType::STRING
                 | ParamType::OBJECT
@@ -168,10 +171,13 @@ pub extern "C" fn set_wasm_fn_return_type(return_type: ParamType) -> FfiParam {
             ParamType::I8
                 | ParamType::I16
                 | ParamType::I32
+                | ParamType::I64
                 | ParamType::U8
                 | ParamType::U16
                 | ParamType::U32
+                | ParamType::U64
                 | ParamType::F32
+                | ParamType::F64
                 | ParamType::BOOL
                 | ParamType::STRING
                 | ParamType::OBJECT
@@ -516,10 +522,13 @@ pub fn wasm_bind_env(
             (ParamType::I8, Val::I32(i)) => params.push(Param::I8(*i as i8)),
             (ParamType::I16, Val::I32(i)) => params.push(Param::I16(*i as i16)),
             (ParamType::I32, Val::I32(i)) => params.push(Param::I32(*i)),
+            (ParamType::I64, Val::I64(i)) => params.push(Param::I64(*i)),
             (ParamType::U8, Val::I32(u)) => params.push(Param::U8(*u as u8)),
             (ParamType::U16, Val::I32(u)) => params.push(Param::U16(*u as u16)),
             (ParamType::U32, Val::I32(u)) => params.push(Param::U32(*u as u32)),
+            (ParamType::U64, Val::I64(u)) => params.push(Param::U64(*u as u64)),
             (ParamType::F32, Val::F32(f)) => params.push(Param::F32(f32::from_bits(*f))),
+            (ParamType::F64, Val::F64(f)) => params.push(Param::F64(f64::from_bits(*f))),
             (ParamType::BOOL, Val::I32(b)) => params.push(Param::Bool(*b != 0)),
             (ParamType::STRING, Val::I32(ptr)) => {
                 let ptr = *ptr as u32;
@@ -568,13 +577,14 @@ pub fn wasm_bind_env(
             Param::I8(i) => Val::I32(i as i32),
             Param::I16(i) => Val::I32(i as i32),
             Param::I32(i) => Val::I32(i),
+            Param::I64(i) => Val::I64(i),
             Param::U8(u) => Val::I32(u as i32),
             Param::U16(u) => Val::I32(u as i32),
             Param::U32(u) => Val::I32(u as i32),
-            Param::F32(f) => Val::F32(f.to_bits()),
-            Param::Bool(b) => Val::I32(if b { 1 } else { 0 }),
             Param::U64(u) => Val::I64(u as i64),
+            Param::F32(f) => Val::F32(f.to_bits()),
             Param::F64(f) => Val::F64(f.to_bits()),
+            Param::Bool(b) => Val::I32(if b { 1 } else { 0 }),
             Param::String(st) => {
                 let l = st.len() + 1;
                 s.turing_mini_ctx.str_cache.push_back(st);
