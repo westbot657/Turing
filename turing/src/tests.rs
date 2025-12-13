@@ -57,7 +57,7 @@ pub fn setup_wasm() -> Result<()> {
         if let Param::Error(e) = res {
             return Err(anyhow!("Creation of wasm function failed: {}", e));
         }
-        let res = add_wasm_fn_param_type(ParamType::STRING).to_param()?;
+        let res = add_wasm_fn_param_type(ParamType::RustString).to_param()?;
         if let Param::Error(e) = res {
             return Err(anyhow!("Addition of function parameter type failed: {}", e));
         }
@@ -68,7 +68,7 @@ pub fn setup_wasm() -> Result<()> {
         if let Param::Error(e) = res {
             return Err(anyhow!("Creation of wasm function failed: {}", e));
         }
-        let res = set_wasm_fn_return_type(ParamType::STRING).to_param()?;
+        let res = set_wasm_fn_return_type(ParamType::RustString).to_param()?;
         if let Param::Error(e) = res {
             return Err(anyhow!("Setting return type failed: {}", e));
         }

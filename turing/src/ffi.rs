@@ -1,22 +1,27 @@
 // Export functions
 
-use std::{cell::RefCell, ffi::{CStr, CString, c_char, c_void}, mem, panic, path};
-use std::collections::HashSet;
 use anyhow::anyhow;
 use slotmap::KeyData;
+use std::collections::HashSet;
+use std::{
+    cell::RefCell,
+    ffi::{CStr, CString, c_char, c_void},
+    mem, panic, path,
+};
 use wasmtime::{Caller, Val};
 use wasmtime_wasi::p1::WasiP1Ctx;
 
 use crate::{
-    CsFns, IntoWasm, OpaquePointerKey, PARAM_KEY_INVALID, ParamKey, ParamsKey, ToCStr, TuringState,
-    get_string,
+    ExtFns, IntoWasm, OpaquePointerKey, PARAM_KEY_INVALID, ParamKey, ParamsKey, ToCStr,
+    TuringState, get_string,
     interop::params::{FfiParam, Param, ParamType, Params},
     wasm::wasm_engine::WasmInterpreter,
     write_string,
 };
 
 static mut STATE: Option<RefCell<TuringState>> = None;
-static mut CSFNS: Option<RefCell<CsFns>> = None;
+/// External functions provided by the FFI environment.
+static mut EXT_FNS: Option<RefCell<ExtFns>> = None;
 
 const TURING_UNINIT: &str = "Turing has not been initialized";
 
@@ -27,7 +32,7 @@ pub struct Log {}
 macro_rules! mlog {
     ($f:tt => $msg:tt ) => {
         unsafe {
-            if let Some(csf) = &mut CSFNS {
+            if let Some(csf) = &mut EXT_FNS {
                 let cs = csf.borrow();
                 (cs.$f)($msg.to_string().to_cstr_ptr());
             }
@@ -49,10 +54,10 @@ impl Log {
     }
 }
 
-pub struct Cs {}
-impl Cs {
+pub struct Ext {}
+impl Ext {
     pub fn free_string(ptr: *const c_char) {
-        if let Some(csf) = unsafe { &mut CSFNS } {
+        if let Some(csf) = unsafe { &mut EXT_FNS } {
             let cs = csf.borrow_mut();
             (cs.free_cs_string)(ptr);
         }
@@ -70,7 +75,7 @@ pub extern "C" fn init_turing() {
 
     unsafe {
         STATE = Some(RefCell::new(TuringState::new()));
-        CSFNS = Some(RefCell::new(CsFns::new()));
+        EXT_FNS = Some(RefCell::new(ExtFns::new()));
     }
 }
 
@@ -79,7 +84,7 @@ pub extern "C" fn init_turing() {
 pub extern "C" fn uninit_turing() {
     unsafe {
         STATE = None;
-        CSFNS = None;
+        EXT_FNS = None;
     }
 }
 
@@ -139,7 +144,8 @@ pub extern "C" fn add_wasm_fn_param_type(param_type: ParamType) -> FfiParam {
                 | ParamType::F32
                 | ParamType::F64
                 | ParamType::BOOL
-                | ParamType::STRING
+                | ParamType::RustString
+                | ParamType::ExtString
                 | ParamType::OBJECT
         ) {
             return Param::Error(format!(
@@ -179,7 +185,8 @@ pub extern "C" fn set_wasm_fn_return_type(return_type: ParamType) -> FfiParam {
                 | ParamType::F32
                 | ParamType::F64
                 | ParamType::BOOL
-                | ParamType::STRING
+                | ParamType::RustString
+                | ParamType::ExtString
                 | ParamType::OBJECT
                 | ParamType::VOID
         ) {
@@ -390,7 +397,7 @@ pub unsafe extern "C" fn free_string(ptr: *mut c_char) {
 pub unsafe extern "C" fn register_function(name: *const c_char, pointer: *const c_void) {
     unsafe {
         let cstr = CStr::from_ptr(name).to_string_lossy().to_string();
-        if let Some(csf) = &mut CSFNS {
+        if let Some(csf) = &mut EXT_FNS {
             let mut cs = csf.borrow_mut();
             cs.link(&cstr, pointer);
         }
@@ -414,7 +421,8 @@ pub unsafe extern "C" fn load_script(
                 "Script does not exist: {:#?}, {:#?}",
                 source.to_str(),
                 e
-            )).into();
+            ))
+            .into();
         }
         let Some(state) = &mut STATE else {
             return Param::Error(TURING_UNINIT.to_string()).into();
@@ -431,15 +439,26 @@ pub unsafe extern "C" fn load_script(
         s.turing_mini_ctx.active_capabilities.clear();
         let mut caps = HashSet::new();
         {
-            let Some(list) = s.param_builders.get(ParamsKey::from(KeyData::from_ffi(loaded_capabilities as u64))) else {
-                return Param::Error(format!("No params object associated with given ParamKey: {}", loaded_capabilities)).into();
+            let Some(list) = s.param_builders.get(ParamsKey::from(KeyData::from_ffi(
+                loaded_capabilities as u64,
+            ))) else {
+                return Param::Error(format!(
+                    "No params object associated with given ParamKey: {}",
+                    loaded_capabilities
+                ))
+                .into();
             };
             for i in 0..list.len() {
                 let Some(p) = list.get(i as usize) else {
-                    return Param::Error(format!("Unexpected end of params list at index {}", i)).into();
+                    return Param::Error(format!("Unexpected end of params list at index {}", i))
+                        .into();
                 };
                 let Param::String(s) = p else {
-                    return Param::Error(format!("capability at index {} is not a string value", i)).into();
+                    return Param::Error(format!(
+                        "capability at index {} is not a string value",
+                        i
+                    ))
+                    .into();
                 };
                 caps.insert(s.clone());
             }
@@ -513,7 +532,7 @@ pub fn wasm_bind_env(
     if let Some(state) = unsafe { &mut STATE } {
         let s = state.borrow_mut();
         if !s.turing_mini_ctx.active_capabilities.contains(cap) {
-            return Err(anyhow!("Mod capability '{}' is not loaded", cap))
+            return Err(anyhow!("Mod capability '{}' is not loaded", cap));
         }
     }
 
@@ -531,7 +550,7 @@ pub fn wasm_bind_env(
             (ParamType::F32, Val::F32(f)) => params.push(Param::F32(f32::from_bits(*f))),
             (ParamType::F64, Val::F64(f)) => params.push(Param::F64(f64::from_bits(*f))),
             (ParamType::BOOL, Val::I32(b)) => params.push(Param::Bool(*b != 0)),
-            (ParamType::STRING, Val::I32(ptr)) => {
+            (ParamType::RustString | ParamType::ExtString, Val::I32(ptr)) => {
                 let ptr = *ptr as u32;
 
                 let Some(memory) = caller.get_export("memory").and_then(|e| e.into_memory()) else {
@@ -541,7 +560,8 @@ pub fn wasm_bind_env(
                 params.push(Param::String(st));
             }
             (ParamType::OBJECT, Val::I64(pointer_id)) => {
-                let pointer_key = OpaquePointerKey::from(KeyData::from_ffi(*pointer_id as ParamKey));
+                let pointer_key =
+                    OpaquePointerKey::from(KeyData::from_ffi(*pointer_id as ParamKey));
 
                 if let Some(state) = unsafe { &mut STATE } {
                     let s = state.borrow_mut();
