@@ -14,7 +14,7 @@ use std::ffi::{CStr, CString, c_char, c_void};
 use std::mem;
 
 use anyhow::{Result, anyhow};
-use slotmap::{Key, SlotMap, new_key_type};
+use slotmap::{SlotMap, new_key_type};
 use wasmtime::{Caller, Engine, FuncType, Linker, Memory, MemoryAccessError, Val, ValType};
 use wasmtime_wasi::p1::WasiP1Ctx;
 
