@@ -154,22 +154,23 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> StdoutStream for WriterInit
 
 /// gets a string out of wasm memory into rust memory.
 pub fn get_string(message: u32, data: &[u8]) -> String {
-    CStr::from_bytes_until_nul(&data[message as usize..])
-        .expect("Not a valid CStr")
-        .to_string_lossy()
-        .to_string()
+    let c = CStr::from_bytes_until_nul(&data[message as usize..]).expect("Not a valid CStr");
+    match c.to_str() {
+        Ok(s) => s.to_owned(),
+        Err(_) => c.to_string_lossy().into_owned(),
+    }
 }
 
 /// writes a string from rust memory to wasm memory.
 pub fn write_string(
     pointer: u32,
-    string: String,
+    string: &str,
     memory: &Memory,
     caller: Caller<'_, WasiP1Ctx>,
 ) -> Result<(), MemoryAccessError> {
-    let string = CString::new(string).unwrap();
-    let string = string.into_bytes_with_nul();
-    memory.write(caller, pointer as usize, &string)
+    let c = CString::new(string).unwrap();
+    let bytes = c.into_bytes_with_nul();
+    memory.write(caller, pointer as usize, &bytes)
 }
 
 impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {

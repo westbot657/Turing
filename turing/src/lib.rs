@@ -130,7 +130,7 @@ pub(crate) fn wasm_host_strcpy(
         && next_str.len() + 1 == size as usize
     {
         if let Some(memory) = caller.get_export("memory").and_then(|m| m.into_memory()) {
-            write_string(ptr as u32, next_str, &memory, caller)?;
+            write_string(ptr as u32, &next_str, &memory, caller)?;
             rs[0] = Val::I32(ptr);
         }
         return Ok(());
