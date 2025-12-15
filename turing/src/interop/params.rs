@@ -612,9 +612,8 @@ impl FfiParam {
             DataType::Bool => Param::Bool(unsafe { self.value.bool }),
             DataType::RustString => Param::String(unsafe {
                 CString::from_raw(self.value.string as *mut c_char)
-                    .to_str()
-                    .expect("Rust invalid string")
-                    .to_string()
+                    .to_string_lossy()
+                    .into_owned()
             }),
             DataType::ExtString => {
                 Param::String(unsafe { ExtString::<Ext>::from(self.value.string).to_string() })
@@ -622,9 +621,8 @@ impl FfiParam {
             DataType::Object => Param::Object(unsafe { self.value.object }),
             DataType::RustError => Param::Error(unsafe {
                 CString::from_raw(self.value.error as *mut c_char)
-                    .to_str()
-                    .expect("Rust invalid string")
-                    .to_string()
+                    .to_string_lossy()
+                    .into_owned()
             }),
             DataType::ExtError => {
                 Param::Error(unsafe { ExtString::<Ext>::from(self.value.error).to_string() })
@@ -648,9 +646,8 @@ impl FfiParam {
             DataType::Bool => Param::Bool(unsafe { self.value.bool }),
             DataType::RustString => Param::String(unsafe {
                 CStr::from_ptr(self.value.string)
-                    .to_str()
-                    .expect("Rust invalid string")
-                    .to_string()
+                    .to_string_lossy()
+                    .into_owned()
             }),
             DataType::ExtString => {
                 Param::String(unsafe { ExtString::<Ext>::from(self.value.string).to_string() })
@@ -658,9 +655,8 @@ impl FfiParam {
             DataType::Object => Param::Object(unsafe { self.value.object }),
             DataType::RustError => Param::Error(unsafe {
                 CStr::from_ptr(self.value.error)
-                    .to_str()
-                    .expect("Rust invalid string")
-                    .to_string()
+                    .to_string_lossy()
+                    .into_owned()
             }),
             DataType::ExtError => {
                 Param::Error(unsafe { ExtString::<Ext>::from(self.value.error).to_string() })
