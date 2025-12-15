@@ -103,6 +103,7 @@ pub fn test_math() -> Result<()> {
         .call_wasm_fn("math_ops_test", params, DataType::F32);
 
     println!("[test/ext]: wasm code multiplied 3.5 by 5.0 for {:#?}", res);
+    assert!((res.to_result::<f32>()? - 17.5).abs() < f32::EPSILON); 
 
     Ok(())
 }

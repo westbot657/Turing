@@ -6,9 +6,9 @@ edition = "2024"
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]
 
-#[[bench]]
-#name = "ffi_api_bench"
-#harness = false
+[[bench]]
+name = "ffi_api_bench"
+harness = false
 
 [dependencies]
 anyhow = "1.0.100"
