@@ -375,6 +375,9 @@ impl Params {
 
     /// Converts the Params into a vector of Wasmtime Val types for function calling.
     pub fn to_args(self, data: &Arc<RwLock<WasmDataState>>) -> SmallVec<[Val; 4]> {
+        // Acquire a single write lock for the duration of conversion to avoid
+        // repeated locking/unlocking when pushing strings or registering objects.
+        let mut s = data.write();
         let vals = self.params.into_iter().map(|p| 
             match p {
                 Param::I8(i) => Val::I32(i as i32),
@@ -390,33 +393,22 @@ impl Params {
                 Param::Bool(b) => Val::I32(if b { 1 } else { 0 }),
                 Param::String(st) => {
                     let l = st.len() + 1;
-                    data.write()
-                        .str_cache
-                        .push_back(st);
+                    s.str_cache.push_back(st);
                     Val::I32(l as i32)
                 }
-                Param::Object(rp) => match data
-                    .read()
-                    .pointer_backlink
-                    .get(&rp.into())
-                {
-                    Some(op) => Val::I32(op.0.as_ffi() as i32),
-                    None => {
-                        let op = data
-                            .write()
-                            .opaque_pointers
-                            .insert(rp.into());
-                        data.write()
-                            .pointer_backlink
-                            .insert(rp.into(), op);
+                Param::Object(rp) => {
+                    let pointer = rp.into();
+                    if let Some(op) = s.pointer_backlink.get(&pointer) {
+                        Val::I32(op.0.as_ffi() as i32)
+                    } else {
+                        let op = s.opaque_pointers.insert(pointer);
+                        s.pointer_backlink.insert(pointer, op);
                         Val::I32(op.0.as_ffi() as i32)
                     }
-                },
+                }
                 Param::Error(st) => {
                     let l = st.len() + 1;
-                    data.write()
-                        .str_cache
-                        .push_back(st);
+                    s.str_cache.push_back(st);
                     Val::I32(l as i32)
                 }
                 _ => unreachable!("Void shouldn't ever be added as an arg"),
