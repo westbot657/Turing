@@ -3,10 +3,11 @@ use std::ffi::{CStr, CString};
 use std::fs;
 use std::marker::PhantomData;
 use std::path::Path;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc};
 use std::task::Poll;
 
 use anyhow::{anyhow, Result};
+use parking_lot::RwLock;
 use tokio::io::AsyncWrite;
 use wasmtime::{Caller, Config, Engine, FuncType, Instance, Linker, Memory, MemoryAccessError, Module, Store, Val, ValType};
 use wasmtime_wasi::WasiCtxBuilder;
@@ -72,16 +73,16 @@ struct OutputWriter<Ext: ExternalFunctions + Send> {
 }
 impl<Ext: ExternalFunctions + Send> std::io::Write for OutputWriter<Ext> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.inner.write().unwrap().extend(buf);
+        self.inner.write().extend(buf);
         Ok(buf.len())
     }
     fn flush(&mut self) -> std::io::Result<()> {
         let s = {
-            str::from_utf8(&self.inner.read().unwrap())
+            str::from_utf8(&self.inner.read())
                 .unwrap()
                 .to_string()
         };
-        self.inner.write().unwrap().clear();
+        self.inner.write().clear();
         if self.is_err {
             Ext::log_critical(s)
         } else {
@@ -97,7 +98,7 @@ impl<Ext: ExternalFunctions + Send> AsyncWrite for OutputWriter<Ext> {
         _cx: &mut std::task::Context<'_>,
         buf: &[u8],
     ) -> Poll<std::result::Result<usize, std::io::Error>> {
-        self.inner.write().unwrap().extend(buf);
+        self.inner.write().extend(buf);
         Poll::Ready(Ok(buf.len()))
     }
     fn poll_flush(
@@ -105,11 +106,11 @@ impl<Ext: ExternalFunctions + Send> AsyncWrite for OutputWriter<Ext> {
         _cx: &mut std::task::Context<'_>,
     ) -> Poll<std::result::Result<(), std::io::Error>> {
         let s = {
-            str::from_utf8(&self.inner.read().unwrap())
+            str::from_utf8(&self.inner.read())
                 .unwrap()
                 .to_string()
         };
-        self.inner.write().unwrap().clear();
+        self.inner.write().clear();
         if self.is_err {
             Ext::log_critical(s);
         } else {
@@ -175,6 +176,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         config.wasm_reference_types(true);
         config.wasm_multi_memory(false);
         config.max_wasm_stack(512 * 1024); // 512KB
+        config.compiler_inlining(true);
         config.consume_fuel(false);
 
         let wasi = WasiCtxBuilder::new()
@@ -320,7 +322,7 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
     func: &WasmCallback,
 ) -> Result<()> {
 
-    if !data.read().expect("WasmDataState lock poisoned").active_capabilities.contains(cap) {
+    if !data.read().active_capabilities.contains(cap) {
         return Err(anyhow!("Mod capability '{}' is not currently loaded", cap))
     }
 
@@ -338,7 +340,7 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
     let res = func(ffi_params_struct).into_param::<Ext>()?;
 
 
-    let mut s = data.write().unwrap();
+    let mut s = data.write();
 
     // Convert Param back to Val for return
     let rv = match res {

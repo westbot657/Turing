@@ -1,9 +1,10 @@
+use parking_lot::RwLock;
 use smallvec::SmallVec;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::fmt::Display;
 use std::marker::PhantomData;
 use std::mem;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc};
 use anyhow::{anyhow, Result};
 use num_enum::TryFromPrimitive;
 use slotmap::KeyData;
@@ -160,7 +161,7 @@ impl DataType {
                 let pointer_key =
                     OpaquePointerKey::from(KeyData::from_ffi(*pointer_id as u64));
 
-                if let Some(true_pointer) = data.read().unwrap().opaque_pointers.get(pointer_key) {
+                if let Some(true_pointer) = data.read().opaque_pointers.get(pointer_key) {
                     Ok(Param::Object(**true_pointer))
                 } else {
                     Err(anyhow!("opaque pointer does not correspond to a real pointer"))
@@ -226,7 +227,7 @@ impl Param {
                 let op = val.unwrap_i64() as u64;
                 let key = OpaquePointerKey::from(KeyData::from_ffi(op));
 
-                let real = data.read().expect("WasmDataState lock poisoned")
+                let real = data.read()
                     .opaque_pointers
                     .get(key)
                     .copied()
@@ -390,14 +391,12 @@ impl Params {
                 Param::String(st) => {
                     let l = st.len() + 1;
                     data.write()
-                        .expect("WasmDataState lock poisoned")
                         .str_cache
                         .push_back(st);
                     Val::I32(l as i32)
                 }
                 Param::Object(rp) => match data
                     .read()
-                    .expect("WasmDataState lock poisoned")
                     .pointer_backlink
                     .get(&rp.into())
                 {
@@ -405,11 +404,9 @@ impl Params {
                     None => {
                         let op = data
                             .write()
-                            .expect("WasmDataState lock poisoned")
                             .opaque_pointers
                             .insert(rp.into());
                         data.write()
-                            .expect("WasmDataState lock poisoned")
                             .pointer_backlink
                             .insert(rp.into(), op);
                         Val::I32(op.0.as_ffi() as i32)
@@ -418,7 +415,6 @@ impl Params {
                 Param::Error(st) => {
                     let l = st.len() + 1;
                     data.write()
-                        .expect("WasmDataState lock poisoned")
                         .str_cache
                         .push_back(st);
                     Val::I32(l as i32)
