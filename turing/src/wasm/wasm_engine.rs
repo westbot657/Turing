@@ -332,13 +332,14 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
     let ffi_params = params.to_ffi();
 
     // Call to C#/rust's provided callback using a clone so we can still cleanup
-    let res = func(ffi_params.clone()).to_param::<Ext>()?;
+    let res = func(ffi_params.clone()).into_param::<Ext>()?;
 
     // Cleanup
-    let _ = ffi_params.to_params::<Ext>();
+    let _ = ffi_params.into_params::<Ext>();
 
     let mut s = data.write().unwrap();
 
+    // Convert Param back to Val for return
     let rv = match res {
         Param::I8(i) => Val::I32(i as i32),
         Param::I16(i) => Val::I32(i as i32),

@@ -33,7 +33,7 @@ impl ExternalFunctions for DirectExt {
 }
 
 extern "C" fn log_info_wasm(params: FfiParamArray) -> FfiParam {
-    let Ok(local) = params.to_params_clone::<DirectExt>() else {
+    let Ok(local) = params.as_params::<DirectExt>() else {
         return Param::Error("Failed to unpack params".to_string()).to_ext_param();
     };
 
@@ -103,6 +103,7 @@ pub fn test_math() -> Result<()> {
         .call_wasm_fn("math_ops_test", params, DataType::F32);
 
     println!("[test/ext]: wasm code multiplied 3.5 by 5.0 for {:#?}", res);
+    assert!((res.to_result::<f32>()? - 17.5).abs() < f32::EPSILON); 
 
     Ok(())
 }
