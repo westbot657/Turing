@@ -463,7 +463,7 @@ impl FfiParamArray {
 
     /// Only call this if you allocated the FfiParamArray via `Params.to_ffi()`
     /// otherwise use `to_params_clone` instead
-    pub fn to_params<Ext: ExternalFunctions>(self) -> Result<Params> {
+    pub fn into_params<Ext: ExternalFunctions>(self) -> Result<Params> {
         if self.ptr.is_null() || self.count == 0 {
             return Ok(Params { params: Vec::new() });
         }
@@ -475,7 +475,7 @@ impl FfiParamArray {
             // take ownership of the raw_vec
             let owned = raw_vec.into_vec();
             let params: Result<Vec<Param>> =
-                owned.into_iter().map(|p| p.to_param::<Ext>()).collect();
+                owned.into_iter().map(|p| p.into_param::<Ext>()).collect();
 
             Ok(Params { params: params? })
         }
@@ -483,7 +483,7 @@ impl FfiParamArray {
 
     /// Clones the parameters from the FfiParamArray without taking ownership.
     /// Does not free any memory.
-    pub fn to_params_clone<Ext: ExternalFunctions>(&self) -> Result<Params> {
+    pub fn as_params<Ext: ExternalFunctions>(&self) -> Result<Params> {
         if self.ptr.is_null() || self.count == 0 {
             return Ok(Params { params: Vec::new() });
         }
@@ -495,7 +495,7 @@ impl FfiParamArray {
 
             let mut result = Vec::with_capacity(slice.len());
             for ffi_param in slice {
-                result.push(ffi_param.to_param_clone::<Ext>()?);
+                result.push(ffi_param.as_param::<Ext>()?);
             }
             Ok(Params { params: result })
         }
@@ -512,7 +512,7 @@ impl FfiParamArray {
 }
 
 impl FfiParam {
-    pub fn to_param<Ext: ExternalFunctions>(self) -> Result<Param> {
+    pub fn into_param<Ext: ExternalFunctions>(self) -> Result<Param> {
         Ok(match self.type_id {
             DataType::I8 => Param::I8(unsafe { self.value.i8 }),
             DataType::I16 => Param::I16(unsafe { self.value.i16 }),
@@ -548,7 +548,7 @@ impl FfiParam {
         })
     }
 
-    pub fn to_param_clone<Ext: ExternalFunctions>(&self) -> Result<Param> {
+    pub fn as_param<Ext: ExternalFunctions>(&self) -> Result<Param> {
         Ok(match self.type_id {
             DataType::I8 => Param::I8(unsafe { self.value.i8 }),
             DataType::I16 => Param::I16(unsafe { self.value.i16 }),

@@ -33,7 +33,7 @@ impl ExternalFunctions for DirectExt {
 }
 
 extern "C" fn log_info_wasm(params: FfiParamArray) -> FfiParam {
-    let Ok(local) = params.to_params_clone::<DirectExt>() else {
+    let Ok(local) = params.as_params::<DirectExt>() else {
         return Param::Error("Failed to unpack params".to_string()).to_ext_param();
     };
 
