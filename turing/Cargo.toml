@@ -21,6 +21,7 @@ wat = "1.239.0"
 tokio = "1.48.0"
 slotmap = "1"
 num_enum = "0.7.5"
+smallvec = "1"
 
 [dev-dependencies]
 wasmprinter = "0.243.0"

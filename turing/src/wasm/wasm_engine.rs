@@ -243,7 +243,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
                 name.clone().as_str(),
                 ft,
                 move |caller, ps, rs| {
-                    wasm_bind_env::<Ext>(&data2, caller, &cap, ps, rs, &pts, &callback)
+                    wasm_bind_env::<Ext>(&data2, caller, &cap, ps, rs, pts.as_slice(), &callback)
                 }
             )?;
 
@@ -316,15 +316,16 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
     cap: &String,
     ps: &[Val],
     rs: &mut [Val],
-    p: &Vec<DataType>,
-    func: &WasmCallback
+    p: &[DataType],
+    func: &WasmCallback,
 ) -> Result<()> {
 
     if !data.read().expect("WasmDataState lock poisoned").active_capabilities.contains(cap) {
         return Err(anyhow!("Mod capability '{}' is not currently loaded", cap))
     }
 
-    let mut params = Params::new();
+    // pre-allocate params to avoid repeated reallocations
+    let mut params = Params::of_size(p.len() as u32);
     for (exp_typ, value) in p.iter().zip(ps) {
         params.push(exp_typ.to_param_with_val(value, &mut caller, &data)?)
     }
