@@ -1,335 +1,140 @@
-#![allow(static_mut_refs, clippy::new_without_default)]
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::ffi::{c_char, c_void};
+use std::marker::PhantomData;
+use std::path::Path;
+use std::sync::{Arc, RwLock};
+use crate::wasm::wasm_engine::{write_string, WasmFnMetadata, WasmInterpreter};
+use anyhow::{anyhow, Result};
+use slotmap::{new_key_type, SlotMap};
+use wasmtime::{Caller, Val};
+use wasmtime_wasi::p1::WasiP1Ctx;
+use crate::interop::params::{DataType, Param, Params};
+use crate::interop::types::ExtPointer;
 
-pub mod interop;
-pub mod util;
 pub mod wasm;
-
-pub mod ffi;
+pub mod interop;
 
 #[cfg(test)]
-pub mod tests;
+mod tests;
 
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::ffi::{CStr, CString, c_char, c_void};
-use std::mem;
-
-use anyhow::{Result, anyhow};
-use slotmap::{SlotMap, new_key_type};
-use wasmtime::{Caller, Engine, FuncType, Linker, Memory, MemoryAccessError, Val, ValType};
-use wasmtime_wasi::p1::WasiP1Ctx;
-
-use crate::ffi::{FfiCallback, wasm_bind_env, wasm_host_strcpy};
-use crate::wasm::wasm_engine::WasmInterpreter;
-
-use crate::interop::params::{ParamType, Params};
-
-use self::interop::params::Param;
-use self::util::ToCStr;
-
-type AbortFn = extern "C" fn(*const c_char, *const c_char);
-type LogFn = extern "C" fn(*const c_char);
-type FreeStr = extern "C" fn(*const c_char);
-
-/// pre-defined functions that turing.rs uses directly.
-pub struct ExtFns {
-    pub abort: AbortFn,
-    pub log_info: LogFn,
-    pub log_warn: LogFn,
-    pub log_critical: LogFn,
-    pub log_debug: LogFn,
-    pub free_cs_string: FreeStr,
+pub trait ExternalFunctions {
+    fn abort(error_type: String, error: String) -> !;
+    fn log_info(msg: impl ToString);
+    fn log_warn(msg: impl ToString);
+    fn log_debug(msg: impl ToString);
+    fn log_critical(msg: impl ToString);
+    fn free_string(ptr: *const c_char);
 }
 
-extern "C" fn null_abort(_: *const c_char, _: *const c_char) {}
-extern "C" fn null_log(_: *const c_char) {}
-extern "C" fn null_free(_: *const c_char) {}
-impl ExtFns {
-    pub fn new() -> Self {
-        Self {
-            abort: null_abort,
-            log_info: null_log,
-            log_warn: null_log,
-            log_critical: null_log,
-            log_debug: null_log,
-            free_cs_string: null_free,
-        }
-    }
-
-    /// # Safety
-    /// 404 safety not found (only safe if the function pointer points to a perfectly matching
-    ///     function as the default)
-    pub unsafe fn link(&mut self, fn_name: &str, ptr: *const c_void) {
-        unsafe {
-            match fn_name {
-                "abort" => self.abort = mem::transmute(ptr),
-                "log_info" => self.log_info = mem::transmute(ptr),
-                "log_warn" => self.log_warn = mem::transmute(ptr),
-                "log_critical" => self.log_critical = mem::transmute(ptr),
-                "log_debug" => self.log_debug = mem::transmute(ptr),
-                "free_cs_string" => self.free_cs_string = mem::transmute(ptr),
-                _ => {
-                    eprintln!("Unrecognized function name: {}", fn_name);
-                }
-            }
-        }
-    }
-}
-
-impl Default for ExtFns {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-type WasmFunctionMetadata = (String, *const c_void, Vec<ParamType>, Vec<ParamType>);
-
-#[derive(Default)]
-pub struct TuringState {
-    /// The WASM engine
-    pub wasm: Option<WasmInterpreter>,
-    /// collection of functions to link to wasm. Only used during the initialization phase
-    pub wasm_fns: HashMap<String, WasmFunctionMetadata>,
-    /// id-tracking map of param objects for ffi.
-    pub param_builders: SlotMap<ParamsKey, Params>,
-    pub active_builder: Option<ParamsKey>,
-    /// active WASM function definition for use in the initialization phase
-    pub active_wasm_fn: Option<String>,
-
-    /// Stores state that is passed around
-    pub turing_mini_ctx: TuringDataState,
+new_key_type! {
+    pub struct OpaquePointerKey;
 }
 
 #[derive(Default)]
-pub struct TuringDataState {
+pub struct WasmDataState {
     /// maps opaque pointer ids to real pointers
-    pub opaque_pointers: SlotMap<OpaquePointerKey, *const c_void>,
+    pub opaque_pointers: SlotMap<OpaquePointerKey, ExtPointer<c_void>>,
     /// maps real pointers back to their opaque pointer ids
-    pub pointer_backlink: HashMap<*const c_void, OpaquePointerKey>,
+    pub pointer_backlink: HashMap<ExtPointer<c_void>, OpaquePointerKey>,
     /// queue of strings for wasm to fetch (needed due to reentrancy limitations)
     pub str_cache: VecDeque<String>,
     /// which mods are currently active
     pub active_capabilities: HashSet<String>,
 }
 
-pub type ParamKey = u64;
-pub const PARAM_KEY_INVALID: ParamKey = 0;
-
-new_key_type! {
-    pub struct ParamsKey;
-    pub struct OpaquePointerKey;
+pub struct Turing<Ext: ExternalFunctions + Send + Sync + 'static> {
+    pub wasm: WasmInterpreter<Ext>,
+    pub data: Arc<RwLock<WasmDataState>>,
+    _ext: PhantomData<Ext>
 }
 
-trait IntoWasm<T> {
-    fn into_wasm(self) -> Result<T, wasmtime::Error>;
+pub struct TuringSetup<Ext: ExternalFunctions + Send + Sync + 'static> {
+    wasm_fns: HashMap<String, WasmFnMetadata>,
+    _ext: PhantomData<Ext>
 }
 
-impl<T, E> IntoWasm<T> for Result<T, E>
-where
-    E: std::fmt::Display + std::fmt::Debug + Send + Sync + 'static,
-{
-    fn into_wasm(self) -> Result<T, wasmtime::Error> {
-        self.map_err(|e| wasmtime::Error::msg(format!("{}", e)))
+impl<Ext: ExternalFunctions + Send + Sync + 'static> TuringSetup<Ext> {
+
+    pub fn build(self) -> Result<Turing<Ext>> {
+        let data = Arc::new(RwLock::new(WasmDataState::default()));
+        let wasm = WasmInterpreter::new(self.wasm_fns, Arc::clone(&data))?;
+        Ok(Turing::build(wasm, data))
     }
+
+    /// Attempts to add a new function. Returns err if the function already exists
+    pub fn add_function(&mut self, name: impl ToString, metadata: WasmFnMetadata) -> Result<()> {
+        let name = name.to_string();
+        if self.wasm_fns.contains_key(&name) {
+            return Err(anyhow!("A function named '{}' has already been registered", name))
+        }
+        self.wasm_fns.insert(name, metadata);
+        Ok(())
+    }
+
 }
 
-/// gets a string out of wasm memory into rust memory.
-fn get_string(message: u32, data: &[u8]) -> String {
-    CStr::from_bytes_until_nul(&data[message as usize..])
-        .expect("Not a valid CStr")
-        .to_string_lossy()
-        .to_string()
-    // let mut output_string = String::new();
-    // for i in message..u32::MAX {
-    //     let byte: &u8 = data.get(i as usize).unwrap();
-    //     if *byte == 0u8 {
-    //         break;
-    //     }
-    //     output_string.push(char::from(*byte));
-    // }
-    // output_string
-}
+impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
 
-/// writes a string from rust memory to wasm memory.
-fn write_string(
-    pointer: u32,
-    string: String,
-    memory: &Memory,
-    caller: Caller<'_, WasiP1Ctx>,
-) -> Result<(), MemoryAccessError> {
-    let string = CString::new(string).unwrap();
-    let string = string.into_bytes_with_nul();
-    memory.write(caller, pointer as usize, &string)
-}
+    pub fn new() -> TuringSetup<Ext> {
+        TuringSetup {
+            wasm_fns: HashMap::default(),
+            _ext: PhantomData::default(),
+        }
+    }
 
-impl TuringState {
-    pub fn new() -> Self {
+    fn build(wasm: WasmInterpreter<Ext>, data: Arc<RwLock<WasmDataState>>) -> Self {
         Self {
-            wasm: None,
-            wasm_fns: HashMap::new(),
-            param_builders: SlotMap::with_key(),
-            active_builder: None,
-            active_wasm_fn: None,
-            turing_mini_ctx: TuringDataState::default(),
+            wasm,
+            data,
+            _ext: PhantomData::default(),
         }
     }
 
-    pub fn push_param(&mut self, param: Param) -> Result<()> {
-        let Some(builder) = self.active_builder else {
-            return Err(anyhow!("active builder not set"));
-        };
+    pub fn load_script(&mut self, source: impl ToString, loaded_capabilities: &[impl ToString]) -> Result<()> {
 
-        match self.param_builders.get_mut(builder) {
-            Some(builder) => {
-                builder.push(param);
-                Ok(())
-            }
-            None => Err(anyhow!("param object does not exist")),
+        let source = source.to_string();
+        let source = Path::new(&source);
+        let capabilities: HashSet<String> = loaded_capabilities.iter().map(|c| c.to_string()).collect();
+
+        if let Err(e) = source.metadata() {
+            return Err(anyhow!("Script does not exist: {:#?}, {:#?}", source, e))
         }
+
+        self.wasm.load_script(source)?;
+        let mut write = self.data.write().expect("WasmDataState lock poisoned");
+        write.active_capabilities = capabilities;
+
+        Ok(())
     }
 
-    pub fn set_param(&mut self, index: u32, value: Param) -> Result<()> {
-        let Some(builder) = self.active_builder else {
-            return Err(anyhow!("active builder not set"));
-        };
-
-        let Some(builder) = self.param_builders.get_mut(builder) else {
-            return Err(anyhow!("param object does not exist"));
-        };
-        if builder.len() > index {
-            builder.set(index, value);
-            return Ok(());
-        }
-        if builder.len() == index {
-            builder.push(value);
-            return Ok(());
-        }
-        Err(anyhow!("Index out of bounds"))
+    pub fn call_wasm_fn(&mut self, name: impl ToString, params: Params, expected_return_type: DataType) -> Param {
+        let name = name.to_string();
+        self.wasm.call_fn(&name, params, expected_return_type, Arc::clone(&self.data))
     }
 
-    pub fn read_param(&self, index: u32) -> Param {
-        let Some(builder) = self.active_builder else {
-            return Param::Error("active builder not set".to_string());
-        };
 
-        if let Some(builder) = self.param_builders.get(builder) {
-            if index >= builder.len() {
-                Param::Error("Index out of bounds".to_string())
-            } else if let Some(val) = builder.get(index as usize) {
-                val.clone()
-            } else {
-                Param::Error("Could not read param for unknown reason".to_string())
-            }
-        } else {
-            Param::Error("param object does not exist".to_string())
-        }
-    }
-
-    pub fn swap_params(&mut self, params: ParamsKey) -> Result<Params> {
-        let p = Params::new();
-        if let Some(slot) = self.param_builders.get_mut(params) {
-            let old = mem::replace(slot, p);
-            Ok(old)
-        } else {
-            Err(anyhow!("Params object does not exist"))
-        }
-    }
-
-    pub fn bind_wasm(&mut self, engine: &Engine, linker: &mut Linker<WasiP1Ctx>) {
-        unsafe {
-            // Utility Functions
-
-            // _host_strcpy(location: *const c_char, size: u32);
-            // Should only be used in 2 situations:
-            // 1. after a call to a function that "returns" a string, the guest
-            //    is required to allocate the size returned in place of the string, and then
-            //    call this, passing the allocated pointer and the size.
-            //    If the size passed in does not exactly match the cached string, or there is no
-            //    cached string, then 0 is returned, otherwise the input pointer is returned.
-            // 2. for each argument of a function that expects a string, in linear order,
-            //    failing to retrieve all param strings in the correct order will invalidate
-            //    the strings with no way to recover.
-
-            linker
-                .func_new(
-                    "env",
-                    "_host_strcpy",
-                    FuncType::new(engine, vec![ValType::I32, ValType::I32], vec![ValType::I32]),
-                    wasm_host_strcpy,
-                )
-                .unwrap();
-
-            // C# wasm bindings
-            let fns;
-            {
-                fns = self.wasm_fns.clone();
-            }
-
-            // n: wasm name, cap: capability (mod), p: param types, r: return type.
-            for (n, (cap, func_ptr, p, r)) in fns.iter() {
-                let func: FfiCallback = mem::transmute(*func_ptr);
-
-                // unpack ffi type ids into wasm types
-                let mut p_types = Vec::new();
-                let mut r_type = Vec::new();
-                for pt in p {
-                    let p_type = match pt {
-                        ParamType::I8
-                        | ParamType::I16
-                        | ParamType::I32
-                        | ParamType::U8
-                        | ParamType::U16
-                        | ParamType::U32
-                        | ParamType::BOOL
-                        | ParamType::RustString
-                        | ParamType::ExtString
-                        | ParamType::OBJECT => ValType::I32,
-
-                        ParamType::I64 | ParamType::U64 => ValType::I64,
-
-                        ParamType::F32 => ValType::F32,
-                        ParamType::F64 => ValType::F64,
-                        _ => unreachable!("invalid parameter type"),
-                    };
-                    p_types.push(p_type);
-                }
-                if !r.is_empty() {
-                    let r_typ = match r[0] {
-                        ParamType::I8
-                        | ParamType::I16
-                        | ParamType::I32
-                        | ParamType::U8
-                        | ParamType::U16
-                        | ParamType::U32
-                        | ParamType::BOOL
-                        | ParamType::RustString
-                        | ParamType::ExtString
-                        | ParamType::OBJECT => ValType::I32,
-
-                        ParamType::I64 | ParamType::U64 => ValType::I64,
-
-                        ParamType::F32 => ValType::F32,
-                        ParamType::F64 => ValType::F64,
-                        _ => unreachable!("invalid return type"),
-                    };
-                    r_type.push(r_typ);
-                }
-
-                // register function to wasm.
-                let ft = FuncType::new(engine, p_types, r_type);
-                let p = p.clone();
-
-                let cap = cap.clone();
-                linker
-                    .func_new(
-                        "env",
-                        n.clone().as_str(),
-                        ft,
-                        move |caller: Caller<'_, WasiP1Ctx>, ps: &[Val], rs: &mut [Val]| {
-                            wasm_bind_env(caller, &cap, ps, rs, p.clone(), func)
-                        },
-                    )
-                    .unwrap();
-            }
-        }
-    }
 }
+
+/// internal for use in the wasm engine only
+pub(crate) fn wasm_host_strcpy(
+    data: &Arc<RwLock<WasmDataState>>,
+    mut caller: Caller<'_, WasiP1Ctx>,
+    ps: &[Val],
+    rs: &mut [Val],
+) -> Result<(), anyhow::Error> {
+    let ptr = ps[0].i32().unwrap();
+    let size = ps[1].i32().unwrap();
+
+    if let Some(next_str) = data.write().expect("WasmDataState lock poisoned").str_cache.pop_front()
+        && next_str.len() + 1 == size as usize
+    {
+        if let Some(memory) = caller.get_export("memory").and_then(|m| m.into_memory()) {
+            write_string(ptr as u32, next_str, &memory, caller)?;
+            rs[0] = Val::I32(ptr);
+        }
+        return Ok(());
+    }
+
+    Ok(())
+}
+

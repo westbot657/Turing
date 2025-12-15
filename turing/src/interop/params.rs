@@ -1,21 +1,20 @@
-use std::ffi::{CStr, CString, c_char, c_void};
+use std::ffi::{c_char, c_void, CStr, CString};
 use std::fmt::Display;
 use std::mem;
-
-use anyhow::{Result, anyhow};
+use std::sync::{Arc, RwLock};
+use anyhow::{anyhow, Result};
 use num_enum::TryFromPrimitive;
 use slotmap::KeyData;
-use wasmtime::{Memory, Store, Val};
+use wasmtime::{Caller, Memory, Store, Val, ValType};
 use wasmtime_wasi::p1::WasiP1Ctx;
-
-use crate::ffi::Ext;
+use crate::{ExternalFunctions, OpaquePointerKey, WasmDataState};
 use crate::interop::types::ExtString;
-use crate::{OpaquePointerKey, ParamKey, ParamsKey, TuringDataState, TuringState, get_string};
+use crate::wasm::wasm_engine::get_string;
 
-/// These ids must remain consistent on both sides of ffi.
+
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFromPrimitive)]
-pub enum ParamType {
+pub enum DataType {
     I8 = 1,
     I16 = 2,
     I32 = 3,
@@ -26,54 +25,152 @@ pub enum ParamType {
     U64 = 8,
     F32 = 9,
     F64 = 10,
-    BOOL = 11,
+    Bool = 11,
     /// allocated via CString, must be freed via CString::from_raw
     RustString = 12,
     /// allocated externally, handled via Cs::free_string
     ExtString = 13,
     /// Represents an object ID, which is mapped by the pointer backlink system.
-    OBJECT = 14,
+    Object = 14,
     // Allocated via CString, must be freed via CString::from_raw
     RustError = 15,
     // Allocated externally, handled via Cs::free_string
     ExtError = 16,
-    VOID = 17,
+    Void = 17,
 }
-
-impl Display for ParamType {
+impl Display for DataType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
-            ParamType::I8 => "I8",
-            ParamType::I16 => "I16",
-            ParamType::I32 => "I32",
-            ParamType::I64 => "I64",
-            ParamType::U8 => "U8",
-            ParamType::U16 => "U16",
-            ParamType::U32 => "U32",
-            ParamType::U64 => "U64",
-            ParamType::F32 => "F32",
-            ParamType::F64 => "F64",
-            ParamType::BOOL => "BOOL",
-            ParamType::RustString => "RUST_STRING",
-            ParamType::ExtString => "EXT_STRING",
-            ParamType::OBJECT => "OBJECT",
-            ParamType::RustError => "RUST_ERROR",
-            ParamType::ExtError => "EXT_ERROR",
-            ParamType::VOID => "VOID",
+            DataType::I8 => "I8",
+            DataType::I16 => "I16",
+            DataType::I32 => "I32",
+            DataType::I64 => "I64",
+            DataType::U8 => "U8",
+            DataType::U16 => "U16",
+            DataType::U32 => "U32",
+            DataType::U64 => "U64",
+            DataType::F32 => "F32",
+            DataType::F64 => "F64",
+            DataType::Bool => "BOOL",
+            DataType::RustString => "RUST_STRING",
+            DataType::ExtString => "EXT_STRING",
+            DataType::Object => "OBJECT",
+            DataType::RustError => "RUST_ERROR",
+            DataType::ExtError => "EXT_ERROR",
+            DataType::Void => "VOID",
         };
         write!(f, "{}", s)
     }
 }
 
-impl ParamType {
+impl DataType {
     /// Checks if the ParamType is valid.
     pub fn is_valid(&self) -> bool {
-        ParamType::try_from(*self as u32).is_ok()
+        DataType::try_from(*self as u32).is_ok()
     }
+
+    pub fn is_valid_param_type(&self) -> bool {
+        matches!(
+            self,
+            DataType::I8
+            | DataType::I16
+            | DataType::I32
+            | DataType::I64
+            | DataType::U8
+            | DataType::U16
+            | DataType::U32
+            | DataType::U64
+            | DataType::F32
+            | DataType::F64
+            | DataType::Bool
+            | DataType::RustString
+            | DataType::ExtString
+            | DataType::Object
+        )
+    }
+
+    pub fn is_valid_return_type(&self) -> bool {
+        matches!(
+            self,
+            DataType::I8
+            | DataType::I16
+            | DataType::I32
+            | DataType::I64
+            | DataType::U8
+            | DataType::U16
+            | DataType::U32
+            | DataType::U64
+            | DataType::F32
+            | DataType::F64
+            | DataType::Bool
+            | DataType::RustString
+            | DataType::ExtString
+            | DataType::Object
+            | DataType::Void
+        )
+    }
+
+    pub fn to_val_type(&self) -> Result<ValType> {
+        match self {
+            DataType::I8
+            | DataType::I16
+            | DataType::I32
+            | DataType::U8
+            | DataType::U16
+            | DataType::U32
+            | DataType::Bool
+            | DataType::RustString
+            | DataType::ExtString
+            | DataType::Object => Ok(ValType::I32),
+
+            DataType::I64 | DataType::U64 => Ok(ValType::I64),
+
+            DataType::F32 => Ok(ValType::F32),
+            DataType::F64 => Ok(ValType::F64),
+
+            _ => Err(anyhow!("Invalid wasm value type: {}", self))
+        }
+    }
+
+    pub fn to_param_with_val(&self, val: &Val, caller: &mut Caller<'_, WasiP1Ctx>, data: &Arc<RwLock<WasmDataState>>) -> Result<Param> {
+        match (self, val) {
+            (DataType::I8, Val::I32(i)) => Ok(Param::I8(*i as i8)),
+            (DataType::I16, Val::I32(i)) => Ok(Param::I16(*i as i16)),
+            (DataType::I32, Val::I32(i)) => Ok(Param::I32(*i)),
+            (DataType::I64, Val::I64(i)) => Ok(Param::I64(*i)),
+            (DataType::U8, Val::I32(u)) => Ok(Param::U8(*u as u8)),
+            (DataType::U16, Val::I32(u)) => Ok(Param::U16(*u as u16)),
+            (DataType::U32, Val::I32(u)) => Ok(Param::U32(*u as u32)),
+            (DataType::U64, Val::I64(u)) => Ok(Param::U64(*u as u64)),
+            (DataType::F32, Val::F32(f)) => Ok(Param::F32(f32::from_bits(*f))),
+            (DataType::F64, Val::F64(f)) => Ok(Param::F64(f64::from_bits(*f))),
+            (DataType::Bool, Val::I32(b)) => Ok(Param::Bool(*b != 0)),
+            (DataType::RustString | DataType::ExtString, Val::I32(ptr)) => {
+                let ptr = *ptr as u32;
+
+                let Some(memory) = caller.get_export("memory").and_then(|e| e.into_memory()) else {
+                    return Err(anyhow!("wasm does not export memory"))
+                };
+                let st = get_string(ptr, memory.data(&caller));
+                Ok(Param::String(st))
+            }
+            (DataType::Object, Val::I64(pointer_id)) => {
+                let pointer_key =
+                    OpaquePointerKey::from(KeyData::from_ffi(*pointer_id as u64));
+
+                if let Some(true_pointer) = data.read().unwrap().opaque_pointers.get(pointer_key) {
+                    Ok(Param::Object(**true_pointer))
+                } else {
+                    Err(anyhow!("opaque pointer does not correspond to a real pointer"))
+                }
+
+            }
+            _ => Err(anyhow!("Mismatched parameter type"))
+        }
+    }
+
 }
 
-/// local repr of ffi data
-/// FFI friendly enum for passing parameters to/from wasm functions
 #[derive(Debug, Clone, PartialEq)]
 pub enum Param {
     I8(i8),
@@ -93,172 +190,152 @@ pub enum Param {
     Void,
 }
 
-/// C repr of ffi data
-#[repr(C)]
-pub union RawParam {
-    i8: i8,
-    i16: i16,
-    i32: i32,
-    i64: i64,
-    u8: u8,
-    u16: u16,
-    u32: u32,
-    u64: u64,
-    f32: f32,
-    f64: f64,
-    bool: bool,
-    // represented by either RustString or ExtString
-    string: *const c_char,
-    object: *const c_void,
-    error: *const c_char,
-    void: (),
-}
-
-/// C tagged repr of ffi data
-#[repr(C)]
-pub struct FfiParam {
-    pub type_id: ParamType,
-    pub value: RawParam,
-}
-
-#[repr(C)]
-pub struct FfiParamArray {
-    pub count: u32,
-    pub ptr: *const c_void,
-}
 
 impl Param {
-    #[rustfmt::skip]
-    pub fn to_ffi_param(self) -> FfiParam {
-        match self {
-            Param::I8(x) => FfiParam { type_id: ParamType::I8, value: RawParam { i8: x } },
-            Param::I16(x) => FfiParam { type_id: ParamType::I16, value: RawParam { i16: x } },
-            Param::I32(x) => FfiParam { type_id: ParamType::I32, value: RawParam { i32: x } },
-            Param::I64(x) => FfiParam { type_id: ParamType::I64, value: RawParam { i64: x } },
-            Param::U8(x) => FfiParam { type_id: ParamType::U8, value: RawParam { u8: x } },
-            Param::U16(x) => FfiParam { type_id: ParamType::U16, value: RawParam { u16: x } },
-            Param::U32(x) => FfiParam { type_id: ParamType::U32, value: RawParam { u32: x } },
-            Param::U64(x) => FfiParam { type_id: ParamType::U64, value: RawParam { u64: x } },
-            Param::F32(x) => FfiParam { type_id: ParamType::F32, value: RawParam { f32: x } },
-            Param::F64(x) => FfiParam { type_id: ParamType::F64, value: RawParam { f64: x } },
-            Param::Bool(x) => FfiParam { type_id: ParamType::BOOL, value: RawParam { bool: x } },
-            // allocated via CString, must be freed via CString::from_raw
-            Param::String(x) => FfiParam { type_id: ParamType::RustString, value: RawParam { string: CString::new(x).unwrap().into_raw() } },
-            Param::Object(x) => FfiParam { type_id: ParamType::OBJECT, value: RawParam { object: x } },
-            Param::Error(x) => FfiParam { type_id: ParamType::RustError, value: RawParam { error: CString::new(x).unwrap().into_raw() } },
-            Param::Void => FfiParam { type_id: ParamType::VOID, value: RawParam { void: () } },
-        }
-    }
-
-    /// If self is an Error value, returns Err, else Ok(())
-    /// If self is a String, it will free the raw pointer (unless null)
-    pub fn to_result(self) -> Result<()> {
-        match self {
-            Param::Error(e) => Err(anyhow!(e)),
-            _ => Ok(()),
-        }
-    }
 
     /// Constructs a Param from a Wasmtime Val and type id.
-    pub fn from_typval(
-        typ: ParamType,
+    pub fn from_type_val(
+        typ: DataType,
         val: Val,
-        context: &TuringDataState,
+        data: &Arc<RwLock<WasmDataState>>,
         memory: &Memory,
         caller: &Store<WasiP1Ctx>,
     ) -> Self {
         match typ {
-            ParamType::I8 => Param::I8(val.unwrap_i32() as i8),
-            ParamType::I16 => Param::I16(val.unwrap_i32() as i16),
-            ParamType::I32 => Param::I32(val.unwrap_i32()),
-            ParamType::I64 => Param::I64(val.unwrap_i64()),
-            ParamType::U8 => Param::U8(val.unwrap_i32() as u8),
-            ParamType::U16 => Param::U16(val.unwrap_i32() as u16),
-            ParamType::U32 => Param::U32(val.unwrap_i32() as u32),
-            ParamType::U64 => Param::U64(val.unwrap_i64() as u64),
-            ParamType::F32 => Param::F32(val.unwrap_f32()),
-            ParamType::F64 => Param::F64(val.unwrap_f64()),
-            ParamType::BOOL => Param::Bool(val.unwrap_i32() != 0),
+            DataType::I8 => Param::I8(val.unwrap_i32() as i8),
+            DataType::I16 => Param::I16(val.unwrap_i32() as i16),
+            DataType::I32 => Param::I32(val.unwrap_i32()),
+            DataType::I64 => Param::I64(val.unwrap_i64()),
+            DataType::U8 => Param::U8(val.unwrap_i32() as u8),
+            DataType::U16 => Param::U16(val.unwrap_i32() as u16),
+            DataType::U32 => Param::U32(val.unwrap_i32() as u32),
+            DataType::U64 => Param::U64(val.unwrap_i64() as u64),
+            DataType::F32 => Param::F32(val.unwrap_f32()),
+            DataType::F64 => Param::F64(val.unwrap_f64()),
+            DataType::Bool => Param::Bool(val.unwrap_i32() != 0),
             // allocated externally, we copy the string
-            ParamType::ExtString => {
+            DataType::ExtString => {
                 let ptr = val.unwrap_i32() as u32;
                 let st = get_string(ptr, memory.data(caller));
                 Param::String(st)
             }
-            ParamType::RustString => unreachable!("RustString should not be used in from_typval"),
-            ParamType::OBJECT => {
-                let op = val.unwrap_i64() as ParamKey;
+            DataType::RustString => unreachable!("RustString should not be used in from_typval"),
+            DataType::Object => {
+                let op = val.unwrap_i64() as u64;
                 let key = OpaquePointerKey::from(KeyData::from_ffi(op));
 
-                let real = context
+                let real = data.read().expect("WasmDataState lock poisoned")
                     .opaque_pointers
                     .get(key)
                     .copied()
-                    .unwrap_or(std::ptr::null::<c_void>());
-                Param::Object(real)
+                    .unwrap_or_default();
+                Param::Object(real.ptr)
             }
-            ParamType::ExtError => {
+            DataType::ExtError => {
                 let ptr = val.unwrap_i32() as u32;
                 let st = get_string(ptr, memory.data(caller));
                 Param::Error(st)
             }
-            ParamType::RustError => unreachable!("RustError should not be used in from_typval"),
-            ParamType::VOID => Param::Void,
+            DataType::RustError => unreachable!("RustError should not be used in from_typval"),
+            DataType::Void => Param::Void,
+        }
+    }
+
+    #[rustfmt::skip]
+    pub fn to_ffi_param(self) -> FfiParam {
+        match self {
+            Param::I8(x) => FfiParam { type_id: DataType::I8, value: RawParam { i8: x } },
+            Param::I16(x) => FfiParam { type_id: DataType::I16, value: RawParam { i16: x } },
+            Param::I32(x) => FfiParam { type_id: DataType::I32, value: RawParam { i32: x } },
+            Param::I64(x) => FfiParam { type_id: DataType::I64, value: RawParam { i64: x } },
+            Param::U8(x) => FfiParam { type_id: DataType::U8, value: RawParam { u8: x } },
+            Param::U16(x) => FfiParam { type_id: DataType::U16, value: RawParam { u16: x } },
+            Param::U32(x) => FfiParam { type_id: DataType::U32, value: RawParam { u32: x } },
+            Param::U64(x) => FfiParam { type_id: DataType::U64, value: RawParam { u64: x } },
+            Param::F32(x) => FfiParam { type_id: DataType::F32, value: RawParam { f32: x } },
+            Param::F64(x) => FfiParam { type_id: DataType::F64, value: RawParam { f64: x } },
+            Param::Bool(x) => FfiParam { type_id: DataType::Bool, value: RawParam { bool: x } },
+            // allocated via CString, must be freed via CString::from_raw
+            Param::String(x) => FfiParam { type_id: DataType::RustString, value: RawParam { string: CString::new(x).unwrap().into_raw() } },
+            Param::Object(x) => FfiParam { type_id: DataType::Object, value: RawParam { object: x } },
+            Param::Error(x) => FfiParam { type_id: DataType::RustError, value: RawParam { error: CString::new(x).unwrap().into_raw() } },
+            Param::Void => FfiParam { type_id: DataType::Void, value: RawParam { void: () } },
+        }
+    }
+    #[rustfmt::skip]
+    pub fn to_ext_param(self) -> FfiParam {
+        match self {
+            Param::I8(x) => FfiParam { type_id: DataType::I8, value: RawParam { i8: x } },
+            Param::I16(x) => FfiParam { type_id: DataType::I16, value: RawParam { i16: x } },
+            Param::I32(x) => FfiParam { type_id: DataType::I32, value: RawParam { i32: x } },
+            Param::I64(x) => FfiParam { type_id: DataType::I64, value: RawParam { i64: x } },
+            Param::U8(x) => FfiParam { type_id: DataType::U8, value: RawParam { u8: x } },
+            Param::U16(x) => FfiParam { type_id: DataType::U16, value: RawParam { u16: x } },
+            Param::U32(x) => FfiParam { type_id: DataType::U32, value: RawParam { u32: x } },
+            Param::U64(x) => FfiParam { type_id: DataType::U64, value: RawParam { u64: x } },
+            Param::F32(x) => FfiParam { type_id: DataType::F32, value: RawParam { f32: x } },
+            Param::F64(x) => FfiParam { type_id: DataType::F64, value: RawParam { f64: x } },
+            Param::Bool(x) => FfiParam { type_id: DataType::Bool, value: RawParam { bool: x } },
+            // allocated via CString, must be freed via CString::from_raw
+            Param::String(x) => FfiParam { type_id: DataType::ExtString, value: RawParam { string: CString::new(x).unwrap().into_raw() } },
+            Param::Object(x) => FfiParam { type_id: DataType::Object, value: RawParam { object: x } },
+            Param::Error(x) => FfiParam { type_id: DataType::ExtError, value: RawParam { error: CString::new(x).unwrap().into_raw() } },
+            Param::Void => FfiParam { type_id: DataType::Void, value: RawParam { void: () } },
+        }
+    }
+
+    pub fn to_result<T: FromParam>(self) -> Result<T> {
+        T::from_param(self)
+    }
+
+}
+
+pub trait FromParam: Sized {
+    fn from_param(param: Param) -> Result<Self>;
+}
+macro_rules! deref_param {
+    ( $param:expr, $case:tt ) => {
+        match $param {
+            Param::$case(v) => Ok(v),
+            Param::Error(e) => Err(anyhow!("{}", e)),
+            _ => Err(anyhow!("Incorrect data type"))
+        }
+    };
+    ( $tp:ty => $case:tt ) => {
+        impl FromParam for $tp {
+            fn from_param(param: Param) -> Result<Self> {
+                deref_param!(param, $case)
+            }
+        }
+    }
+}
+deref_param! { i8     => I8     }
+deref_param! { i16    => I16    }
+deref_param! { i32    => I32    }
+deref_param! { i64    => I64    }
+deref_param! { u8     => U8     }
+deref_param! { u16    => U16    }
+deref_param! { u32    => U32    }
+deref_param! { u64    => U64    }
+deref_param! { f32    => F32    }
+deref_param! { f64    => F64    }
+deref_param! { bool   => Bool   }
+deref_param! { String => String }
+impl FromParam for () {
+    fn from_param(param: Param) -> Result<Self> {
+        match param {
+            Param::Void => Ok(()),
+            Param::Error(e) => Err(anyhow!("{}", e)),
+            _ => Err(anyhow!("Incorrect data type"))
         }
     }
 }
 
-impl FfiParam {
-    pub fn to_param(self) -> Result<Param> {
-        Ok(match self.type_id {
-            ParamType::I8 => Param::I8(unsafe { self.value.i8 }),
-            ParamType::I16 => Param::I16(unsafe { self.value.i16 }),
-            ParamType::I32 => Param::I32(unsafe { self.value.i32 }),
-            ParamType::I64 => Param::I64(unsafe { self.value.i64 }),
-            ParamType::U8 => Param::U8(unsafe { self.value.u8 }),
-            ParamType::U16 => Param::U16(unsafe { self.value.u16 }),
-            ParamType::U32 => Param::U32(unsafe { self.value.u32 }),
-            ParamType::U64 => Param::U64(unsafe { self.value.u64 }),
-            ParamType::F32 => Param::F32(unsafe { self.value.f32 }),
-            ParamType::F64 => Param::F64(unsafe { self.value.f64 }),
-            ParamType::BOOL => Param::Bool(unsafe { self.value.bool }),
-            ParamType::RustString => Param::String(unsafe {
-                CString::from_raw(self.value.string as *mut c_char)
-                    .to_str()
-                    .expect("Rust invalid string")
-                    .to_string()
-            }),
-            ParamType::ExtString => {
-                Param::String(unsafe { ExtString::from(self.value.string).to_string() })
-            }
-            ParamType::OBJECT => Param::Object(unsafe { self.value.object }),
-            ParamType::RustError => Param::Error(unsafe {
-                CString::from_raw(self.value.error as *mut c_char)
-                    .to_str()
-                    .expect("Rust invalid string")
-                    .to_string()
-            }),
-            ParamType::ExtError => {
-                Param::Error(unsafe { ExtString::from(self.value.error).to_string() })
-            }
-            ParamType::VOID => Param::Void,
-        })
-    }
-}
 
-impl From<Param> for FfiParam {
-    fn from(value: Param) -> Self {
-        value.to_ffi_param()
-    }
-}
-
-/// A collection of parameters to be passed to a wasm function.
-/// These get converted to WASM Vals when calling and
-/// are built up in the host environment.
-#[derive(Debug, Clone, Default)]
 pub struct Params {
-    params: Vec<Param>,
+    params: Vec<Param>
 }
+
 
 impl Params {
     pub fn new() -> Self {
@@ -292,7 +369,7 @@ impl Params {
     }
 
     /// Converts the Params into a vector of Wasmtime Val types for function calling.
-    pub fn to_args(self, state: &mut TuringDataState) -> Vec<Val> {
+    pub fn to_args(self, data: &Arc<RwLock<WasmDataState>>) -> Vec<Val> {
         let mut vals = Vec::new();
 
         for p in self.params {
@@ -310,20 +387,20 @@ impl Params {
                 Param::Bool(b) => Val::I32(if b { 1 } else { 0 }),
                 Param::String(st) => {
                     let l = st.len() + 1;
-                    state.str_cache.push_back(st);
+                    data.write().expect("WasmDataState lock poisoned").str_cache.push_back(st);
                     Val::I32(l as i32)
                 }
-                Param::Object(rp) => match state.pointer_backlink.get(&rp) {
+                Param::Object(rp) => match data.read().expect("WasmDataState lock poisoned").pointer_backlink.get(&rp.into()) {
                     Some(op) => Val::I32(op.0.as_ffi() as i32),
                     None => {
-                        let op = state.opaque_pointers.insert(rp);
-                        state.pointer_backlink.insert(rp, op);
+                        let op = data.write().expect("WasmDataState lock poisoned").opaque_pointers.insert(rp.into());
+                        data.write().expect("WasmDataState lock poisoned").pointer_backlink.insert(rp.into(), op);
                         Val::I32(op.0.as_ffi() as i32)
                     }
                 },
                 Param::Error(st) => {
                     let l = st.len() + 1;
-                    state.str_cache.push_back(st);
+                    data.write().expect("WasmDataState lock poisoned").str_cache.push_back(st);
                     Val::I32(l as i32)
                 }
                 _ => unreachable!("Void shouldn't ever be added as an arg"),
@@ -331,6 +408,201 @@ impl Params {
         }
 
         vals
+    }
+
+    pub fn to_ffi(self) -> FfiParamArray {
+        FfiParamArray::from(self.params)
+    }
+
+}
+
+
+/// C repr of ffi data
+#[repr(C)]
+pub union RawParam {
+    i8: i8,
+    i16: i16,
+    i32: i32,
+    i64: i64,
+    u8: u8,
+    u16: u16,
+    u32: u32,
+    u64: u64,
+    f32: f32,
+    f64: f64,
+    bool: bool,
+    // represented by either RustString or ExtString
+    string: *const c_char,
+    object: *const c_void,
+    error: *const c_char,
+    void: (),
+}
+
+/// C tagged repr of ffi data
+#[repr(C)]
+pub struct FfiParam {
+    pub type_id: DataType,
+    pub value: RawParam,
+}
+
+#[repr(C)]
+#[derive(Clone)]
+pub struct FfiParamArray {
+    pub count: u32,
+    pub ptr: *const FfiParam,
+}
+
+impl FfiParamArray {
+    /// Creates an empty FfiParamArray.
+    pub fn empty() -> Self {
+        FfiParamArray {
+            count: 0,
+            ptr: std::ptr::null(),
+        }
+    }
+
+    /// Only call this if you allocated the FfiParamArray via `Params.to_ffi()`
+    /// otherwise use `to_params_clone` instead
+    pub fn to_params<Ext: ExternalFunctions>(self) -> Result<Params> {
+
+        if (!self.ptr.is_null()) && self.count > 0 {
+            unsafe {
+                let raw_vec = std::ptr::slice_from_raw_parts_mut(
+                    self.ptr as *mut FfiParam,
+                    self.count as usize,
+                );
+                let raw_vec = Box::from_raw(raw_vec);
+
+                let mut result = Vec::with_capacity(raw_vec.len());
+                for ffi_param in raw_vec {
+                    result.push(ffi_param.to_param::<Ext>()?);
+                }
+                Ok(Params {
+                    params: result
+                })
+            }
+
+        } else {
+            Ok(Params {
+                params: Vec::new()
+            })
+        }
+    }
+
+    pub fn to_params_clone<Ext: ExternalFunctions>(self) -> Result<Params> {
+
+        if !self.ptr.is_null() && self.count > 0 {
+            unsafe {
+                let raw_vec = std::ptr::slice_from_raw_parts_mut(
+                    self.ptr as *mut FfiParam,
+                    self.count as usize,
+                );
+                let raw_vec = Box::from_raw(raw_vec);
+
+                let mut result = Vec::with_capacity(raw_vec.len());
+                for ffi_param in raw_vec {
+                    result.push(ffi_param.to_param_clone::<Ext>()?);
+                }
+                Ok(Params {
+                    params: result
+                })
+            }
+
+        } else {
+            Ok(Params {
+                params: Vec::new()
+            })
+        }
+    }
+
+    pub fn as_slice(&self) -> &[FfiParam] {
+        unsafe { std::slice::from_raw_parts(self.ptr, self.count as usize) }
+    }
+
+    pub(crate) fn get_param(&self, arg: usize) -> &FfiParam {
+        assert!(arg < self.count as usize);
+        &self.as_slice()[arg]
+    }
+}
+
+impl FfiParam {
+    pub fn to_param<Ext: ExternalFunctions>(self) -> Result<Param> {
+        Ok(match self.type_id {
+            DataType::I8 => Param::I8(unsafe { self.value.i8 }),
+            DataType::I16 => Param::I16(unsafe { self.value.i16 }),
+            DataType::I32 => Param::I32(unsafe { self.value.i32 }),
+            DataType::I64 => Param::I64(unsafe { self.value.i64 }),
+            DataType::U8 => Param::U8(unsafe { self.value.u8 }),
+            DataType::U16 => Param::U16(unsafe { self.value.u16 }),
+            DataType::U32 => Param::U32(unsafe { self.value.u32 }),
+            DataType::U64 => Param::U64(unsafe { self.value.u64 }),
+            DataType::F32 => Param::F32(unsafe { self.value.f32 }),
+            DataType::F64 => Param::F64(unsafe { self.value.f64 }),
+            DataType::Bool => Param::Bool(unsafe { self.value.bool }),
+            DataType::RustString => Param::String(unsafe {
+                CString::from_raw(self.value.string as *mut c_char)
+                    .to_str()
+                    .expect("Rust invalid string")
+                    .to_string()
+            }),
+            DataType::ExtString => {
+                Param::String(unsafe { ExtString::<Ext>::from(self.value.string).to_string() })
+            }
+            DataType::Object => Param::Object(unsafe { self.value.object }),
+            DataType::RustError => Param::Error(unsafe {
+                CString::from_raw(self.value.error as *mut c_char)
+                    .to_str()
+                    .expect("Rust invalid string")
+                    .to_string()
+            }),
+            DataType::ExtError => {
+                Param::Error(unsafe { ExtString::<Ext>::from(self.value.error).to_string() })
+            }
+            DataType::Void => Param::Void,
+        })
+    }
+
+    pub fn to_param_clone<Ext: ExternalFunctions>(&self) -> Result<Param> {
+        Ok(match self.type_id {
+            DataType::I8 => Param::I8(unsafe { self.value.i8 }),
+            DataType::I16 => Param::I16(unsafe { self.value.i16 }),
+            DataType::I32 => Param::I32(unsafe { self.value.i32 }),
+            DataType::I64 => Param::I64(unsafe { self.value.i64 }),
+            DataType::U8 => Param::U8(unsafe { self.value.u8 }),
+            DataType::U16 => Param::U16(unsafe { self.value.u16 }),
+            DataType::U32 => Param::U32(unsafe { self.value.u32 }),
+            DataType::U64 => Param::U64(unsafe { self.value.u64 }),
+            DataType::F32 => Param::F32(unsafe { self.value.f32 }),
+            DataType::F64 => Param::F64(unsafe { self.value.f64 }),
+            DataType::Bool => Param::Bool(unsafe { self.value.bool }),
+            DataType::RustString => Param::String(unsafe {
+                CStr::from_ptr(self.value.string)
+                    .to_str()
+                    .expect("Rust invalid string")
+                    .to_string()
+            }),
+            DataType::ExtString => {
+                Param::String(unsafe { ExtString::<Ext>::from(self.value.string).to_string() })
+            }
+            DataType::Object => Param::Object(unsafe { self.value.object }),
+            DataType::RustError => Param::Error(unsafe {
+                CStr::from_ptr(self.value.error)
+                    .to_str()
+                    .expect("Rust invalid string")
+                    .to_string()
+            }),
+            DataType::ExtError => {
+                Param::Error(unsafe { ExtString::<Ext>::from(self.value.error).to_string() })
+            }
+            DataType::Void => Param::Void,
+        })
+    }
+
+}
+
+impl From<Param> for FfiParam {
+    fn from(value: Param) -> Self {
+        value.to_ffi_param()
     }
 }
 
@@ -348,38 +620,11 @@ impl From<Vec<Param>> for FfiParamArray {
         let ffi_params = ffi_params.into_boxed_slice();
 
         let count = ffi_params.len() as u32;
-        let ptr = ffi_params.as_ptr() as *const c_void;
+        let ptr = ffi_params.as_ptr();
 
         // cleaned up by the caller via TryFrom<FfiParamArray> for Vec<Param>
         mem::forget(ffi_params);
 
         FfiParamArray { count, ptr }
-    }
-}
-
-impl TryFrom<FfiParamArray> for Vec<Param> {
-    type Error = anyhow::Error;
-
-    fn try_from(array: FfiParamArray) -> Result<Self> {
-        if array.ptr.is_null() || array.count == 0 {
-            return Ok(Vec::new());
-        }
-
-        unsafe {
-            // take ownership of the raw parts allocated by `From<Vec<Param>> for FfiParamArray`
-
-            let raw_vec = std::ptr::slice_from_raw_parts_mut(
-                array.ptr as *mut FfiParam,
-                array.count as usize,
-            );
-            let raw_vec = Box::from_raw(raw_vec);
-
-            let mut result = Vec::with_capacity(raw_vec.len());
-            for ffi_param in raw_vec {
-                result.push(ffi_param.to_param()?);
-            }
-
-            Ok(result)
-        }
     }
 }
