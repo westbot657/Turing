@@ -1,13 +1,13 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use std::ffi::CString;
-use std::hint::black_box;
 use std::env;
+use std::ffi::CString;
 use std::fs::File;
+use std::hint::black_box;
 use std::io::Write;
 
-use turing::{ExternalFunctions, Turing};
 use turing::interop::params::{DataType, FfiParam, FfiParamArray, Param, Params};
 use turing::wasm::wasm_engine::WasmFnMetadata;
+use turing::{ExternalFunctions, Turing};
 
 struct DirectExt {}
 impl ExternalFunctions for DirectExt {
@@ -30,7 +30,6 @@ impl ExternalFunctions for DirectExt {
 
 // called from wasm
 extern "C" fn log_info_wasm(params: FfiParamArray) -> FfiParam {
-
     Param::Void.to_ext_param()
 }
 
@@ -66,7 +65,9 @@ fn bench_call_wasm_add(c: &mut Criterion) {
     file.write_all(&wasm).unwrap();
 
     let capabilities = vec!["test"]; // match the registered capability
-    turing.load_script(path.to_str().unwrap(), &capabilities).unwrap();
+    turing
+        .load_script(path.to_str().unwrap(), &capabilities)
+        .unwrap();
 
     c.bench_function("turing_call_wasm_add", |b| {
         b.iter(|| {
@@ -82,7 +83,9 @@ fn bench_call_wasm_add(c: &mut Criterion) {
 
 fn bench_call_tests_wasm_math(c: &mut Criterion) {
     let mut turing = setup_turing_with_callbacks();
-    turing.load_script("../tests/wasm/wasm_tests.wasm", &vec!["test"]).unwrap();
+    turing
+        .load_script("../tests/wasm/wasm_tests.wasm", &vec!["test"])
+        .unwrap();
 
     c.bench_function("turing_call_tests_wasm_math", |b| {
         b.iter(|| {
@@ -96,5 +99,24 @@ fn bench_call_tests_wasm_math(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_call_wasm_add, bench_call_tests_wasm_math);
+fn bench_fetch_string_from_wasm(c: &mut Criterion) {
+    let mut turing = setup_turing_with_callbacks();
+    turing
+        .load_script("../tests/wasm/wasm_tests.wasm", &vec!["test"])
+        .unwrap();
+
+    c.bench_function("turing_fetch_string_from_wasm", |b| {
+        b.iter(|| {
+            let _ = turing.call_wasm_fn("test_string_fetch", Params::new(), DataType::Void);
+        })
+    });
+}
+
+
+criterion_group!(
+    benches,
+    bench_call_wasm_add,
+    bench_call_tests_wasm_math,
+    bench_fetch_string_from_wasm,
+);
 criterion_main!(benches);
