@@ -330,13 +330,13 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
         params.push(exp_typ.to_param_with_val(value, &mut caller, &data)?)
     }
 
-    let ffi_params = params.to_ffi();
+    
+    let ffi_params= params.to_ffi::<Ext>();
+    let ffi_params_struct = ffi_params.as_ffi_array();
 
     // Call to C#/rust's provided callback using a clone so we can still cleanup
-    let res = func(ffi_params.clone()).into_param::<Ext>()?;
+    let res = func(ffi_params_struct).into_param::<Ext>()?;
 
-    // Cleanup
-    let _ = ffi_params.into_params::<Ext>();
 
     let mut s = data.write().unwrap();
 

@@ -1,6 +1,7 @@
 use smallvec::SmallVec;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::fmt::Display;
+use std::marker::PhantomData;
 use std::mem;
 use std::sync::{Arc, RwLock};
 use anyhow::{anyhow, Result};
@@ -372,7 +373,7 @@ impl Params {
     }
 
     /// Converts the Params into a vector of Wasmtime Val types for function calling.
-    pub fn to_args(self, data: &Arc<RwLock<WasmDataState>>) -> Vec<Val> {
+    pub fn to_args(self, data: &Arc<RwLock<WasmDataState>>) -> SmallVec<[Val; 4]> {
         let vals = self.params.into_iter().map(|p| 
             match p {
                 Param::I8(i) => Val::I32(i as i32),
@@ -428,8 +429,8 @@ impl Params {
         vals
     }
 
-    pub fn to_ffi(self) -> FfiParamArray {
-        FfiParamArray::from(self.params.into_vec())
+    pub fn to_ffi<Ext>(self) -> FfiParams<Ext> where Ext: ExternalFunctions {
+        FfiParams::from_params(self.params)
     }
 }
 
@@ -461,45 +462,131 @@ pub struct FfiParam {
     pub value: RawParam,
 }
 
-#[repr(C)]
-#[derive(Clone)]
-pub struct FfiParamArray {
-    pub count: u32,
-    pub ptr: *const FfiParam,
+/// A collection of FfiParams.
+/// Can be converted to/from Params.
+/// Will free allocated resources on drop.
+pub struct FfiParams<Ext: ExternalFunctions> {
+    pub params: SmallVec<[FfiParam; 4]>,
+    marker: PhantomData<Ext>,
 }
 
-impl FfiParamArray {
-    /// Creates an empty FfiParamArray.
-    pub fn empty() -> Self {
-        FfiParamArray {
-            count: 0,
-            ptr: std::ptr::null(),
+
+impl<Ext> Drop for FfiParams<Ext> where Ext: ExternalFunctions {
+    fn drop(&mut self) {
+        if self.params.is_empty() {
+            return;
+        }
+
+        // Convert the inner params without moving fields out of `self`
+        let params: Result<_> = mem::take(&mut self.params)
+            .into_iter()
+            .map(|p| p.into_param::<Ext>())
+            .collect();
+
+        if let Ok(params) = params {
+            // drop the converted Params so any allocated resources are freed
+            drop(Params { params });
         }
     }
+}
 
-    /// Only call this if you allocated the FfiParamArray via `Params.to_ffi()`
-    /// otherwise use `to_params_clone` instead
-    pub fn into_params<Ext: ExternalFunctions>(self) -> Result<Params> {
-        if self.ptr.is_null() || self.count == 0 {
-            return Ok(Params::default());
+impl<Ext> Default for FfiParams<Ext> where Ext: ExternalFunctions {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
+impl<Ext> FfiParams<Ext> where Ext: ExternalFunctions {
+    pub fn empty() -> Self {
+        Self { params: SmallVec::new(), marker: PhantomData }
+    }
+
+    /// Creates FfiParams from a vector of Params.
+    pub fn from_params<T>(params: T) -> Self where T: IntoIterator<Item = Param> {
+        let ffi_params = params.into_iter().map(|p| p.to_ffi_param()).collect();
+        Self { params: ffi_params, marker: PhantomData }
+    }
+
+    /// Creates FfiParams from an FfiParamArray with 'static lifetime.
+    pub fn from_ffi_array(array: FfiParamArray<'static>) -> Result<Self> {
+        if array.ptr.is_null() || array.count == 0 {
+            return Ok(Self::default());
         }
         unsafe {
             let raw_vec =
-                std::ptr::slice_from_raw_parts_mut(self.ptr as *mut FfiParam, self.count as usize);
+                std::ptr::slice_from_raw_parts_mut(array.ptr as *mut FfiParam, array.count as usize);
             let raw_vec = Box::from_raw(raw_vec);
 
             // take ownership of the raw_vec
             let owned = raw_vec.into_vec();
-            let params: Result<_> =
-                owned.into_iter().map(|p| p.into_param::<Ext>()).collect();
 
-            Ok(Params { params: params? })
+
+            Ok(Self {
+                params: SmallVec::from_vec(owned),
+                marker: PhantomData,
+            })
+        }
+    }
+
+    /// Converts FfiParams back into Params.
+    pub fn to_params(mut self) -> Result<Params> {
+        // take the inner SmallVec to avoid moving a field out of a Drop type
+        let params: Result<_> = mem::take(&mut self.params)
+            .into_iter()
+            .map(|p| p.into_param::<Ext>())
+            .collect();
+        Ok(Params { params: params? })
+    }
+
+    /// Creates an FfiParamArray from the FfiParams.
+    pub fn as_ffi_array<'a>(&'a self) -> FfiParamArray<'a> {
+        FfiParamArray::<'a> {
+            count: self.params.len() as u32,
+            ptr: self.params.as_ptr(),
+            marker: PhantomData,
+        }
+    }
+
+    /// Leaks the FfiParams into an FfiParamArray with 'static lifetime.
+    /// Caller is responsible for freeing the memory. 
+    /// Freeing is possible by converting back via FfiParams::from_ffi_array and dropping the FfiParams.
+    pub fn leak(mut self) -> FfiParamArray<'static> {
+        let boxed_slice = mem::take(&mut self.params).into_boxed_slice();
+        let count = boxed_slice.len() as u32;
+        let ptr = Box::into_raw(boxed_slice) as *const FfiParam;
+
+        FfiParamArray {
+            count,
+            ptr,
+            marker: PhantomData,
+        }
+    }
+}
+
+/// C repr of an array of FfiParams.
+/// Does not own the memory, just a view.
+/// Can be converted to Params.
+#[repr(C)]
+#[derive(Clone)]
+pub struct FfiParamArray<'a> {
+    pub count: u32,
+    pub ptr: *const FfiParam,
+    pub marker: PhantomData<&'a ()>,
+}
+
+impl<'a> FfiParamArray<'a> {
+    /// Creates an empty FfiParamArray.
+    pub fn empty() -> Self {
+        Self {
+            count: 0,
+            ptr: std::ptr::null(),
+            marker: PhantomData,
         }
     }
 
     /// Clones the parameters from the FfiParamArray without taking ownership.
     /// Does not free any memory.
-    pub fn as_params<Ext: ExternalFunctions>(&self) -> Result<Params> {
+    pub fn as_params<Ext: ExternalFunctions>(&'a self) -> Result<Params> {
         if self.ptr.is_null() || self.count == 0 {
             return Ok(Params::default());
         }
@@ -516,13 +603,8 @@ impl FfiParamArray {
         }
     }
 
-    pub fn as_slice(&self) -> &[FfiParam] {
+    pub fn as_slice(&'a self) -> &'a [FfiParam] {
         unsafe { std::slice::from_raw_parts(self.ptr, self.count as usize) }
-    }
-
-    pub(crate) fn get_param(&self, arg: usize) -> &FfiParam {
-        assert!(arg < self.count as usize);
-        &self.as_slice()[arg]
     }
 }
 
@@ -607,26 +689,3 @@ impl From<Param> for FfiParam {
     }
 }
 
-impl<T> From<T> for FfiParamArray
-where
-    T: Into<Vec<Param>>,
-{
-    fn from(arr: T) -> Self {
-        let vec = arr.into();
-        if vec.is_empty() {
-            return FfiParamArray::empty();
-        }
-
-        let ffi_params: Vec<FfiParam> = vec.into_iter().map(Into::into).collect();
-        let ffi_params = ffi_params.into_boxed_slice();
-        // leak
-        let ffi_params = Box::into_raw(ffi_params);
-
-        let count = ffi_params.len() as u32;
-        let ptr = ffi_params as *const FfiParam;
-
-        // cleaned up by the caller via TryFrom<FfiParamArray> for Vec<Param>
-
-        FfiParamArray { count, ptr }
-    }
-}
