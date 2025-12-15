@@ -2,9 +2,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::{c_char, c_void};
 use std::marker::PhantomData;
 use std::path::Path;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc};
 use crate::wasm::wasm_engine::{write_string, WasmFnMetadata, WasmInterpreter};
 use anyhow::{anyhow, Result};
+use parking_lot::RwLock;
 use slotmap::{new_key_type, SlotMap};
 use wasmtime::{Caller, Val};
 use wasmtime_wasi::p1::WasiP1Ctx;
@@ -101,7 +102,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
         }
 
         self.wasm.load_script(source)?;
-        let mut write = self.data.write().expect("WasmDataState lock poisoned");
+        let mut write = self.data.write();
         write.active_capabilities = capabilities;
 
         Ok(())
@@ -125,7 +126,7 @@ pub(crate) fn wasm_host_strcpy(
     let ptr = ps[0].i32().unwrap();
     let size = ps[1].i32().unwrap();
 
-    if let Some(next_str) = data.write().expect("WasmDataState lock poisoned").str_cache.pop_front()
+    if let Some(next_str) = data.write().str_cache.pop_front()
         && next_str.len() + 1 == size as usize
     {
         if let Some(memory) = caller.get_export("memory").and_then(|m| m.into_memory()) {

@@ -3,10 +3,12 @@ use std::ffi::{CStr, CString};
 use std::fs;
 use std::marker::PhantomData;
 use std::path::Path;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc};
 use std::task::Poll;
 
 use anyhow::{anyhow, Result};
+use parking_lot::RwLock;
+use smallvec::SmallVec;
 use tokio::io::AsyncWrite;
 use wasmtime::{Caller, Config, Engine, FuncType, Instance, Linker, Memory, MemoryAccessError, Module, Store, Val, ValType};
 use wasmtime_wasi::WasiCtxBuilder;
@@ -21,6 +23,7 @@ pub struct WasmInterpreter<Ext: ExternalFunctions> {
     store: Store<WasiP1Ctx>,
     linker: Linker<WasiP1Ctx>,
     script_instance: Option<Instance>,
+    memory: Option<Memory>,
     _ext: PhantomData<Ext>,
 }
 
@@ -72,20 +75,23 @@ struct OutputWriter<Ext: ExternalFunctions + Send> {
 }
 impl<Ext: ExternalFunctions + Send> std::io::Write for OutputWriter<Ext> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.inner.write().unwrap().extend(buf);
+        self.inner.write().extend(buf);
         Ok(buf.len())
     }
     fn flush(&mut self) -> std::io::Result<()> {
-        let s = {
-            str::from_utf8(&self.inner.read().unwrap())
-                .unwrap()
-                .to_string()
+        // Move the inner buffer out so we avoid an extra copy when converting
+        // bytes -> String. Taking the write lock lets us swap the Vec<u8>.
+        let vec = {
+            let mut guard = self.inner.write();
+            std::mem::take(&mut *guard)
         };
-        self.inner.write().unwrap().clear();
-        if self.is_err {
-            Ext::log_critical(s)
-        } else {
-            Ext::log_info(s);
+        if !vec.is_empty() {
+            let s = String::from_utf8_lossy(&vec).into_owned();
+            if self.is_err {
+                Ext::log_critical(s)
+            } else {
+                Ext::log_info(s);
+            }
         }
         Ok(())
     }
@@ -97,23 +103,26 @@ impl<Ext: ExternalFunctions + Send> AsyncWrite for OutputWriter<Ext> {
         _cx: &mut std::task::Context<'_>,
         buf: &[u8],
     ) -> Poll<std::result::Result<usize, std::io::Error>> {
-        self.inner.write().unwrap().extend(buf);
+        self.inner.write().extend(buf);
         Poll::Ready(Ok(buf.len()))
     }
     fn poll_flush(
         self: std::pin::Pin<&mut Self>,
         _cx: &mut std::task::Context<'_>,
     ) -> Poll<std::result::Result<(), std::io::Error>> {
-        let s = {
-            str::from_utf8(&self.inner.read().unwrap())
-                .unwrap()
-                .to_string()
+        // Move the inner buffer out so we avoid an extra copy when converting
+        // bytes -> String. Taking the write lock lets us swap the Vec<u8>.
+        let vec = {
+            let mut guard = self.inner.write();
+            std::mem::take(&mut *guard)
         };
-        self.inner.write().unwrap().clear();
-        if self.is_err {
-            Ext::log_critical(s);
-        } else {
-            Ext::log_info(s);
+        if !vec.is_empty() {
+            let s = String::from_utf8_lossy(&vec).into_owned();
+            if self.is_err {
+                Ext::log_critical(s);
+            } else {
+                Ext::log_info(s);
+            }
         }
         Poll::Ready(Ok(()))
     }
@@ -175,6 +184,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         config.wasm_reference_types(true);
         config.wasm_multi_memory(false);
         config.max_wasm_stack(512 * 1024); // 512KB
+        config.compiler_inlining(true);
         config.consume_fuel(false);
 
         let wasi = WasiCtxBuilder::new()
@@ -198,6 +208,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             store,
             linker,
             script_instance: None,
+            memory: None,
             _ext: PhantomData::default()
         })
     }
@@ -240,10 +251,10 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             let data2 = Arc::clone(&data);
             linker.func_new(
                 "env",
-                name.clone().as_str(),
+                name.as_str(),
                 ft,
                 move |caller, ps, rs| {
-                    wasm_bind_env::<Ext>(&data2, caller, &cap, ps, rs, &pts, &callback)
+                    wasm_bind_env::<Ext>(&data2, caller, &cap, ps, rs, pts.as_slice(), &callback)
                 }
             )?;
 
@@ -259,6 +270,13 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
 
         let instance = self.linker.instantiate(&mut self.store, &module)?;
 
+        // Cache instance and exported memory to avoid repeated lookups per call
+        let memory = instance
+            .get_export(&mut self.store, "memory")
+            .and_then(|m| m.into_memory())
+            .ok_or_else(|| anyhow!("WASM module does not export memory"))?;
+
+        self.memory = Some(memory);
         self.script_instance = Some(instance);
 
         Ok(())
@@ -276,23 +294,22 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         let Some(instance) = &mut self.script_instance else {
             return Param::Error("No script is loaded or reentry was attempted".to_string());
         };
-
         let Some(f) = instance.get_func(&mut self.store, name) else {
             return Param::Error("Function does not exist".to_string());
         };
-        let memory = instance
-            .get_export(&mut self.store, "memory")
-            .and_then(|m| m.into_memory())
-            .unwrap();
+        let memory = match &self.memory {
+            Some(m) => m,
+            None => return Param::Error("WASM memory not initialized".to_string()),
+        };
         let args = params.to_args(&data);
 
-        let mut res = match ret_type {
-            DataType::Void => Vec::new(),
-            DataType::F32 => vec![Val::F32(0)],
-            DataType::F64 => vec![Val::F64(0)],
+        let mut res: SmallVec<[Val; 1]> = match ret_type {
+            DataType::Void => SmallVec::new(),
+            DataType::F32 => SmallVec::from_buf([Val::F32(0)]),
+            DataType::F64 => SmallVec::from_buf([Val::F64(0)]),
             DataType::I64
-            | DataType::U64 => vec![Val::I64(0)],
-            _ => vec![Val::I32(0)],
+            | DataType::U64 => SmallVec::from_buf([Val::I64(0)]),
+            _ => SmallVec::from_buf([Val::I32(0)]),
         };
 
         if let Err(e) = f.call(&mut self.store, &args, &mut res) {
@@ -316,28 +333,29 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
     cap: &String,
     ps: &[Val],
     rs: &mut [Val],
-    p: &Vec<DataType>,
-    func: &WasmCallback
+    p: &[DataType],
+    func: &WasmCallback,
 ) -> Result<()> {
 
-    if !data.read().expect("WasmDataState lock poisoned").active_capabilities.contains(cap) {
+    if !data.read().active_capabilities.contains(cap) {
         return Err(anyhow!("Mod capability '{}' is not currently loaded", cap))
     }
 
-    let mut params = Params::new();
+    // pre-allocate params to avoid repeated reallocations
+    let mut params = Params::of_size(p.len() as u32);
     for (exp_typ, value) in p.iter().zip(ps) {
         params.push(exp_typ.to_param_with_val(value, &mut caller, &data)?)
     }
 
-    let ffi_params = params.to_ffi();
+    
+    let ffi_params= params.to_ffi::<Ext>();
+    let ffi_params_struct = ffi_params.as_ffi_array();
 
     // Call to C#/rust's provided callback using a clone so we can still cleanup
-    let res = func(ffi_params.clone()).into_param::<Ext>()?;
+    let res = func(ffi_params_struct).into_param::<Ext>()?;
 
-    // Cleanup
-    let _ = ffi_params.into_params::<Ext>();
 
-    let mut s = data.write().unwrap();
+    let mut s = data.write();
 
     // Convert Param back to Val for return
     let rv = match res {

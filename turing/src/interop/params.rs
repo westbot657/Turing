@@ -1,7 +1,10 @@
-use std::ffi::{c_char, c_void, CStr, CString};
+use parking_lot::RwLock;
+use smallvec::SmallVec;
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::fmt::Display;
+use std::marker::PhantomData;
 use std::mem;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc};
 use anyhow::{anyhow, Result};
 use num_enum::TryFromPrimitive;
 use slotmap::KeyData;
@@ -158,7 +161,7 @@ impl DataType {
                 let pointer_key =
                     OpaquePointerKey::from(KeyData::from_ffi(*pointer_id as u64));
 
-                if let Some(true_pointer) = data.read().unwrap().opaque_pointers.get(pointer_key) {
+                if let Some(true_pointer) = data.read().opaque_pointers.get(pointer_key) {
                     Ok(Param::Object(**true_pointer))
                 } else {
                     Err(anyhow!("opaque pointer does not correspond to a real pointer"))
@@ -224,7 +227,7 @@ impl Param {
                 let op = val.unwrap_i64() as u64;
                 let key = OpaquePointerKey::from(KeyData::from_ffi(op));
 
-                let real = data.read().expect("WasmDataState lock poisoned")
+                let real = data.read()
                     .opaque_pointers
                     .get(key)
                     .copied()
@@ -331,20 +334,22 @@ impl FromParam for () {
     }
 }
 
-
+#[derive(Debug, Default)]
 pub struct Params {
-    params: Vec<Param>
+    // SmallVec will spill onto the heap if there are more than 4 params
+    params: SmallVec<[Param; 4]>,
 }
-
 
 impl Params {
     pub fn new() -> Self {
-        Self { params: Vec::new() }
+        Self {
+            params: Default::default(),
+        }
     }
 
     pub fn of_size(size: u32) -> Self {
         Self {
-            params: Vec::with_capacity(size as usize),
+            params: SmallVec::with_capacity(size as usize),
         }
     }
 
@@ -369,11 +374,12 @@ impl Params {
     }
 
     /// Converts the Params into a vector of Wasmtime Val types for function calling.
-    pub fn to_args(self, data: &Arc<RwLock<WasmDataState>>) -> Vec<Val> {
-        let mut vals = Vec::new();
-
-        for p in self.params {
-            vals.push(match p {
+    pub fn to_args(self, data: &Arc<RwLock<WasmDataState>>) -> SmallVec<[Val; 4]> {
+        // Acquire a single write lock for the duration of conversion to avoid
+        // repeated locking/unlocking when pushing strings or registering objects.
+        let mut s = data.write();
+        let vals = self.params.into_iter().map(|p| 
+            match p {
                 Param::I8(i) => Val::I32(i as i32),
                 Param::I16(i) => Val::I32(i as i32),
                 Param::I32(i) => Val::I32(i),
@@ -387,35 +393,34 @@ impl Params {
                 Param::Bool(b) => Val::I32(if b { 1 } else { 0 }),
                 Param::String(st) => {
                     let l = st.len() + 1;
-                    data.write().expect("WasmDataState lock poisoned").str_cache.push_back(st);
+                    s.str_cache.push_back(st);
                     Val::I32(l as i32)
                 }
-                Param::Object(rp) => match data.read().expect("WasmDataState lock poisoned").pointer_backlink.get(&rp.into()) {
-                    Some(op) => Val::I32(op.0.as_ffi() as i32),
-                    None => {
-                        let op = data.write().expect("WasmDataState lock poisoned").opaque_pointers.insert(rp.into());
-                        data.write().expect("WasmDataState lock poisoned").pointer_backlink.insert(rp.into(), op);
+                Param::Object(rp) => {
+                    let pointer = rp.into();
+                    if let Some(op) = s.pointer_backlink.get(&pointer) {
+                        Val::I32(op.0.as_ffi() as i32)
+                    } else {
+                        let op = s.opaque_pointers.insert(pointer);
+                        s.pointer_backlink.insert(pointer, op);
                         Val::I32(op.0.as_ffi() as i32)
                     }
-                },
+                }
                 Param::Error(st) => {
                     let l = st.len() + 1;
-                    data.write().expect("WasmDataState lock poisoned").str_cache.push_back(st);
+                    s.str_cache.push_back(st);
                     Val::I32(l as i32)
                 }
                 _ => unreachable!("Void shouldn't ever be added as an arg"),
-            })
-        }
+            }).collect();
 
         vals
     }
 
-    pub fn to_ffi(self) -> FfiParamArray {
-        FfiParamArray::from(self.params)
+    pub fn to_ffi<Ext>(self) -> FfiParams<Ext> where Ext: ExternalFunctions {
+        FfiParams::from_params(self.params)
     }
-
 }
-
 
 /// C repr of ffi data
 #[repr(C)]
@@ -445,47 +450,133 @@ pub struct FfiParam {
     pub value: RawParam,
 }
 
-#[repr(C)]
-#[derive(Clone)]
-pub struct FfiParamArray {
-    pub count: u32,
-    pub ptr: *const FfiParam,
+/// A collection of FfiParams.
+/// Can be converted to/from Params.
+/// Will free allocated resources on drop.
+pub struct FfiParams<Ext: ExternalFunctions> {
+    pub params: SmallVec<[FfiParam; 4]>,
+    marker: PhantomData<Ext>,
 }
 
-impl FfiParamArray {
-    /// Creates an empty FfiParamArray.
-    pub fn empty() -> Self {
-        FfiParamArray {
-            count: 0,
-            ptr: std::ptr::null(),
+
+impl<Ext> Drop for FfiParams<Ext> where Ext: ExternalFunctions {
+    fn drop(&mut self) {
+        if self.params.is_empty() {
+            return;
+        }
+
+        // Convert the inner params without moving fields out of `self`
+        let params: Result<_> = mem::take(&mut self.params)
+            .into_iter()
+            .map(|p| p.into_param::<Ext>())
+            .collect();
+
+        if let Ok(params) = params {
+            // drop the converted Params so any allocated resources are freed
+            drop(Params { params });
         }
     }
+}
 
-    /// Only call this if you allocated the FfiParamArray via `Params.to_ffi()`
-    /// otherwise use `to_params_clone` instead
-    pub fn into_params<Ext: ExternalFunctions>(self) -> Result<Params> {
-        if self.ptr.is_null() || self.count == 0 {
-            return Ok(Params { params: Vec::new() });
+impl<Ext> Default for FfiParams<Ext> where Ext: ExternalFunctions {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
+impl<Ext> FfiParams<Ext> where Ext: ExternalFunctions {
+    pub fn empty() -> Self {
+        Self { params: SmallVec::new(), marker: PhantomData }
+    }
+
+    /// Creates FfiParams from a vector of Params.
+    pub fn from_params<T>(params: T) -> Self where T: IntoIterator<Item = Param> {
+        let ffi_params = params.into_iter().map(|p| p.to_ffi_param()).collect();
+        Self { params: ffi_params, marker: PhantomData }
+    }
+
+    /// Creates FfiParams from an FfiParamArray with 'static lifetime.
+    pub fn from_ffi_array(array: FfiParamArray<'static>) -> Result<Self> {
+        if array.ptr.is_null() || array.count == 0 {
+            return Ok(Self::default());
         }
         unsafe {
             let raw_vec =
-                std::ptr::slice_from_raw_parts_mut(self.ptr as *mut FfiParam, self.count as usize);
+                std::ptr::slice_from_raw_parts_mut(array.ptr as *mut FfiParam, array.count as usize);
             let raw_vec = Box::from_raw(raw_vec);
 
             // take ownership of the raw_vec
             let owned = raw_vec.into_vec();
-            let params: Result<Vec<Param>> =
-                owned.into_iter().map(|p| p.into_param::<Ext>()).collect();
 
-            Ok(Params { params: params? })
+
+            Ok(Self {
+                params: SmallVec::from_vec(owned),
+                marker: PhantomData,
+            })
+        }
+    }
+
+    /// Converts FfiParams back into Params.
+    pub fn to_params(mut self) -> Result<Params> {
+        // take the inner SmallVec to avoid moving a field out of a Drop type
+        let params: Result<_> = mem::take(&mut self.params)
+            .into_iter()
+            .map(|p| p.into_param::<Ext>())
+            .collect();
+        Ok(Params { params: params? })
+    }
+
+    /// Creates an FfiParamArray from the FfiParams.
+    pub fn as_ffi_array<'a>(&'a self) -> FfiParamArray<'a> {
+        FfiParamArray::<'a> {
+            count: self.params.len() as u32,
+            ptr: self.params.as_ptr(),
+            marker: PhantomData,
+        }
+    }
+
+    /// Leaks the FfiParams into an FfiParamArray with 'static lifetime.
+    /// Caller is responsible for freeing the memory. 
+    /// Freeing is possible by converting back via FfiParams::from_ffi_array and dropping the FfiParams.
+    pub fn leak(mut self) -> FfiParamArray<'static> {
+        let boxed_slice = mem::take(&mut self.params).into_boxed_slice();
+        let count = boxed_slice.len() as u32;
+        let ptr = Box::into_raw(boxed_slice) as *const FfiParam;
+
+        FfiParamArray {
+            count,
+            ptr,
+            marker: PhantomData,
+        }
+    }
+}
+
+/// C repr of an array of FfiParams.
+/// Does not own the memory, just a view.
+/// Can be converted to Params.
+#[repr(C)]
+#[derive(Clone)]
+pub struct FfiParamArray<'a> {
+    pub count: u32,
+    pub ptr: *const FfiParam,
+    pub marker: PhantomData<&'a ()>,
+}
+
+impl<'a> FfiParamArray<'a> {
+    /// Creates an empty FfiParamArray.
+    pub fn empty() -> Self {
+        Self {
+            count: 0,
+            ptr: std::ptr::null(),
+            marker: PhantomData,
         }
     }
 
     /// Clones the parameters from the FfiParamArray without taking ownership.
     /// Does not free any memory.
-    pub fn as_params<Ext: ExternalFunctions>(&self) -> Result<Params> {
+    pub fn as_params<Ext: ExternalFunctions>(&'a self) -> Result<Params> {
         if self.ptr.is_null() || self.count == 0 {
-            return Ok(Params { params: Vec::new() });
+            return Ok(Params::default());
         }
 
         unsafe {
@@ -493,21 +584,15 @@ impl FfiParamArray {
                 std::ptr::slice_from_raw_parts(self.ptr as *mut FfiParam, self.count as usize);
             let slice = &*raw_slice;
 
-            let mut result = Vec::with_capacity(slice.len());
-            for ffi_param in slice {
-                result.push(ffi_param.as_param::<Ext>()?);
-            }
+            let result = slice.iter()
+                .map(|p| p.as_param::<Ext>())
+                .collect::<Result<_>>()?;
             Ok(Params { params: result })
         }
     }
 
-    pub fn as_slice(&self) -> &[FfiParam] {
+    pub fn as_slice(&'a self) -> &'a [FfiParam] {
         unsafe { std::slice::from_raw_parts(self.ptr, self.count as usize) }
-    }
-
-    pub(crate) fn get_param(&self, arg: usize) -> &FfiParam {
-        assert!(arg < self.count as usize);
-        &self.as_slice()[arg]
     }
 }
 
@@ -592,23 +677,3 @@ impl From<Param> for FfiParam {
     }
 }
 
-impl From<Vec<Param>> for FfiParamArray {
-    fn from(vec: Vec<Param>) -> Self {
-        if vec.is_empty() {
-            return FfiParamArray::empty();
-        }
-
-        let ffi_params: Vec<FfiParam> = vec.into_iter().map(Into::into).collect();
-        let ffi_params = ffi_params.into_boxed_slice();
-        // leak
-        let ffi_params = Box::into_raw(ffi_params);
-
-        let count = ffi_params.len() as u32;
-        let ptr = ffi_params as *const FfiParam;
-
-        // cleaned up by the caller via TryFrom<FfiParamArray> for Vec<Param>
-
-
-        FfiParamArray { count, ptr}
-    }
-}
