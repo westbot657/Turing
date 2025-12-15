@@ -595,22 +595,20 @@ impl From<Param> for FfiParam {
 impl From<Vec<Param>> for FfiParamArray {
     fn from(vec: Vec<Param>) -> Self {
         if vec.is_empty() {
-            return FfiParamArray {
-                count: 0,
-                ptr: std::ptr::null(),
-            };
+            return FfiParamArray::empty();
         }
 
         let ffi_params: Vec<FfiParam> = vec.into_iter().map(Into::into).collect();
-
         let ffi_params = ffi_params.into_boxed_slice();
+        // leak
+        let ffi_params = Box::into_raw(ffi_params);
 
         let count = ffi_params.len() as u32;
-        let ptr = ffi_params.as_ptr();
+        let ptr = ffi_params as *const FfiParam;
 
         // cleaned up by the caller via TryFrom<FfiParamArray> for Vec<Param>
-        mem::forget(ffi_params);
 
-        FfiParamArray { count, ptr }
+
+        FfiParamArray { count, ptr}
     }
 }
