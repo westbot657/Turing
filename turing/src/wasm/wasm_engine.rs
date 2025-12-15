@@ -339,6 +339,7 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
 
     let mut s = data.write().unwrap();
 
+    // Convert Param back to Val for return
     let rv = match res {
         Param::I8(i) => Val::I32(i as i32),
         Param::I16(i) => Val::I32(i as i32),

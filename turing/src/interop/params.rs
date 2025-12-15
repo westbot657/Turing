@@ -464,54 +464,40 @@ impl FfiParamArray {
     /// Only call this if you allocated the FfiParamArray via `Params.to_ffi()`
     /// otherwise use `to_params_clone` instead
     pub fn to_params<Ext: ExternalFunctions>(self) -> Result<Params> {
+        if self.ptr.is_null() || self.count == 0 {
+            return Ok(Params { params: Vec::new() });
+        }
+        unsafe {
+            let raw_vec =
+                std::ptr::slice_from_raw_parts_mut(self.ptr as *mut FfiParam, self.count as usize);
+            let raw_vec = Box::from_raw(raw_vec);
 
-        if (!self.ptr.is_null()) && self.count > 0 {
-            unsafe {
-                let raw_vec = std::ptr::slice_from_raw_parts_mut(
-                    self.ptr as *mut FfiParam,
-                    self.count as usize,
-                );
-                let raw_vec = Box::from_raw(raw_vec);
+            // take ownership of the raw_vec
+            let owned = raw_vec.into_vec();
+            let params: Result<Vec<Param>> =
+                owned.into_iter().map(|p| p.to_param::<Ext>()).collect();
 
-                let mut result = Vec::with_capacity(raw_vec.len());
-                for ffi_param in raw_vec {
-                    result.push(ffi_param.to_param::<Ext>()?);
-                }
-                Ok(Params {
-                    params: result
-                })
-            }
-
-        } else {
-            Ok(Params {
-                params: Vec::new()
-            })
+            Ok(Params { params: params? })
         }
     }
 
-    pub fn to_params_clone<Ext: ExternalFunctions>(self) -> Result<Params> {
+    /// Clones the parameters from the FfiParamArray without taking ownership.
+    /// Does not free any memory.
+    pub fn to_params_clone<Ext: ExternalFunctions>(&self) -> Result<Params> {
+        if self.ptr.is_null() || self.count == 0 {
+            return Ok(Params { params: Vec::new() });
+        }
 
-        if !self.ptr.is_null() && self.count > 0 {
-            unsafe {
-                let raw_vec = std::ptr::slice_from_raw_parts_mut(
-                    self.ptr as *mut FfiParam,
-                    self.count as usize,
-                );
-                let raw_vec = Box::from_raw(raw_vec);
+        unsafe {
+            let raw_slice =
+                std::ptr::slice_from_raw_parts(self.ptr as *mut FfiParam, self.count as usize);
+            let slice = &*raw_slice;
 
-                let mut result = Vec::with_capacity(raw_vec.len());
-                for ffi_param in raw_vec {
-                    result.push(ffi_param.to_param_clone::<Ext>()?);
-                }
-                Ok(Params {
-                    params: result
-                })
+            let mut result = Vec::with_capacity(slice.len());
+            for ffi_param in slice {
+                result.push(ffi_param.to_param_clone::<Ext>()?);
             }
-
-        } else {
-            Ok(Params {
-                params: Vec::new()
-            })
+            Ok(Params { params: result })
         }
     }
 
