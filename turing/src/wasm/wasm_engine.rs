@@ -29,6 +29,7 @@ pub struct WasmInterpreter<Ext: ExternalFunctions> {
 
 pub type WasmCallback = extern "C" fn(FfiParamArray) -> FfiParam;
 
+#[derive(Clone)]
 pub struct WasmFnMetadata {
     capability: String,
     callback: WasmCallback,
@@ -347,15 +348,13 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
     for (exp_typ, value) in p.iter().zip(ps) {
         params.push(exp_typ.to_param_with_val(value, &mut caller, &data)?)
     }
-
     
     let ffi_params= params.to_ffi::<Ext>();
     let ffi_params_struct = ffi_params.as_ffi_array();
 
     // Call to C#/rust's provided callback using a clone so we can still cleanup
     let res = func(ffi_params_struct).into_param::<Ext>()?;
-
-
+    
     let mut s = data.write();
 
     // Convert Param back to Val for return

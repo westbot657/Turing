@@ -1,3 +1,5 @@
+extern crate core;
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::{c_char, c_void};
 use std::marker::PhantomData;
@@ -17,6 +19,9 @@ pub mod interop;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(target_os = "windows")]
+mod win_ffi;
 
 pub trait ExternalFunctions {
     fn abort(error_type: String, error: String) -> !;

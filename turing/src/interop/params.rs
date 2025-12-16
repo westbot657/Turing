@@ -244,29 +244,15 @@ impl Param {
         }
     }
 
-    #[rustfmt::skip]
-    pub fn to_ffi_param(self) -> FfiParam {
-        match self {
-            Param::I8(x) => FfiParam { type_id: DataType::I8, value: RawParam { i8: x } },
-            Param::I16(x) => FfiParam { type_id: DataType::I16, value: RawParam { i16: x } },
-            Param::I32(x) => FfiParam { type_id: DataType::I32, value: RawParam { i32: x } },
-            Param::I64(x) => FfiParam { type_id: DataType::I64, value: RawParam { i64: x } },
-            Param::U8(x) => FfiParam { type_id: DataType::U8, value: RawParam { u8: x } },
-            Param::U16(x) => FfiParam { type_id: DataType::U16, value: RawParam { u16: x } },
-            Param::U32(x) => FfiParam { type_id: DataType::U32, value: RawParam { u32: x } },
-            Param::U64(x) => FfiParam { type_id: DataType::U64, value: RawParam { u64: x } },
-            Param::F32(x) => FfiParam { type_id: DataType::F32, value: RawParam { f32: x } },
-            Param::F64(x) => FfiParam { type_id: DataType::F64, value: RawParam { f64: x } },
-            Param::Bool(x) => FfiParam { type_id: DataType::Bool, value: RawParam { bool: x } },
-            // allocated via CString, must be freed via CString::from_raw
-            Param::String(x) => FfiParam { type_id: DataType::RustString, value: RawParam { string: CString::new(x).unwrap().into_raw() } },
-            Param::Object(x) => FfiParam { type_id: DataType::Object, value: RawParam { object: x } },
-            Param::Error(x) => FfiParam { type_id: DataType::RustError, value: RawParam { error: CString::new(x).unwrap().into_raw() } },
-            Param::Void => FfiParam { type_id: DataType::Void, value: RawParam { void: () } },
-        }
+    pub fn to_rs_param(self) -> FfiParam {
+        self.to_param_inner(DataType::RustString, DataType::RustError)
     }
-    #[rustfmt::skip]
     pub fn to_ext_param(self) -> FfiParam {
+        self.to_param_inner(DataType::ExtString, DataType::ExtError)
+    }
+    
+    #[rustfmt::skip]
+    fn to_param_inner(self, str_type: DataType, err_type: DataType) -> FfiParam {
         match self {
             Param::I8(x) => FfiParam { type_id: DataType::I8, value: RawParam { i8: x } },
             Param::I16(x) => FfiParam { type_id: DataType::I16, value: RawParam { i16: x } },
@@ -280,9 +266,9 @@ impl Param {
             Param::F64(x) => FfiParam { type_id: DataType::F64, value: RawParam { f64: x } },
             Param::Bool(x) => FfiParam { type_id: DataType::Bool, value: RawParam { bool: x } },
             // allocated via CString, must be freed via CString::from_raw
-            Param::String(x) => FfiParam { type_id: DataType::ExtString, value: RawParam { string: CString::new(x).unwrap().into_raw() } },
+            Param::String(x) => FfiParam { type_id: str_type, value: RawParam { string: CString::new(x).unwrap().into_raw() } },
             Param::Object(x) => FfiParam { type_id: DataType::Object, value: RawParam { object: x } },
-            Param::Error(x) => FfiParam { type_id: DataType::ExtError, value: RawParam { error: CString::new(x).unwrap().into_raw() } },
+            Param::Error(x) => FfiParam { type_id: err_type, value: RawParam { error: CString::new(x).unwrap().into_raw() } },
             Param::Void => FfiParam { type_id: DataType::Void, value: RawParam { void: () } },
         }
     }
@@ -334,7 +320,7 @@ impl FromParam for () {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Params {
     // SmallVec will spill onto the heap if there are more than 4 params
     params: SmallVec<[Param; 4]>,
@@ -491,7 +477,7 @@ impl<Ext> FfiParams<Ext> where Ext: ExternalFunctions {
 
     /// Creates FfiParams from a vector of Params.
     pub fn from_params<T>(params: T) -> Self where T: IntoIterator<Item = Param> {
-        let ffi_params = params.into_iter().map(|p| p.to_ffi_param()).collect();
+        let ffi_params = params.into_iter().map(|p| p.to_rs_param()).collect();
         Self { params: ffi_params, marker: PhantomData }
     }
 
@@ -669,7 +655,7 @@ impl FfiParam {
 
 impl From<Param> for FfiParam {
     fn from(value: Param) -> Self {
-        value.to_ffi_param()
+        value.to_rs_param()
     }
 }
 
