@@ -8,9 +8,10 @@ use std::task::Poll;
 
 use anyhow::{anyhow, Result};
 use parking_lot::RwLock;
+use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use tokio::io::AsyncWrite;
-use wasmtime::{Caller, Config, Engine, FuncType, Instance, Linker, Memory, MemoryAccessError, Module, Store, Val, ValType};
+use wasmtime::{Caller, Config, Engine, FuncType, Func, Instance, Linker, Memory, MemoryAccessError, Module, Store, Val, ValType};
 use wasmtime_wasi::WasiCtxBuilder;
 use wasmtime_wasi::cli::{IsTerminal, StdoutStream};
 use wasmtime_wasi::p1::WasiP1Ctx;
@@ -24,6 +25,7 @@ pub struct WasmInterpreter<Ext: ExternalFunctions> {
     linker: Linker<WasiP1Ctx>,
     script_instance: Option<Instance>,
     memory: Option<Memory>,
+    func_cache: FxHashMap<String, Func>,
     _ext: PhantomData<Ext>,
 }
 
@@ -176,7 +178,7 @@ pub fn write_string(
 
 impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
 
-    pub fn new(wasm_functions: HashMap<String, WasmFnMetadata>, data: Arc<RwLock<WasmDataState>>) -> Result<WasmInterpreter<Ext>> {
+    pub fn new(wasm_functions: FxHashMap<String, WasmFnMetadata>, data: Arc<RwLock<WasmDataState>>) -> Result<WasmInterpreter<Ext>> {
         let mut config = Config::new();
         config.wasm_threads(false);
         // config.cranelift_pcc(true); // do sandbox verification checks
@@ -211,11 +213,12 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             linker,
             script_instance: None,
             memory: None,
+            func_cache: Default::default(),
             _ext: PhantomData::default()
         })
     }
 
-    fn bind_wasm(engine: &Engine, linker: &mut Linker<WasiP1Ctx>, wasm_fns: HashMap<String, WasmFnMetadata>, data: Arc<RwLock<WasmDataState>>) -> Result<()> {
+    fn bind_wasm(engine: &Engine, linker: &mut Linker<WasiP1Ctx>, wasm_fns: FxHashMap<String, WasmFnMetadata>, data: Arc<RwLock<WasmDataState>>) -> Result<()> {
 
         // Utility Functions
 
@@ -279,6 +282,8 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             .ok_or_else(|| anyhow!("WASM module does not export memory"))?;
 
         self.memory = Some(memory);
+        // clear any previous function cache and cache exports lazily
+        self.func_cache.clear();
         self.script_instance = Some(instance);
 
         Ok(())
@@ -296,8 +301,14 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         let Some(instance) = &mut self.script_instance else {
             return Param::Error("No script is loaded or reentry was attempted".to_string());
         };
-        let Some(f) = instance.get_func(&mut self.store, name) else {
-            return Param::Error("Function does not exist".to_string());
+        // Try cache first to avoid repeated name lookup and Val boxing/unboxing.
+        let Some(f) = self.func_cache.get(name).copied().or_else(|| {
+            let found = instance.get_func(&mut self.store, name)?;
+            self.func_cache.insert(name.to_string(), found);
+            Some(found)
+        }) else {
+                return Param::Error("Function does not exist".to_string());
+
         };
         let memory = match &self.memory {
             Some(m) => m,

@@ -23,6 +23,7 @@ slotmap = "1"
 num_enum = "0.7.5"
 smallvec = "1"
 parking_lot = "0.12.5"
+rustc-hash = "2"
 
 [dev-dependencies]
 wasmprinter = "0.243.0"

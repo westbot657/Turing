@@ -8,6 +8,7 @@ use std::sync::{Arc};
 use crate::wasm::wasm_engine::{write_string, WasmFnMetadata, WasmInterpreter};
 use anyhow::{anyhow, Result};
 use parking_lot::RwLock;
+use rustc_hash::{FxHashMap, FxHashSet};
 use slotmap::{new_key_type, SlotMap};
 use wasmtime::{Caller, Val};
 use wasmtime_wasi::p1::WasiP1Ctx;
@@ -41,11 +42,11 @@ pub struct WasmDataState {
     /// maps opaque pointer ids to real pointers
     pub opaque_pointers: SlotMap<OpaquePointerKey, ExtPointer<c_void>>,
     /// maps real pointers back to their opaque pointer ids
-    pub pointer_backlink: HashMap<ExtPointer<c_void>, OpaquePointerKey>,
+    pub pointer_backlink: FxHashMap<ExtPointer<c_void>, OpaquePointerKey>,
     /// queue of strings for wasm to fetch (needed due to reentrancy limitations)
     pub str_cache: VecDeque<String>,
     /// which mods are currently active
-    pub active_capabilities: HashSet<String>,
+    pub active_capabilities: FxHashSet<String>,
 }
 
 pub struct Turing<Ext: ExternalFunctions + Send + Sync + 'static> {
@@ -55,7 +56,7 @@ pub struct Turing<Ext: ExternalFunctions + Send + Sync + 'static> {
 }
 
 pub struct TuringSetup<Ext: ExternalFunctions + Send + Sync + 'static> {
-    wasm_fns: HashMap<String, WasmFnMetadata>,
+    wasm_fns: FxHashMap<String, WasmFnMetadata>,
     _ext: PhantomData<Ext>
 }
 
@@ -83,7 +84,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
 
     pub fn new() -> TuringSetup<Ext> {
         TuringSetup {
-            wasm_fns: HashMap::default(),
+            wasm_fns: Default::default(),
             _ext: PhantomData::default(),
         }
     }
@@ -100,7 +101,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
 
         let source = source.to_string();
         let source = Path::new(&source);
-        let capabilities: HashSet<String> = loaded_capabilities.iter().map(|c| c.to_string()).collect();
+        let capabilities: FxHashSet<String> = loaded_capabilities.iter().map(|c| c.to_string()).collect();
 
         if let Err(e) = source.metadata() {
             return Err(anyhow!("Script does not exist: {:#?}, {:#?}", source, e))
