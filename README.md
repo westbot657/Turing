@@ -3,86 +3,127 @@ A wasm interpreter written in rust that interops with beat saber.
 
 this library behaves similar to OpenGL in how functions are called
 
-## C# and rust interop specs
+# C# and rust interop specs
 
-Initialize the Turing library via `init_turing()`  
+Here are the true types of type aliases, for ffi however,
+these concrete types are only to tell you which functions
+should be given what values.
 
-Finalize the wasm interpreter via `init_wasm()`  
+type `WasmFnMap` = `HashMap<String, WasmFnMetadata>`  
+type `TuringInstance` = `Turing<CsFns>`  
+type `TuringInit` = `Result<Turing<CsFns>>`  
 
-if things break, and you need to reset the state, call `uninit_turing()`, this will reset the state to as if the program just started.  
+---
+## Helper functions
 
-> [!WARNING]
-> Reentry loops will not work.
-> this means chains of host → wasm → host → wasm are invalid and will error.
+### `free_string(ptr: *mut c_char)`
+frees a rust-allocated string.
 
+### `register_function(name: *const c_char, callback: *const c_void)`
+registers functions that rust needs to work with interop.
+valid functions are:
+- `abort(err_type: *const c_char, err_msg: *const c_char)`
+- `log_info(*const c_char)`
+- `log_warn(*const c_char)`
+- `log_critical(*const c_char)`
+- `log_debug(*const c_char)`
+- `free_cs_string(*const c_char)`
 
-### Parameters
-Note: the type `ParamKey` is an alias of `u64`  
+---
+# Wasm initialization phase functions
 
-Create a new parameters builder with `create_params() -> ParamKey` or `create_n_params(count: u32) -> ParamKey`  
+### `create_wasm_fn_map() -> *mut WasmFnMap`
 
-Select a params object for future calls via `bind_params(params: ParamKey)`  
+### `create_wasm_fn_metadata(capability: *const c_char, callback: WasmCallback) -> *mut WasmFnMetadata`
 
-Add params via `add_param(param: FfiParam)`  
+### `add_param_types_to_wasm_fn_data(data: *mut WasmFnMetadata, params: *mut DataType, params_count: u32) -> *const c_char`
 
-Set a specific param via `set_param(index: u32, param: FfiParam)`
+### `set_wasm_fn_return_type(data: *mut WasmFnMetadata, return_type: DataType) -> *const c_char`
 
-Read params via `read_param(index: u32) -> FfiParam`  
+### `add_wasm_fn_to_map(map: *mut WasmFnMap, name: *const c_char, data: *mut WasmFnMetadata)`
 
-Delete the params object via `delete_params(params: ParamKey)`  
+### `copy_wasm_fn_map(map: *mut WasmFnMap) -> *mut WasmFnMap`
 
-### wasm functions
+### `delete_wasm_fn_map(map: *mut WasmFnMap)`
 
-create a new function with `create_wasm_fn(capability: *const c_char, name: *const c_char, pointer: *const c_void) -> FfiParam`  
+## 
 
-add param types via `add_wasm_fn_param_type(param_type: u32) -> FfiParam`  
+---
+## Turing Instance creation
 
-set return type via `set_wasm_fn_return_type(return_type: u32) -> FfiParam`  
+### `create_instance(wasm_fns_ptr: *mut WasmFnMap) -> *mut TuringInit`
 
-The previous 2 functions always operate on the last created function.
+### `check_error(res_ptr: *mut TuringInit) -> *const c_char`
 
-call a wasm function via `call_wasm_fn(name: *const c_char, params: ParamKey, expected_return_type: u32) -> FfiParam`  
+### `unwrap_instance(res_ptr: *mut TuringInit) -> *mut TuringInstance`
 
-load a script with `load_script(source: *const c_char, loaded_capabilites: ParamKey) -> FfiParam`, where the loaded_capabilities Param object is used as a list of strings
+### `delete_instance(turing: *mut TuringInstance)`
 
-### Helpers
+---
+# Params modification
 
-`free_string(ptr: *const c_char)`  
+### `create_params(size: u32) -> *mut Params`
 
-register C# functions that rust uses directly with `register_function(name: *const c_char, pointer: *const c_void)`  
-rust expects these functions to be registered after `init_turing` and before anything else
-- `abort(error_code: *const c_char, error_message: *const c_char) -> !`
-- `log_info(msg: *const c_char)`
-- `log_warn(msg: *const c_char)`
-- `log_critical(msg: *const c_char)`
-- `log_debug(msg: *const c_char)`
-Failing to register these 5 functions is technically fine since they all have an empty fallback implementation, though it is not recommended  
+### `add_param(params: *mut Params, param: FfiParam)`
 
+### `delete_params(params: *mut Params)`
 
-### Interop Structs
+### `get_param(params: *mut Params, index: u32) -> FfiParam`
+
+### `delete_param(param: FfiParam)`
+
+---
+# Wasm runtime
+
+### `load_wasm_script(turing: *mut TuringInstance, source: *const c_char, loaded_capabilities: *mut *const c_char, capability_count: u32) -> FfiParam`
+
+### `call_wasm_fn(turing: *mut TuringInstance, name: *const c_char, params: *mut Params, expected_return_type: DataType) -> FfiParam`
+
+---
+## Interop Structs
 ```rs
+pub enum DataType {
+    I8 = 1,
+    I16 = 2,
+    I32 = 3,
+    I64 = 4,
+    U8 = 5,
+    U16 = 6,
+    U32 = 7,
+    U64 = 8,
+    F32 = 9,
+    F64 = 10,
+    Bool = 11,
+    RustString = 12,
+    ExtString = 13,
+    Object = 14,
+    RustError = 15,
+    ExtError = 16,
+    Void = 17,
+}
+
 pub union RawParam {
-    I8: i8,                    // id: 1
-    I16: i16,                  //     2
-    I32: i32,                  //     3
-    I64: i64,                  //     4
-    U8: u8,                    //     5
-    U16: u16,                  //     6
-    U32: u32,                  //     7
-    U64: u64,                  //     8
-    F32: f32,                  //     9
-    F64: f64,                  //    10
-    Bool: bool,                //    11
-    RustString: *const c_char, //    12
-    ExtString: *const c_char,  //    13
-    Object: *const c_void,     //    14
-    RustError: *const c_char,  //    15
-    ExtError: *const c_char,   //    16
-    Void: (),                  //    17 or 0
+    I8: i8,
+    I16: i16,
+    I32: i32,
+    I64: i64,
+    U8: u8,
+    U16: u16,
+    U32: u32,
+    U64: u64,
+    F32: f32,
+    F64: f64,
+    Bool: bool,
+    RustString: *const c_char,
+    ExtString: *const c_char,
+    Object: *const c_void,
+    RustError: *const c_char,
+    ExtError: *const c_char,
+    Void: (),
 }
 
 pub struct FfiParam {
-    type_id: u32,
+    type_id: DataType,
     value: RawParam,
 }
 

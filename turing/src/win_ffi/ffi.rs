@@ -10,6 +10,11 @@ use crate::Turing;
 use crate::wasm::wasm_engine::{WasmCallback, WasmFnMetadata};
 use crate::win_ffi::wrappers::*;
 
+pub type WasmFnMap = HashMap<String, WasmFnMetadata>;
+pub type TuringInstance = Turing<CsFns>;
+pub type TuringInit = Result<Turing<CsFns>>;
+
+
 #[unsafe(no_mangle)]
 /// # Safety
 /// `ptr` must be a valid pointer to a string made via rust's `CString::into_raw` method.
@@ -20,15 +25,15 @@ unsafe extern "C" fn free_string(ptr: *mut c_char) {
 }
 
 #[unsafe(no_mangle)]
-extern "C" fn register_function(name: *const c_char, pointer: *const c_void) {
+extern "C" fn register_function(name: *const c_char, callback: *const c_void) {
     unsafe {
         let cstr = CStr::from_ptr(name).to_string_lossy().into_owned();
-        CS_FNS.link(&cstr, pointer);
+        CS_FNS.link(&cstr, callback);
     }
 }
 
 #[unsafe(no_mangle)]
-extern "C" fn create_wasm_fn_map() -> *mut HashMap<String, WasmFnMetadata> {
+extern "C" fn create_wasm_fn_map() -> *mut WasmFnMap {
     let map = Box::new(HashMap::new());
     Box::into_raw(map)
 }
@@ -89,7 +94,7 @@ unsafe extern "C" fn set_wasm_fn_return_type(data: *mut WasmFnMetadata, return_t
 /// Will silently fail if any are null so check before calling.
 /// If `data` is not null it will be freed regardless of validity of other args.
 /// Only `data` will be freed.
-unsafe extern "C" fn add_wasm_fn_to_map(map: *mut HashMap<String, WasmFnMetadata>, name: *const c_char, data: *mut WasmFnMetadata) {
+unsafe extern "C" fn add_wasm_fn_to_map(map: *mut WasmFnMap, name: *const c_char, data: *mut WasmFnMetadata) {
     if data.is_null() { return }
 
     let data = unsafe { *Box::from_raw(data) };
@@ -104,7 +109,7 @@ unsafe extern "C" fn add_wasm_fn_to_map(map: *mut HashMap<String, WasmFnMetadata
 #[unsafe(no_mangle)]
 /// # Safety
 /// `map` must be a valid pointer to a `HashMap<String, WasmFnMetadata>`
-unsafe extern "C" fn copy_wasm_fn_map(map: *mut HashMap<String, WasmFnMetadata>) -> *mut HashMap<String, WasmFnMetadata> {
+unsafe extern "C" fn copy_wasm_fn_map(map: *mut WasmFnMap) -> *mut WasmFnMap {
     if map.is_null() { return map }
     Box::into_raw(Box::new(unsafe { &*map }.clone()))
 }
@@ -114,7 +119,7 @@ unsafe extern "C" fn copy_wasm_fn_map(map: *mut HashMap<String, WasmFnMetadata>)
 /// # Safety
 /// `map` must be a valid pointer to a `HashMap<String, WasmFnMetadata>`.
 /// This function should only be called if a map is made and then never ends up getting used
-unsafe extern "C" fn delete_wasm_fn_map(map: *mut HashMap<String, WasmFnMetadata>) {
+unsafe extern "C" fn delete_wasm_fn_map(map: *mut WasmFnMap) {
     let _ = unsafe { Box::from_raw(map) };
 }
 
@@ -123,7 +128,7 @@ unsafe extern "C" fn delete_wasm_fn_map(map: *mut HashMap<String, WasmFnMetadata
 /// # Safety
 /// `wasm_fns_ptr` must be a valid pointer to a `HashMap<String, WasmFnMetadata>`.
 /// `wasm_fns_ptr` will be freed during this function and must no longer be used.
-unsafe extern "C" fn create_instance(wasm_fns_ptr: *mut HashMap<String, WasmFnMetadata>) -> *mut Result<Turing<CsFns>> {
+unsafe extern "C" fn create_instance(wasm_fns_ptr: *mut WasmFnMap) -> *mut TuringInit {
     let map = unsafe { Box::from_raw(wasm_fns_ptr) };
     let mut turing = Turing::new();
     turing.wasm_fns = *map;
@@ -136,7 +141,7 @@ unsafe extern "C" fn create_instance(wasm_fns_ptr: *mut HashMap<String, WasmFnMe
 /// # Safety
 /// `res_ptr` must be a valid pointer to a `Result<Turing>`.
 /// the caller is responsible for freeing the returned string if not null.
-unsafe extern "C" fn check_error(res_ptr: *mut Result<Turing<CsFns>>) -> *const c_char {
+unsafe extern "C" fn check_error(res_ptr: *mut TuringInit) -> *const c_char {
     let res = unsafe { &*res_ptr };
 
     if let Err(e) = res {
@@ -152,7 +157,7 @@ unsafe extern "C" fn check_error(res_ptr: *mut Result<Turing<CsFns>>) -> *const 
 /// `res_ptr` must have been checked with `check_error` and handled if an error was returned.
 /// If `res_ptr` points to an `Err` value, this function will abort the process.
 /// `res_ptr` will be freed during this function and must no longer be used.
-unsafe extern "C" fn unwrap_instance(res_ptr: *mut Result<Turing<CsFns>>) -> *mut Turing<CsFns> {
+unsafe extern "C" fn unwrap_instance(res_ptr: *mut TuringInit) -> *mut TuringInstance {
     let res = unsafe { *Box::from_raw(res_ptr) };
 
     let Ok(turing) = res else {
@@ -166,7 +171,7 @@ unsafe extern "C" fn unwrap_instance(res_ptr: *mut Result<Turing<CsFns>>) -> *mu
 #[unsafe(no_mangle)]
 /// # Safety
 /// `turing` must be a valid pointer to a `Turing`
-unsafe extern "C" fn delete_instance(turing: *mut Turing<CsFns>) {
+unsafe extern "C" fn delete_instance(turing: *mut TuringInstance) {
     let _ = unsafe { Box::from_raw(turing) };
 }
 
@@ -229,7 +234,7 @@ extern "C" fn delete_param(param: FfiParam) {
 /// `source` must be a valid `UTF-8` string.
 /// `loaded_capabilities` must be a valid pointer to an array of valid string pointers.
 /// Returns an `FfiParam` that is either void or an error value.
-unsafe extern "C" fn load_wasm_script(turing: *mut Turing<CsFns>, source: *const c_char, loaded_capabilities: *mut *const c_char, capability_count: u32) -> FfiParam {
+unsafe extern "C" fn load_wasm_script(turing: *mut TuringInstance, source: *const c_char, loaded_capabilities: *mut *const c_char, capability_count: u32) -> FfiParam {
     if turing.is_null() {
         return Param::Error("turing is null".to_string()).to_rs_param()
     }
@@ -260,7 +265,7 @@ unsafe extern "C" fn load_wasm_script(turing: *mut Turing<CsFns>, source: *const
         Ok(ls) => ls,
         Err(e) => return Param::Error(format!("{}", e)).to_rs_param()
     };
-    
+
     if let Err(e) = turing.load_script(source, &capabilities) {
         Param::Error(format!("{}", e))
     } else {
@@ -277,7 +282,7 @@ unsafe extern "C" fn load_wasm_script(turing: *mut Turing<CsFns>, source: *const
 /// `params` must be a valid pointer to a `Params`.
 /// If `params` is null, an empty `Params` will be used for the function call instead.
 /// `params` will not be freed.
-unsafe extern "C" fn call_wasm_fn(turing: *mut Turing<CsFns>, name: *const c_char, params: *mut Params, expected_return_type: DataType) -> FfiParam {
+unsafe extern "C" fn call_wasm_fn(turing: *mut TuringInstance, name: *const c_char, params: *mut Params, expected_return_type: DataType) -> FfiParam {
     if turing.is_null() {
         return Param::Error("turing is null".to_string()).to_rs_param()
     }
