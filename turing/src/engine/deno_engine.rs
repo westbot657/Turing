@@ -4,15 +4,17 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
-use deno_core::{JsRuntime, OpState, RuntimeOptions};
 use deno_core::op2;
+use deno_core::{JsRuntime, OpState, RuntimeOptions, serde_v8, v8};
 use deno_error::JsErrorBox;
 use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
 
+use crate::OpaquePointerKey;
 use crate::engine::types::ScriptFnMetadata;
-use crate::interop::params::Params;
+use crate::interop::params::{DataType, Param, Params};
 use crate::{EngineDataState, ExternalFunctions};
+use slotmap::KeyData;
 
 pub struct DenoEngine<Ext>
 where
@@ -25,7 +27,55 @@ where
     _ext: PhantomData<Ext>,
 }
 
+fn param_to_js(
+    param: Param,
+    data: &Arc<RwLock<EngineDataState>>,
+) -> Result<serde_json::Value, JsErrorBox> {
+    Ok(match param {
+        Param::I8(i) => serde_json::Value::from(i),
+        Param::I16(i) => serde_json::Value::from(i),
+        Param::I32(i) => serde_json::Value::from(i),
+        Param::I64(i) => serde_json::Value::from(i),
+        Param::U8(u) => serde_json::Value::from(u),
+        Param::U16(u) => serde_json::Value::from(u),
+        Param::U32(u) => serde_json::Value::from(u),
+        Param::U64(u) => serde_json::Value::from(u),
+        Param::F32(f) => serde_json::Value::from(f),
+        Param::F64(f) => serde_json::Value::from(f),
+        Param::Bool(b) => serde_json::Value::from(b),
+        Param::String(s) => serde_json::Value::from(s),
+        Param::Void => serde_json::Value::Null,
+        Param::Object(ptr) => {
+            let mut s = data.write();
+            let key = s.get_opaque_pointer(ptr.into());
+            serde_json::Value::from(key.0.as_ffi())
+        }
+        Param::Error(e) => return Err(JsErrorBox::generic(e)),
+    })
+}
+
+fn js_value_to_param(value: serde_json::Value) -> Param {
+    match value {
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Param::I64(i)
+            } else if let Some(u) = n.as_u64() {
+                Param::U64(u)
+            } else if let Some(f) = n.as_f64() {
+                Param::F64(f)
+            } else {
+                Param::Error("Invalid number".to_string())
+            }
+        }
+        serde_json::Value::String(s) => Param::String(s),
+        serde_json::Value::Bool(b) => Param::Bool(b),
+        serde_json::Value::Null => Param::Void,
+        _ => Param::Error("Unsupported return type".to_string()),
+    }
+}
+
 // Single dispatch op which receives a JSON array like `["fn.name", [arg0, arg1, ...]]`
+/// Handles calling registered FFI functions from JS.
 #[op2]
 #[serde]
 fn turing_dispatch<Ext: ExternalFunctions>(
@@ -142,30 +192,11 @@ fn turing_dispatch<Ext: ExternalFunctions>(
     let ret = (metadata.callback)(ffi_arr);
 
     // convert return to JSON
-    let j = match ret
+    let ret = ret
         .into_param::<Ext>()
-        .map_err(|e| JsErrorBox::generic("failed return value"))?
-    {
-        Param::I8(i) => serde_json::Value::from(i),
-        Param::I16(i) => serde_json::Value::from(i),
-        Param::I32(i) => serde_json::Value::from(i),
-        Param::I64(i) => serde_json::Value::from(i),
-        Param::U8(u) => serde_json::Value::from(u),
-        Param::U16(u) => serde_json::Value::from(u),
-        Param::U32(u) => serde_json::Value::from(u),
-        Param::U64(u) => serde_json::Value::from(u),
-        Param::F32(f) => serde_json::Value::from(f),
-        Param::F64(f) => serde_json::Value::from(f),
-        Param::Bool(b) => serde_json::Value::from(b),
-        Param::String(s) => serde_json::Value::from(s),
-        Param::Void => serde_json::Value::Null,
-        Param::Object(ptr) => {
-            let mut s = data.write();
-            let key = s.get_opaque_pointer(ptr.into());
-            serde_json::Value::from(key.0.as_ffi())
-        }
-        Param::Error(e) => return Err(JsErrorBox::generic(e)),
-    };
+        .map_err(|e| JsErrorBox::generic("failed return value"))?;
+
+    let j = param_to_js(ret, data)?;
 
     Ok(j)
 }
@@ -197,13 +228,11 @@ impl<Ext: ExternalFunctions> turing_op<Ext> {
             name: ::std::stringify!(turing),
             deps: &[],
             js_files: {
-                const JS: &[deno_core::ExtensionFileSource] =
-                    &deno_core::include_js_files!(turing);
+                const JS: &[deno_core::ExtensionFileSource] = &deno_core::include_js_files!(turing);
                 ::std::borrow::Cow::Borrowed(JS)
             },
             esm_files: {
-                const JS: &[deno_core::ExtensionFileSource] =
-                    &deno_core::include_js_files!(turing);
+                const JS: &[deno_core::ExtensionFileSource] = &deno_core::include_js_files!(turing);
                 ::std::borrow::Cow::Borrowed(JS)
             },
             lazy_loaded_esm_files: {
@@ -274,7 +303,6 @@ impl<Ext: ExternalFunctions> turing_op<Ext> {
     #[doc = r" `JsRuntime::lazy_init_extensions`."]
     #[allow(dead_code, unused_mut)]
     pub fn args() -> deno_core::ExtensionArguments {
-        
         deno_core::extension!(!__config__ args);
         deno_core::ExtensionArguments {
             name: ::std::stringify!(turing),
@@ -293,13 +321,18 @@ where
     ) -> Result<Self> {
         // Register a single dispatch op generated by the `#[op]` macro.
 
-        let runtime = JsRuntime::new(RuntimeOptions {
-            extensions: vec![
-                turing_op::<Ext>::init(),
-            ],
+        let mut runtime = JsRuntime::new(RuntimeOptions {
+            extensions: vec![turing_op::<Ext>::init()],
             module_loader: None,
             ..Default::default()
         });
+
+        // Inject a small helper once to minimize per-call overhead.
+        // `__turing_call(name, argsArray)` will look up the function and call it.
+        let helper = r#"globalThis.__turing_call = function(name, args) { const fn = globalThis[name]; if (typeof fn !== 'function') throw new Error('function not found'); return fn.apply(null, args); };"#;
+        runtime
+            .execute_script("__turing_helper", helper)
+            .map_err(|e| anyhow!(e.to_string()))?;
 
         Ok(Self {
             runtime,
@@ -324,13 +357,71 @@ where
 
     pub fn call_fn(
         &mut self,
-        _name: &str,
-        _params: Params,
-        _ret_type: crate::interop::params::DataType,
-        _data: Arc<RwLock<EngineDataState>>,
+        name: &str,
+        params: Params,
+        ret_type: crate::interop::params::DataType,
+        data: Arc<RwLock<EngineDataState>>,
     ) -> crate::interop::params::Param {
-        crate::interop::params::Param::Error(
-            "Deno engine call from Rust -> JS is not implemented".to_string(),
-        )
+        // Basic implementation: serialize params to JSON and invoke the global JS
+        // function by name. For now the return value is not converted in full
+        // generality — we return `Void` on success and `Error(...)` on failure.
+        use crate::interop::params::Param;
+
+        // build JSON array of args
+        let args_vec = params
+            .into_iter()
+            .map(|p| param_to_js(p, &data))
+            .collect::<Result<_, _>>();
+
+        let args_vec = match args_vec {
+            Ok(v) => v,
+            Err(e) => {
+                return Param::Error(format!("argument conversion error: {}", e));
+            }
+        };
+
+        // Serialize the args as a JS array literal (no JSON.parse).
+        let args_literal = serde_json::to_string(&serde_json::Value::Array(args_vec))
+            .unwrap_or_else(|_| "[]".to_string());
+
+        let call_code = format!(
+            "__turing_call({}, {});",
+            serde_json::to_string(&name).unwrap(),
+            args_literal
+        );
+
+        let script_name = format!("turing_call:{}", name);
+        let exec_res = self.runtime.execute_script(script_name, call_code);
+
+        match exec_res {
+            Ok(global_val) => {
+                deno_core::scope!(scope, &mut self.runtime);
+                let local = v8::Local::new(scope, &global_val);
+
+                let json_val: serde_json::Value = match serde_v8::from_v8(scope, local) {
+                    Ok(v) => v,
+                    Err(e) => return Param::Error(format!("return conversion error: {}", e)),
+                };
+
+                // If the caller expects an object (opaque pointer id), map it back.
+                if ret_type == DataType::Object {
+                    if let Some(id) = json_val.as_u64() {
+                        let pointer_key = OpaquePointerKey::from(KeyData::from_ffi(id));
+                        let real = data
+                            .read()
+                            .opaque_pointers
+                            .get(pointer_key)
+                            .copied()
+                            .unwrap_or_default();
+                        return Param::Object(real.ptr);
+                    } else {
+                        return Param::Error("expected object id (number) from JS".to_string());
+                    }
+                }
+
+                js_value_to_param(json_val)
+            }
+            Err(e) => Param::Error(e.to_string()),
+        }
     }
 }
