@@ -144,8 +144,8 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
 
 
         let require = engine.create_function(|lua, name: String| {
-            if name == "host" {
-                lua.globals().get("host")
+            if name == "turing_api" {
+                lua.globals().get("turing_api")
             } else {
                 Err::<Table, _>(mlua::Error::RuntimeError(format!("Module '{name}' no found")))
             }
