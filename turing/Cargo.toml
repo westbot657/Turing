@@ -6,20 +6,33 @@ edition = "2024"
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]
 
+[features]
+default = ["wasm", "lua"]
+wasm = ["dep:wasmtime", "dep:wasmtime-wasi"]
+lua = ["dep:mlua"]
+# Enables registration of global-based FFI functions for all engines
+global_ffi = []
+
 [[bench]]
-name = "ffi_api_bench"
+name = "wasm_api_bench"
 harness = false
 
+[[bench]]
+name = "lua_api_bench"
+harness = false
+
+
 [dependencies]
-anyhow = "1.0.100"
-ffi = "0.1.1"
-glam = "0.30.8"
-serde_json = "1.0.145"
-wasmtime = "39.0.1"
-wasmtime-wasi = "39.0.1"
-wat = "1.239.0"
+anyhow = "1.0"
+serde_json = "1.0"
+
+wasmtime = { version = "39.0", optional = true }
+wasmtime-wasi = { version = "39.0", optional = true }
+mlua = { version = "0.11.5", features = ["lua54", "vendored"], optional = true }
+
+# todo: necessary?
 tokio = "1.48.0"
-mlua = { version = "0.11.5", features = ["lua54", "vendored"] }
+
 slotmap = "1"
 num_enum = "0.7.5"
 smallvec = "1"
@@ -28,6 +41,9 @@ rustc-hash = "2"
 convert_case = "0.10.0"
 
 [dev-dependencies]
-wasmprinter = "0.243.0"
+# for testing with wasmtime
+wat = { version = "1.239.0" }
+wasmprinter = {version = "0.243.0" }
+
 serial_test = "3.2.0"
 criterion = "0.8"

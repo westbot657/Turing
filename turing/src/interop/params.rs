@@ -6,14 +6,10 @@ use std::marker::PhantomData;
 use std::mem;
 use std::sync::{Arc};
 use anyhow::{anyhow, Result};
-use mlua::MultiValue;
 use num_enum::TryFromPrimitive;
 use slotmap::KeyData;
-use wasmtime::{Caller, Memory, Store, Val, ValType};
-use wasmtime_wasi::p1::WasiP1Ctx;
-use crate::{ExternalFunctions, OpaquePointerKey, WasmDataState};
+use crate::{ExternalFunctions, OpaquePointerKey, EngineDataState};
 use crate::interop::types::ExtString;
-use crate::wasm::wasm_engine::get_string;
 
 
 #[repr(u32)]
@@ -114,7 +110,8 @@ impl DataType {
         )
     }
 
-    pub fn to_val_type(&self) -> Result<ValType> {
+    #[cfg(feature = "wasm")]
+    pub fn to_val_type(&self) -> Result<wasmtime::ValType> {
         match self {
             DataType::I8
             | DataType::I16
@@ -125,18 +122,22 @@ impl DataType {
             | DataType::Bool
             | DataType::RustString
             | DataType::ExtString
-            | DataType::Object => Ok(ValType::I32),
+            | DataType::Object => Ok(wasmtime::ValType::I32),
 
-            DataType::I64 | DataType::U64 => Ok(ValType::I64),
+            DataType::I64 | DataType::U64 => Ok(wasmtime::ValType::I64),
 
-            DataType::F32 => Ok(ValType::F32),
-            DataType::F64 => Ok(ValType::F64),
+            DataType::F32 => Ok(wasmtime::ValType::F32),
+            DataType::F64 => Ok(wasmtime::ValType::F64),
 
             _ => Err(anyhow!("Invalid wasm value type: {}", self))
         }
     }
 
-    pub fn to_wasm_val_param(&self, val: &Val, caller: &mut Caller<'_, WasiP1Ctx>, data: &Arc<RwLock<WasmDataState>>) -> Result<Param> {
+    #[cfg(feature = "wasm")]
+    pub fn to_wasm_val_param(&self, val: &wasmtime::Val, caller: &mut wasmtime::Caller<'_, wasmtime_wasi::p1::WasiP1Ctx>, data: &Arc<RwLock<EngineDataState>>) -> Result<Param> {
+        use wasmtime::Val;
+        use crate::engine::wasm_engine::get_wasm_string;
+
         match (self, val) {
             (DataType::I8, Val::I32(i)) => Ok(Param::I8(*i as i8)),
             (DataType::I16, Val::I32(i)) => Ok(Param::I16(*i as i16)),
@@ -150,12 +151,13 @@ impl DataType {
             (DataType::F64, Val::F64(f)) => Ok(Param::F64(f64::from_bits(*f))),
             (DataType::Bool, Val::I32(b)) => Ok(Param::Bool(*b != 0)),
             (DataType::RustString | DataType::ExtString, Val::I32(ptr)) => {
+
                 let ptr = *ptr as u32;
 
                 let Some(memory) = caller.get_export("memory").and_then(|e| e.into_memory()) else {
                     return Err(anyhow!("wasm does not export memory"))
                 };
-                let st = get_string(ptr, memory.data(&caller));
+                let st = get_wasm_string(ptr, memory.data(&caller));
                 Ok(Param::String(st))
             }
             (DataType::Object, Val::I64(pointer_id)) => {
@@ -173,7 +175,8 @@ impl DataType {
         }
     }
 
-    pub fn to_lua_val_param(&self, val: &mlua::Value, data: &Arc<RwLock<WasmDataState>>) -> mlua::Result<Param> {
+    #[cfg(feature = "lua")]
+    pub fn to_lua_val_param(&self, val: &mlua::Value, data: &Arc<RwLock<EngineDataState>>) -> mlua::Result<Param> {
         match (self, val) {
             (DataType::I8,  mlua::Value::Integer(i)) => Ok(Param::I8(*i as i8)),
             (DataType::I16, mlua::Value::Integer(i)) => Ok(Param::I16(*i as i16)),
@@ -229,13 +232,16 @@ pub enum Param {
 impl Param {
 
     /// Constructs a Param from a Wasmtime Val and type id.
+    #[cfg(feature = "wasm")]
     pub fn from_wasm_type_val(
         typ: DataType,
-        val: Val,
-        data: &Arc<RwLock<WasmDataState>>,
-        memory: &Memory,
-        caller: &Store<WasiP1Ctx>,
+        val: wasmtime::Val,
+        data: &Arc<RwLock<EngineDataState>>,
+        memory: &wasmtime::Memory,
+        caller: &wasmtime::Store<wasmtime_wasi::p1::WasiP1Ctx>,
     ) -> Self {
+        use crate::engine::wasm_engine::get_wasm_string;
+        
         match typ {
             DataType::I8 => Param::I8(val.unwrap_i32() as i8),
             DataType::I16 => Param::I16(val.unwrap_i32() as i16),
@@ -250,8 +256,9 @@ impl Param {
             DataType::Bool => Param::Bool(val.unwrap_i32() != 0),
             // allocated externally, we copy the string
             DataType::ExtString => {
+
                 let ptr = val.unwrap_i32() as u32;
-                let st = get_string(ptr, memory.data(caller));
+                let st = get_wasm_string(ptr, memory.data(caller));
                 Param::String(st)
             }
             DataType::RustString => unreachable!("RustString should not be used in from_typval"),
@@ -268,7 +275,7 @@ impl Param {
             }
             DataType::ExtError => {
                 let ptr = val.unwrap_i32() as u32;
-                let st = get_string(ptr, memory.data(caller));
+                let st = get_wasm_string(ptr, memory.data(caller));
                 Param::Error(st)
             }
             DataType::RustError => unreachable!("RustError should not be used in from_typval"),
@@ -276,10 +283,11 @@ impl Param {
         }
     }
 
+    #[cfg(feature = "lua")]
     pub fn from_lua_type_val(
         typ: DataType,
         val: mlua::Value,
-        data: &Arc<RwLock<WasmDataState>>,
+        data: &Arc<RwLock<EngineDataState>>,
         lua: &mlua::Lua
     ) -> Self {
         match typ {
@@ -432,9 +440,12 @@ impl Params {
     }
 
     /// Converts the Params into a vector of Wasmtime Val types for function calling.
-    pub fn to_wasm_args(self, data: &Arc<RwLock<WasmDataState>>) -> Result<SmallVec<[Val; 4]>> {
+    #[cfg(feature = "wasm")]
+    pub fn to_wasm_args(self, data: &Arc<RwLock<EngineDataState>>) -> Result<SmallVec<[wasmtime::Val; 4]>> {
         // Acquire a single write lock for the duration of conversion to avoid
         // repeated locking/unlocking when pushing strings or registering objects.
+
+        use wasmtime::Val;
         let mut s = data.write();
         let vals = self.params.into_iter().map(|p| 
             match p {
@@ -474,7 +485,8 @@ impl Params {
         vals
     }
 
-    pub fn to_lua_args(self, lua: &mlua::Lua, data: &Arc<RwLock<WasmDataState>>) -> Result<MultiValue> {
+    #[cfg(feature = "lua")]
+    pub fn to_lua_args(self, lua: &mlua::Lua, data: &Arc<RwLock<EngineDataState>>) -> Result<mlua::MultiValue> {
         let mut s = data.write();
         let vals = self.params.into_iter().map(|p|
             match p {
@@ -507,7 +519,7 @@ impl Params {
             }
         ).collect::<Result<Vec<mlua::Value>>>()?;
 
-        Ok(MultiValue::from_vec(vals))
+        Ok(mlua::MultiValue::from_vec(vals))
     }
 
     pub fn to_ffi<Ext>(self) -> FfiParams<Ext> where Ext: ExternalFunctions {

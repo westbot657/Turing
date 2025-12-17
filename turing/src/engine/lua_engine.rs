@@ -8,21 +8,21 @@ use convert_case::{Case, Casing};
 use mlua::{Table, Value};
 use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
-use crate::wasm::wasm_engine::{WasmCallback, WasmFnMetadata};
-use crate::{ExternalFunctions, WasmDataState};
+use crate::engine::types::{ScriptCallback, ScriptFnMetadata};
+use crate::{ExternalFunctions, EngineDataState};
 use crate::interop::params::{DataType, Param, Params};
 use crate::interop::types::ExtPointer;
 
 pub struct LuaInterpreter<Ext: ExternalFunctions> {
-    lua_fns: FxHashMap<String, WasmFnMetadata>,
-    data: Arc<RwLock<WasmDataState>>,
+    lua_fns: FxHashMap<String, ScriptFnMetadata>,
+    data: Arc<RwLock<EngineDataState>>,
     engine: Option<(Lua, Table)>,
     _ext: PhantomData<Ext>
 }
 
 impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
 
-    pub fn new(lua_functions: &FxHashMap<String, WasmFnMetadata>, data: Arc<RwLock<WasmDataState>>) -> Result<Self> {
+    pub fn new(lua_functions: &FxHashMap<String, ScriptFnMetadata>, data: Arc<RwLock<EngineDataState>>) -> Result<Self> {
         Ok(Self {
             lua_fns: lua_functions.clone(),
             data,
@@ -31,7 +31,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
         })
     }
 
-    fn generate_function(&self, lua: &Lua, table: &Table, name: &str, metadata: &WasmFnMetadata) -> Result<()> {
+    fn generate_function(&self, lua: &Lua, table: &Table, name: &str, metadata: &ScriptFnMetadata) -> Result<()> {
         let cap = metadata.capability.to_owned();
         let callback = metadata.callback;
         let pts = metadata.param_types.clone();
@@ -167,7 +167,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
         name: &str,
         params: Params,
         ret_type: DataType,
-        data: Arc<RwLock<WasmDataState>>
+        data: Arc<RwLock<EngineDataState>>
     ) -> Param {
         let Some((lua, module)) = &mut self.engine else {
             return Param::Error("No script is loaded".to_string())
@@ -205,12 +205,12 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
 }
 
 fn lua_bind_env<Ext: ExternalFunctions>(
-    data: &Arc<RwLock<WasmDataState>>,
+    data: &Arc<RwLock<EngineDataState>>,
     lua: &Lua,
     cap: &str,
     ps: &LuaVariadic<Value>,
     p: &[DataType],
-    func: &WasmCallback
+    func: &ScriptCallback
 ) -> mlua::Result<Value> {
 
     if !data.read().active_capabilities.contains(cap) {

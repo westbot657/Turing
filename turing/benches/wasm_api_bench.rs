@@ -1,4 +1,5 @@
 use criterion::{Criterion, criterion_group, criterion_main};
+use turing::engine::types::ScriptFnMetadata;
 use std::env;
 use std::ffi::CString;
 use std::fs::File;
@@ -6,7 +7,6 @@ use std::hint::black_box;
 use std::io::Write;
 
 use turing::interop::params::{DataType, FfiParam, FfiParamArray, Param, Params};
-use turing::wasm::wasm_engine::WasmFnMetadata;
 use turing::{ExternalFunctions, Turing};
 
 struct DirectExt {}
@@ -41,11 +41,11 @@ extern "C" fn fetch_string(_params: FfiParamArray) -> FfiParam {
 fn setup_turing_with_callbacks() -> Turing<DirectExt> {
     let mut turing = Turing::new();
 
-    let mut meta = WasmFnMetadata::new("test", log_info_wasm);
+    let mut meta = ScriptFnMetadata::new("test", log_info_wasm);
     let _ = meta.add_param_type(DataType::RustString);
     turing.add_function("log_info", meta).unwrap();
 
-    let mut meta = WasmFnMetadata::new("test", fetch_string);
+    let mut meta = ScriptFnMetadata::new("test", fetch_string);
     let _ = meta.add_return_type(DataType::ExtString);
     turing.add_function("fetch_string", meta).unwrap();
 
