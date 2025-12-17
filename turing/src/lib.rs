@@ -7,6 +7,7 @@ use std::path::Path;
 use std::sync::{Arc};
 use crate::wasm::wasm_engine::{write_string, WasmFnMetadata, WasmInterpreter};
 use anyhow::{anyhow, Result};
+use convert_case::{Case, Casing};
 use parking_lot::RwLock;
 use rustc_hash::{FxHashMap, FxHashSet};
 use slotmap::{new_key_type, SlotMap};

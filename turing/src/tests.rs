@@ -54,34 +54,36 @@ extern "C" fn fetch_string(_params: FfiParamArray) -> FfiParam {
     Param::String("this is a host provided string!".to_string()).to_ext_param()
 }
 
-fn common_setup_direct() -> Result<Turing<DirectExt>> {
+fn common_setup_direct(source: &str) -> Result<Turing<DirectExt>> {
     let mut turing = Turing::new();
 
     let mut metadata = WasmFnMetadata::new("test", log_info_wasm);
     metadata.add_param_type(DataType::RustString)?;
-    turing.add_function("log_info", metadata)?;
+    turing.add_function("log.info", metadata)?;
 
     let mut metadata = WasmFnMetadata::new("test", fetch_string);
     metadata.add_return_type(DataType::ExtString)?;
     turing.add_function("fetch_string", metadata)?;
 
     let mut turing = turing.build()?;
-    setup_test_script(&mut turing)?;
+    setup_test_script(&mut turing, source)?;
 
     Ok(turing)
 }
 
-fn setup_test_script<Ext: ExternalFunctions + Send + Sync + 'static>(turing: &mut Turing<Ext>) -> Result<()> {
-    let fp = r#"../tests/wasm/wasm_tests.wasm"#;
+const WASM_SCRIPT: &str = "../tests/wasm/wasm_tests.wasm";
+const LUA_SCRIPT: &str = "../tests/wasm/lua_test.lua";
+
+fn setup_test_script<Ext: ExternalFunctions + Send + Sync + 'static>(turing: &mut Turing<Ext>, source: &str) -> Result<()> {
     let capabilities = vec!["test"];
 
-    turing.load_script(fp, &capabilities)?;
+    turing.load_script(source, &capabilities)?;
     Ok(())
 }
 
 #[test]
 pub fn test_file_access() -> Result<()> {
-    let mut turing = common_setup_direct()?;
+    let mut turing = common_setup_direct(WASM_SCRIPT)?;
 
     let res = turing
         .call_fn("file_access_test", Params::new(), DataType::Void)
@@ -91,10 +93,7 @@ pub fn test_file_access() -> Result<()> {
     Ok(())
 }
 
-#[test]
-pub fn test_math() -> Result<()> {
-    let mut turing = common_setup_direct()?;
-
+fn test_math(mut turing: Turing<DirectExt>) -> Result<()> {
     let mut params = Params::new();
     params.push(Param::F32(3.5));
     params.push(Param::F32(5.0));
@@ -102,15 +101,27 @@ pub fn test_math() -> Result<()> {
     let res = turing
         .call_fn("math_ops_test", params, DataType::F32);
 
-    println!("[test/ext]: wasm code multiplied 3.5 by 5.0 for {:#?}", res);
-    assert!((res.to_result::<f32>()? - 17.5).abs() < f32::EPSILON); 
+    println!("[test/ext]: code multiplied 3.5 by 5.0 for {:#?}", res);
+    assert!((res.to_result::<f32>()? - 17.5).abs() < f32::EPSILON);
 
     Ok(())
 }
 
 #[test]
+pub fn test_math_wasm() -> Result<()> {
+    let turing = common_setup_direct(WASM_SCRIPT)?;
+    test_math(turing)
+}
+
+#[test]
+pub fn test_math_lua() -> Result<()> {
+    let turing = common_setup_direct(LUA_SCRIPT)?;
+    test_math(turing)
+}
+
+#[test]
 pub fn test_stdin_fail() -> Result<()> {
-    let mut turing = common_setup_direct()?;
+    let mut turing = common_setup_direct(WASM_SCRIPT)?;
 
     turing
         .call_fn("test_stdin_fail", Params::new(), DataType::Void)
@@ -119,10 +130,12 @@ pub fn test_stdin_fail() -> Result<()> {
 
 #[test]
 pub fn test_string_fetch() -> Result<()> {
-    let mut turing = common_setup_direct()?;
+    let mut turing = common_setup_direct(WASM_SCRIPT)?;
 
     turing
         .call_fn("test_string_fetch", Params::new(), DataType::Void)
         .to_result::<()>()
 }
+
+
 

@@ -3,8 +3,8 @@ use std::{fs, io};
 
 
 unsafe extern "C" {
-    fn log_info(msg: *const c_char);
-    fn fetch_string() -> u32;
+    fn _log_info(msg: *const c_char);
+    fn _fetch_string() -> u32;
     fn _host_strcpy(location: u32, size: u32) -> u32;
 }
 
@@ -12,7 +12,7 @@ macro_rules! println {
     ( $( $tok:expr ),* ) => {
         {
             let s = CString::new(format!($($tok),*)).unwrap();
-            unsafe { log_info(s.as_ptr()) }
+            unsafe { _log_info(s.as_ptr()) }
         }
     };
 }
@@ -23,7 +23,7 @@ extern "C" fn on_load() {
         let s = CString::new("log info from wasm!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!").unwrap();
         let ptr = s.into_raw();
 
-        log_info(ptr);
+        _log_info(ptr);
     }
 }
 
@@ -54,7 +54,7 @@ extern "C" fn test_stdin_fail() {
 
 #[unsafe(no_mangle)]
 extern "C" fn test_string_fetch() {
-    let sz = unsafe { fetch_string() };
+    let sz = unsafe { _fetch_string() };
     let mut turing_str = vec![0; sz as usize];
     unsafe { _host_strcpy(turing_str.as_mut_ptr() as u32, sz) };
     let turing_str = unsafe { CStr::from_ptr(turing_str.as_ptr() as *const c_char) };
