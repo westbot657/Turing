@@ -1,6 +1,6 @@
 extern crate core;
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::ffi::{c_char, c_void};
 use std::marker::PhantomData;
 use std::path::Path;
@@ -14,7 +14,9 @@ use wasmtime::{Caller, Val};
 use wasmtime_wasi::p1::WasiP1Ctx;
 use crate::interop::params::{DataType, Param, Params};
 use crate::interop::types::ExtPointer;
+use crate::lua::lua_engine::LuaInterpreter;
 
+pub mod lua;
 pub mod wasm;
 pub mod interop;
 
@@ -49,9 +51,29 @@ pub struct WasmDataState {
     pub active_capabilities: FxHashSet<String>,
 }
 
+impl WasmDataState {
+    pub fn get_opaque_pointer(&mut self, pointer: ExtPointer<c_void>) -> OpaquePointerKey {
+        if let Some(opaque) = self.pointer_backlink.get(&pointer) {
+            *opaque
+        } else {
+            let op = self.opaque_pointers.insert(pointer);
+            self.pointer_backlink.insert(pointer, op);
+            op
+        }
+    }
+}
+
+pub enum Engine {
+    None,
+    Wasm,
+    Lua,
+}
+
 pub struct Turing<Ext: ExternalFunctions + Send + Sync + 'static> {
     pub wasm: WasmInterpreter<Ext>,
+    pub lua: LuaInterpreter<Ext>,
     pub data: Arc<RwLock<WasmDataState>>,
+    pub active_engine: Engine,
     _ext: PhantomData<Ext>
 }
 
@@ -64,8 +86,9 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> TuringSetup<Ext> {
 
     pub fn build(self) -> Result<Turing<Ext>> {
         let data = Arc::new(RwLock::new(WasmDataState::default()));
-        let wasm = WasmInterpreter::new(self.wasm_fns, Arc::clone(&data))?;
-        Ok(Turing::build(wasm, data))
+        let wasm = WasmInterpreter::new(&self.wasm_fns, Arc::clone(&data))?;
+        let lua = LuaInterpreter::new(&self.wasm_fns, Arc::clone(&data))?;
+        Ok(Turing::build(wasm, lua, data))
     }
 
     /// Attempts to add a new function. Returns err if the function already exists
@@ -89,16 +112,18 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
         }
     }
 
-    fn build(wasm: WasmInterpreter<Ext>, data: Arc<RwLock<WasmDataState>>) -> Self {
+    fn build(wasm: WasmInterpreter<Ext>, lua: LuaInterpreter<Ext>, data: Arc<RwLock<WasmDataState>>) -> Self {
         Self {
             wasm,
+            lua,
             data,
+            active_engine: Engine::None,
             _ext: PhantomData::default(),
         }
     }
 
     pub fn load_script(&mut self, source: impl ToString, loaded_capabilities: &[impl ToString]) -> Result<()> {
-
+        self.active_engine = Engine::None;
         let source = source.to_string();
         let source = Path::new(&source);
         let capabilities: FxHashSet<String> = loaded_capabilities.iter().map(|c| c.to_string()).collect();
@@ -106,17 +131,34 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
         if let Err(e) = source.metadata() {
             return Err(anyhow!("Script does not exist: {:#?}, {:#?}", source, e))
         }
+        
+        if let Some(extension) = source.extension() {
+            if extension == "wasm" {
+                self.wasm.load_script(source)?;
+                self.active_engine = Engine::Wasm;
+            } else if extension == "lua" {
+                self.lua.load_script(source)?;
+                self.active_engine = Engine::Lua;
+            } else {
+                return Err(anyhow!("Unknown script extension: '{extension:?}' must be .wasm or .lua"))
+            }
+        } else {
+            return Err(anyhow!("script file has no extension, must be either .wasm or .lua"))
+        }
 
-        self.wasm.load_script(source)?;
         let mut write = self.data.write();
         write.active_capabilities = capabilities;
 
         Ok(())
     }
 
-    pub fn call_wasm_fn(&mut self, name: impl ToString, params: Params, expected_return_type: DataType) -> Param {
+    pub fn call_fn(&mut self, name: impl ToString, params: Params, expected_return_type: DataType) -> Param {
         let name = name.to_string();
-        self.wasm.call_fn(&name, params, expected_return_type, Arc::clone(&self.data))
+        match self.active_engine {
+            Engine::Wasm => self.wasm.call_fn(&name, params, expected_return_type, Arc::clone(&self.data)),
+            Engine::Lua => self.lua.call_fn(&name, params, expected_return_type, Arc::clone(&self.data)),
+            Engine::None => Param::Error("No code engine is active".to_string())
+        }
     }
 
 

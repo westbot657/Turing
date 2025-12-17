@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::fs;
 use std::marker::PhantomData;
@@ -7,6 +6,7 @@ use std::sync::{Arc};
 use std::task::Poll;
 
 use anyhow::{anyhow, Result};
+use convert_case::{Case, Casing};
 use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
@@ -33,10 +33,10 @@ pub type WasmCallback = extern "C" fn(FfiParamArray) -> FfiParam;
 
 #[derive(Clone)]
 pub struct WasmFnMetadata {
-    capability: String,
-    callback: WasmCallback,
-    param_types: Vec<DataType>,
-    return_type: Vec<DataType>
+    pub capability: String,
+    pub callback: WasmCallback,
+    pub param_types: Vec<DataType>,
+    pub return_type: Vec<DataType>
 }
 
 impl WasmFnMetadata {
@@ -178,7 +178,7 @@ pub fn write_string(
 
 impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
 
-    pub fn new(wasm_functions: FxHashMap<String, WasmFnMetadata>, data: Arc<RwLock<WasmDataState>>) -> Result<WasmInterpreter<Ext>> {
+    pub fn new(wasm_functions: &FxHashMap<String, WasmFnMetadata>, data: Arc<RwLock<WasmDataState>>) -> Result<Self> {
         let mut config = Config::new();
         config.wasm_threads(false);
         // config.cranelift_pcc(true); // do sandbox verification checks
@@ -218,7 +218,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         })
     }
 
-    fn bind_wasm(engine: &Engine, linker: &mut Linker<WasiP1Ctx>, wasm_fns: FxHashMap<String, WasmFnMetadata>, data: Arc<RwLock<WasmDataState>>) -> Result<()> {
+    fn bind_wasm(engine: &Engine, linker: &mut Linker<WasiP1Ctx>, wasm_fns: &FxHashMap<String, WasmFnMetadata>, data: Arc<RwLock<WasmDataState>>) -> Result<()> {
 
         // Utility Functions
 
@@ -245,13 +245,17 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         // External functions
         for (name, metadata) in wasm_fns.into_iter() {
 
+            // Convert from `ClassName::functionName` to `_class_name_function_name`
+            let mut name = name.replace("::", "_").to_case(Case::Snake);
+            name.insert(0, '_');
+
             let p_types = metadata.param_types.iter().map(|d| d.to_val_type()).collect::<Result<Vec<ValType>>>()?;
             let r_types = metadata.return_type.iter().map(|d| d.to_val_type()).collect::<Result<Vec<ValType>>>()?;
 
             let ft = FuncType::new(engine, p_types, r_types);
-            let cap = metadata.capability;
+            let cap = metadata.capability.clone();
             let callback = metadata.callback;
-            let pts = metadata.param_types;
+            let pts = metadata.param_types.clone();
 
             let data2 = Arc::clone(&data);
             linker.func_new(
@@ -295,7 +299,6 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         name: &str,
         params: Params,
         ret_type: DataType,
-        // use a refcell to avoid borrow issues
         data: Arc<RwLock<WasmDataState>>,
     ) -> Param {
         let Some(instance) = &mut self.script_instance else {
@@ -307,14 +310,17 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             self.func_cache.insert(name.to_string(), found);
             Some(found)
         }) else {
-                return Param::Error("Function does not exist".to_string());
-
+            return Param::Error("Function does not exist".to_string());
         };
         let memory = match &self.memory {
             Some(m) => m,
             None => return Param::Error("WASM memory not initialized".to_string()),
         };
-        let args = params.to_args(&data);
+        let args = params.to_wasm_args(&data);
+        if let Err(e) = args {
+            return Param::Error(format!("{e}"))
+        }
+        let args = args.unwrap();
 
         let mut res: SmallVec<[Val; 1]> = match ret_type {
             DataType::Void => SmallVec::new(),
@@ -335,7 +341,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         let rt = res[0];
 
         // convert Val to Param
-        Param::from_type_val(ret_type, rt, &data, &memory, &self.store)
+        Param::from_wasm_type_val(ret_type, rt, &data, &memory, &self.store)
     }
 }
 
@@ -357,7 +363,7 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
     // pre-allocate params to avoid repeated reallocations
     let mut params = Params::of_size(p.len() as u32);
     for (exp_typ, value) in p.iter().zip(ps) {
-        params.push(exp_typ.to_param_with_val(value, &mut caller, &data)?)
+        params.push(exp_typ.to_wasm_val_param(value, &mut caller, &data)?)
     }
     
     let ffi_params= params.to_ffi::<Ext>();
@@ -387,18 +393,12 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
             Val::I32(l as i32)
         }
         Param::Object(pointer) => {
-            let pointer = ExtPointer::from(pointer );
-            let opaque = if let Some(opaque) = s.pointer_backlink.get(&pointer) {
-                *opaque
-            } else {
-                let op = s.opaque_pointers.insert(pointer);
-                s.pointer_backlink.insert(pointer, op);
-                op
-            };
-            Val::I32(opaque.0.as_ffi() as i32)
+            let pointer = ExtPointer::from(pointer);
+            let opaque = s.get_opaque_pointer(pointer);
+            Val::I64(opaque.0.as_ffi() as i64)
         }
         Param::Error(er) => {
-            return Err(anyhow!("Error executing C# function: {}", er))?;
+            return Err(anyhow!("Error executing C# function: {}", er));
         }
         Param::Void => return Ok(()),
     };

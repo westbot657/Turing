@@ -75,7 +75,7 @@ fn bench_call_wasm_add(c: &mut Criterion) {
             params.push(Param::I32(1));
             params.push(Param::I32(2));
 
-            let res = turing.call_wasm_fn("add", params, DataType::I32);
+            let res = turing.call_fn("add", params, DataType::I32);
             let _ = black_box(res.to_result::<i32>().unwrap());
         })
     });
@@ -93,7 +93,7 @@ fn bench_call_tests_wasm_math(c: &mut Criterion) {
             params.push(Param::F32(3.5));
             params.push(Param::F32(5.0));
 
-            let res = turing.call_wasm_fn("math_ops_test", params, DataType::F32);
+            let res = turing.call_fn("math_ops_test", params, DataType::F32);
             let _ = black_box(res.to_result::<f32>().unwrap());
         })
     });
@@ -107,7 +107,7 @@ fn bench_fetch_string_from_wasm(c: &mut Criterion) {
 
     c.bench_function("turing_fetch_string_from_wasm", |b| {
         b.iter(|| {
-            let _ = turing.call_wasm_fn("test_string_fetch", Params::new(), DataType::Void);
+            let _ = turing.call_fn("test_string_fetch", Params::new(), DataType::Void);
         })
     });
 }

@@ -299,7 +299,7 @@ unsafe extern "C" fn call_wasm_fn(turing: *mut TuringInstance, name: *const c_ch
         unsafe { &*params }.clone()
     };
 
-    turing.call_wasm_fn(name, params, expected_return_type).to_rs_param()
+    turing.call_fn(name, params, expected_return_type).to_rs_param()
 
 }
 
