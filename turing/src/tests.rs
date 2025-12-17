@@ -137,5 +137,18 @@ pub fn test_string_fetch() -> Result<()> {
         .to_result::<()>()
 }
 
+#[test]
+pub fn test_lua_string_fetch() -> Result<()> {
+    let mut turing = common_setup_direct(LUA_SCRIPT)?;
 
+    let mut s = Params::of_size(1);
+    s.push(Param::String("Message from host".to_string()));
+
+    let res = turing
+        .call_fn("string_test", s, DataType::ExtString)
+        .to_result::<String>()?;
+
+    println!("Received message from lua: '{res}'");
+    Ok(())
+}
 

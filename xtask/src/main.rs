@@ -101,7 +101,7 @@ fn test_run() {
     let cargo_bin = env::var("CARGO").unwrap_or("cargo".to_string());
 
     let status = Command::new(cargo_bin)
-        .args(["test", "-p", "turing"])
+        .args(["test", "-p", "turing", "--", "--nocapture"])
         .status()
         .expect("Failed to run tests");
 

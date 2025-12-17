@@ -151,7 +151,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
             }
         }).map_err(|e| anyhow!("Failed to define 'require' function: {e}"))?;
 
-        env.set("require", require).map_err(|e| anyhow!("Failed to add 'require' to env: {e}"))?;
+        env.raw_set("require", require).map_err(|e| anyhow!("Failed to add 'require' to env: {e}"))?;
 
         let module: Table = engine.load(lua)
             .set_environment(env)
