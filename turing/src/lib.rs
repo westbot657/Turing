@@ -21,8 +21,8 @@ pub mod interop;
 #[cfg(test)]
 mod tests;
 
-#[cfg(target_os = "windows")]
-mod win_ffi;
+#[cfg(feature = "global_ffi")]
+mod global_ffi;
 
 pub trait ExternalFunctions {
     fn abort(error_type: String, error: String) -> !;

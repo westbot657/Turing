@@ -10,6 +10,8 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 default = ["wasm", "lua"]
 wasm = ["dep:wasmtime", "dep:wasmtime-wasi"]
 lua = ["dep:mlua"]
+# Enables registration of global-based FFI functions for all engines
+global_ffi = []
 
 [[bench]]
 name = "wasm_api_bench"
