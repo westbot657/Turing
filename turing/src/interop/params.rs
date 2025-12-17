@@ -11,9 +11,9 @@ use num_enum::TryFromPrimitive;
 use slotmap::KeyData;
 use wasmtime::{Caller, Memory, Store, Val, ValType};
 use wasmtime_wasi::p1::WasiP1Ctx;
-use crate::{ExternalFunctions, OpaquePointerKey, WasmDataState};
+use crate::engine::wasm_engine::get_wasm_string;
+use crate::{ExternalFunctions, OpaquePointerKey, EngineDataState};
 use crate::interop::types::ExtString;
-use crate::wasm::wasm_engine::get_string;
 
 
 #[repr(u32)]
@@ -136,7 +136,7 @@ impl DataType {
         }
     }
 
-    pub fn to_wasm_val_param(&self, val: &Val, caller: &mut Caller<'_, WasiP1Ctx>, data: &Arc<RwLock<WasmDataState>>) -> Result<Param> {
+    pub fn to_wasm_val_param(&self, val: &Val, caller: &mut Caller<'_, WasiP1Ctx>, data: &Arc<RwLock<EngineDataState>>) -> Result<Param> {
         match (self, val) {
             (DataType::I8, Val::I32(i)) => Ok(Param::I8(*i as i8)),
             (DataType::I16, Val::I32(i)) => Ok(Param::I16(*i as i16)),
@@ -155,7 +155,7 @@ impl DataType {
                 let Some(memory) = caller.get_export("memory").and_then(|e| e.into_memory()) else {
                     return Err(anyhow!("wasm does not export memory"))
                 };
-                let st = get_string(ptr, memory.data(&caller));
+                let st = get_wasm_string(ptr, memory.data(&caller));
                 Ok(Param::String(st))
             }
             (DataType::Object, Val::I64(pointer_id)) => {
@@ -173,7 +173,7 @@ impl DataType {
         }
     }
 
-    pub fn to_lua_val_param(&self, val: &mlua::Value, data: &Arc<RwLock<WasmDataState>>) -> mlua::Result<Param> {
+    pub fn to_lua_val_param(&self, val: &mlua::Value, data: &Arc<RwLock<EngineDataState>>) -> mlua::Result<Param> {
         match (self, val) {
             (DataType::I8,  mlua::Value::Integer(i)) => Ok(Param::I8(*i as i8)),
             (DataType::I16, mlua::Value::Integer(i)) => Ok(Param::I16(*i as i16)),
@@ -232,7 +232,7 @@ impl Param {
     pub fn from_wasm_type_val(
         typ: DataType,
         val: Val,
-        data: &Arc<RwLock<WasmDataState>>,
+        data: &Arc<RwLock<EngineDataState>>,
         memory: &Memory,
         caller: &Store<WasiP1Ctx>,
     ) -> Self {
@@ -251,7 +251,7 @@ impl Param {
             // allocated externally, we copy the string
             DataType::ExtString => {
                 let ptr = val.unwrap_i32() as u32;
-                let st = get_string(ptr, memory.data(caller));
+                let st = get_wasm_string(ptr, memory.data(caller));
                 Param::String(st)
             }
             DataType::RustString => unreachable!("RustString should not be used in from_typval"),
@@ -268,7 +268,7 @@ impl Param {
             }
             DataType::ExtError => {
                 let ptr = val.unwrap_i32() as u32;
-                let st = get_string(ptr, memory.data(caller));
+                let st = get_wasm_string(ptr, memory.data(caller));
                 Param::Error(st)
             }
             DataType::RustError => unreachable!("RustError should not be used in from_typval"),
@@ -279,7 +279,7 @@ impl Param {
     pub fn from_lua_type_val(
         typ: DataType,
         val: mlua::Value,
-        data: &Arc<RwLock<WasmDataState>>,
+        data: &Arc<RwLock<EngineDataState>>,
         lua: &mlua::Lua
     ) -> Self {
         match typ {
@@ -432,7 +432,7 @@ impl Params {
     }
 
     /// Converts the Params into a vector of Wasmtime Val types for function calling.
-    pub fn to_wasm_args(self, data: &Arc<RwLock<WasmDataState>>) -> Result<SmallVec<[Val; 4]>> {
+    pub fn to_wasm_args(self, data: &Arc<RwLock<EngineDataState>>) -> Result<SmallVec<[Val; 4]>> {
         // Acquire a single write lock for the duration of conversion to avoid
         // repeated locking/unlocking when pushing strings or registering objects.
         let mut s = data.write();
@@ -474,7 +474,7 @@ impl Params {
         vals
     }
 
-    pub fn to_lua_args(self, lua: &mlua::Lua, data: &Arc<RwLock<WasmDataState>>) -> Result<MultiValue> {
+    pub fn to_lua_args(self, lua: &mlua::Lua, data: &Arc<RwLock<EngineDataState>>) -> Result<MultiValue> {
         let mut s = data.write();
         let vals = self.params.into_iter().map(|p|
             match p {

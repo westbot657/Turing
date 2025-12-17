@@ -15,7 +15,8 @@ use wasmtime::{Caller, Config, Engine, FuncType, Func, Instance, Linker, Memory,
 use wasmtime_wasi::WasiCtxBuilder;
 use wasmtime_wasi::cli::{IsTerminal, StdoutStream};
 use wasmtime_wasi::p1::WasiP1Ctx;
-use crate::{wasm_host_strcpy, ExternalFunctions, WasmDataState};
+use crate::engine::types::{ScriptCallback, ScriptFnMetadata};
+use crate::{wasm_host_strcpy, ExternalFunctions, EngineDataState};
 use crate::interop::params::{DataType, FfiParam, FfiParamArray, Param, Params};
 use crate::interop::types::ExtPointer;
 
@@ -29,47 +30,6 @@ pub struct WasmInterpreter<Ext: ExternalFunctions> {
     _ext: PhantomData<Ext>,
 }
 
-pub type WasmCallback = extern "C" fn(FfiParamArray) -> FfiParam;
-
-#[derive(Clone)]
-pub struct WasmFnMetadata {
-    pub capability: String,
-    pub callback: WasmCallback,
-    pub param_types: Vec<DataType>,
-    pub return_type: Vec<DataType>
-}
-
-impl WasmFnMetadata {
-
-    pub fn new(capability: impl ToString, callback: WasmCallback) -> Self {
-        Self {
-            capability: capability.to_string(),
-            callback,
-            param_types: Vec::new(),
-            return_type: Vec::new(),
-        }
-    }
-
-    /// May error if DataType is not a valid parameter type
-    pub fn add_param_type(&mut self, p: DataType) -> Result<&mut Self> {
-         if !p.is_valid_param_type() {
-            return Err(anyhow!("DataType '{}' is not a valid parameter type", p))
-        }
-        self.param_types.push(p);
-
-        Ok(self)
-    }
-
-    /// May error if DataType is not a valid return type
-    pub fn add_return_type(&mut self, r: DataType) -> Result<&mut Self> {
-        if !r.is_valid_return_type() {
-            return Err(anyhow!("DataType '{}' is not a valid return type", r))
-        }
-        self.return_type.push(r);
-        Ok(self)
-    }
-
-}
 
 struct OutputWriter<Ext: ExternalFunctions + Send> {
     inner: Arc<RwLock<Vec<u8>>>,
@@ -156,7 +116,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> StdoutStream for WriterInit
 }
 
 /// gets a string out of wasm memory into rust memory.
-pub fn get_string(message: u32, data: &[u8]) -> String {
+pub fn get_wasm_string(message: u32, data: &[u8]) -> String {
     let c = CStr::from_bytes_until_nul(&data[message as usize..]).expect("Not a valid CStr");
     match c.to_str() {
         Ok(s) => s.to_owned(),
@@ -165,7 +125,7 @@ pub fn get_string(message: u32, data: &[u8]) -> String {
 }
 
 /// writes a string from rust memory to wasm memory.
-pub fn write_string(
+pub fn write_wasm_string(
     pointer: u32,
     string: &str,
     memory: &Memory,
@@ -178,7 +138,7 @@ pub fn write_string(
 
 impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
 
-    pub fn new(wasm_functions: &FxHashMap<String, WasmFnMetadata>, data: Arc<RwLock<WasmDataState>>) -> Result<Self> {
+    pub fn new(wasm_functions: &FxHashMap<String, ScriptFnMetadata>, data: Arc<RwLock<EngineDataState>>) -> Result<Self> {
         let mut config = Config::new();
         config.wasm_threads(false);
         // config.cranelift_pcc(true); // do sandbox verification checks
@@ -218,7 +178,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         })
     }
 
-    fn bind_wasm(engine: &Engine, linker: &mut Linker<WasiP1Ctx>, wasm_fns: &FxHashMap<String, WasmFnMetadata>, data: Arc<RwLock<WasmDataState>>) -> Result<()> {
+    fn bind_wasm(engine: &Engine, linker: &mut Linker<WasiP1Ctx>, wasm_fns: &FxHashMap<String, ScriptFnMetadata>, data: Arc<RwLock<EngineDataState>>) -> Result<()> {
 
         // Utility Functions
 
@@ -299,7 +259,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         name: &str,
         params: Params,
         ret_type: DataType,
-        data: Arc<RwLock<WasmDataState>>,
+        data: Arc<RwLock<EngineDataState>>,
     ) -> Param {
         let Some(instance) = &mut self.script_instance else {
             return Param::Error("No script is loaded or reentry was attempted".to_string());
@@ -347,13 +307,13 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
 
 
 fn wasm_bind_env<Ext: ExternalFunctions>(
-    data: &Arc<RwLock<WasmDataState>>,
+    data: &Arc<RwLock<EngineDataState>>,
     mut caller: Caller<'_, WasiP1Ctx>,
     cap: &String,
     ps: &[Val],
     rs: &mut [Val],
     p: &[DataType],
-    func: &WasmCallback,
+    func: &ScriptCallback,
 ) -> Result<()> {
 
     if !data.read().active_capabilities.contains(cap) {

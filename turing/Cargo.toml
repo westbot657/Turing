@@ -7,7 +7,7 @@ edition = "2024"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [[bench]]
-name = "ffi_api_bench"
+name = "wasm_api_bench"
 harness = false
 
 [dependencies]

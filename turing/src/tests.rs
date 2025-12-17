@@ -1,8 +1,8 @@
 use std::ffi::{c_char, CString};
 use anyhow::Result;
+use crate::engine::types::ScriptFnMetadata;
 use crate::{ExternalFunctions, Turing};
 use crate::interop::params::{DataType, FfiParam, FfiParamArray, Param, Params};
-use crate::wasm::wasm_engine::WasmFnMetadata;
 
 
 struct DirectExt {}
@@ -57,11 +57,11 @@ extern "C" fn fetch_string(_params: FfiParamArray) -> FfiParam {
 fn common_setup_direct(source: &str) -> Result<Turing<DirectExt>> {
     let mut turing = Turing::new();
 
-    let mut metadata = WasmFnMetadata::new("test", log_info_wasm);
+    let mut metadata = ScriptFnMetadata::new("test", log_info_wasm);
     metadata.add_param_type(DataType::RustString)?;
     turing.add_function("log.info", metadata)?;
 
-    let mut metadata = WasmFnMetadata::new("test", fetch_string);
+    let mut metadata = ScriptFnMetadata::new("test", fetch_string);
     metadata.add_return_type(DataType::ExtString)?;
     turing.add_function("fetch_string", metadata)?;
 
