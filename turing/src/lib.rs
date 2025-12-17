@@ -7,14 +7,11 @@ use std::path::Path;
 use std::sync::{Arc};
 use crate::engine::Engine;
 use crate::engine::types::ScriptFnMetadata;
-use crate::engine::wasm_engine::write_wasm_string;
 use anyhow::{anyhow, Result};
 use convert_case::{Case, Casing};
 use parking_lot::RwLock;
 use rustc_hash::{FxHashMap, FxHashSet};
 use slotmap::{new_key_type, SlotMap};
-use wasmtime::{Caller, Val};
-use wasmtime_wasi::p1::WasiP1Ctx;
 use crate::interop::params::{DataType, Param, Params};
 use crate::interop::types::ExtPointer;
 
@@ -137,6 +134,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
             ));
         };
         match extension.to_string_lossy().as_ref() {
+            #[cfg(feature = "wasm")]
             "wasm" => {
                 let mut wasm_interpreter = engine::wasm_engine::WasmInterpreter::new(
                     &self.script_fns,
@@ -145,6 +143,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
                 wasm_interpreter.load_script(source)?;
                 self.engine = Some(Engine::Wasm(wasm_interpreter));
             }
+            #[cfg(feature = "lua")]
             "lua" => {
                 let mut lua_interpreter = engine::lua_engine::LuaInterpreter::new(
                     &self.script_fns,
@@ -182,27 +181,3 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
 
 
 }
-
-/// internal for use in the wasm engine only
-pub(crate) fn wasm_host_strcpy(
-    data: &Arc<RwLock<EngineDataState>>,
-    mut caller: Caller<'_, WasiP1Ctx>,
-    ps: &[Val],
-    rs: &mut [Val],
-) -> Result<(), anyhow::Error> {
-    let ptr = ps[0].i32().unwrap();
-    let size = ps[1].i32().unwrap();
-
-    if let Some(next_str) = data.write().str_cache.pop_front()
-        && next_str.len() + 1 == size as usize
-    {
-        if let Some(memory) = caller.get_export("memory").and_then(|m| m.into_memory()) {
-            write_wasm_string(ptr as u32, &next_str, &memory, caller)?;
-            rs[0] = Val::I32(ptr);
-        }
-        return Ok(());
-    }
-
-    Ok(())
-}
-

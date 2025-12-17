@@ -16,7 +16,7 @@ use wasmtime_wasi::WasiCtxBuilder;
 use wasmtime_wasi::cli::{IsTerminal, StdoutStream};
 use wasmtime_wasi::p1::WasiP1Ctx;
 use crate::engine::types::{ScriptCallback, ScriptFnMetadata};
-use crate::{wasm_host_strcpy, ExternalFunctions, EngineDataState};
+use crate::{ExternalFunctions, EngineDataState};
 use crate::interop::params::{DataType, FfiParam, FfiParamArray, Param, Params};
 use crate::interop::types::ExtPointer;
 
@@ -366,3 +366,28 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
 
     Ok(())
 }
+
+
+/// internal for use in the wasm engine only
+pub fn wasm_host_strcpy(
+    data: &Arc<RwLock<EngineDataState>>,
+    mut caller: Caller<'_, WasiP1Ctx>,
+    ps: &[Val],
+    rs: &mut [Val],
+) -> Result<(), anyhow::Error> {
+    let ptr = ps[0].i32().unwrap();
+    let size = ps[1].i32().unwrap();
+
+    if let Some(next_str) = data.write().str_cache.pop_front()
+        && next_str.len() + 1 == size as usize
+    {
+        if let Some(memory) = caller.get_export("memory").and_then(|m| m.into_memory()) {
+            write_wasm_string(ptr as u32, &next_str, &memory, caller)?;
+            rs[0] = Val::I32(ptr);
+        }
+        return Ok(());
+    }
+
+    Ok(())
+}
+
