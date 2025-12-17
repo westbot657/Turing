@@ -282,7 +282,7 @@ unsafe extern "C" fn load_wasm_script(turing: *mut TuringInstance, source: *cons
 /// `params` must be a valid pointer to a `Params`.
 /// If `params` is null, an empty `Params` will be used for the function call instead.
 /// `params` will not be freed.
-unsafe extern "C" fn call_wasm_fn(turing: *mut TuringInstance, name: *const c_char, params: *mut Params, expected_return_type: DataType) -> FfiParam {
+unsafe extern "C" fn call_fn(turing: *mut TuringInstance, name: *const c_char, params: *mut Params, expected_return_type: DataType) -> FfiParam {
     if turing.is_null() {
         return Param::Error("turing is null".to_string()).to_rs_param()
     }

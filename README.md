@@ -41,6 +41,12 @@ valid functions are:
 ### `set_wasm_fn_return_type(data: *mut WasmFnMetadata, return_type: DataType) -> *const c_char`
 
 ### `add_wasm_fn_to_map(map: *mut WasmFnMap, name: *const c_char, data: *mut WasmFnMetadata)`
+name should be in one of these formats:
+- `ClassName:methodName`
+- `ClassName.functionName`
+- `function_name`
+case style doesn't matter, only the `:` and `.`
+
 
 ### `copy_wasm_fn_map(map: *mut WasmFnMap) -> *mut WasmFnMap`
 
@@ -76,8 +82,10 @@ valid functions are:
 # Wasm runtime
 
 ### `load_wasm_script(turing: *mut TuringInstance, source: *const c_char, loaded_capabilities: *mut *const c_char, capability_count: u32) -> FfiParam`
+This will either load the wasm or lua engine based on the source's file extension.
 
-### `call_wasm_fn(turing: *mut TuringInstance, name: *const c_char, params: *mut Params, expected_return_type: DataType) -> FfiParam`
+### `call_fn(turing: *mut TuringInstance, name: *const c_char, params: *mut Params, expected_return_type: DataType) -> FfiParam`
+Will automatically call the appropriate functions based on the current code engine.
 
 ---
 ## Interop Structs
