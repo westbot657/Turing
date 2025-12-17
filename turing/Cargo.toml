@@ -10,6 +10,10 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 name = "wasm_api_bench"
 harness = false
 
+[[bench]]
+name = "lua_api_bench"
+harness = false
+
 [dependencies]
 anyhow = "1.0.100"
 ffi = "0.1.1"
