@@ -4,6 +4,7 @@ use std::ffi::{CStr, CString, c_char, c_void};
 use std::fmt::Display;
 use std::marker::PhantomData;
 use std::mem;
+use std::ops::{Deref, DerefMut};
 use std::sync::{Arc};
 use anyhow::{anyhow, Result};
 use num_enum::TryFromPrimitive;
@@ -241,7 +242,7 @@ impl Param {
         caller: &wasmtime::Store<wasmtime_wasi::p1::WasiP1Ctx>,
     ) -> Self {
         use crate::engine::wasm_engine::get_wasm_string;
-        
+
         match typ {
             DataType::I8 => Param::I8(val.unwrap_i32() as i8),
             DataType::I16 => Param::I16(val.unwrap_i32() as i16),
@@ -447,7 +448,9 @@ impl Params {
 
         use wasmtime::Val;
         let mut s = data.write();
-        let vals = self.params.into_iter().map(|p| 
+        
+
+        self.params.into_iter().map(|p| 
             match p {
                 Param::I8(i) => Ok(Val::I32(i as i32)),
                 Param::I16(i) => Ok(Val::I32(i as i32)),
@@ -480,9 +483,7 @@ impl Params {
                 }
                 _ => unreachable!("Void shouldn't ever be added as an arg"),
             }
-        ).collect();
-
-        vals
+        ).collect()
     }
 
     #[cfg(feature = "lua")]
@@ -524,6 +525,20 @@ impl Params {
 
     pub fn to_ffi<Ext>(self) -> FfiParams<Ext> where Ext: ExternalFunctions {
         FfiParams::from_params(self.params)
+    }
+}
+
+impl Deref for Params {
+    type Target = SmallVec<[Param; 4]>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.params
+    }
+}
+
+impl DerefMut for Params {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.params
     }
 }
 
