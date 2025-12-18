@@ -152,6 +152,15 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
                 lua_interpreter.load_script(source)?;
                 self.engine = Some(Engine::Lua(lua_interpreter));
             }
+            #[cfg(feature = "deno")]
+            "js" | "ts" => {
+                let mut deno_engine = engine::deno_engine::DenoEngine::new(
+                    &self.script_fns,
+                    Arc::clone(&self.data),
+                )?;
+                deno_engine.load_script(source)?;
+                self.engine = Some(Engine::Deno(deno_engine));
+            }
             _ => {
                 return Err(anyhow!(
                     "Unknown script extension: '{extension:?}' must be .wasm or .lua"
