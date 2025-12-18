@@ -246,10 +246,6 @@ fn turing_dispatch<Ext: ExternalFunctions>(
     let j = param_to_v8(scope, ret, &data)?;
 
     let global = v8::Global::new(scope, j);
-    drop(j);
-    drop(args);
-    drop(name);
-    drop(scope);
 
     Ok(global)
 }
