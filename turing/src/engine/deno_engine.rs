@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use deno_core::op2;
+use deno_core::v8::{HandleScope, PinScope};
 use deno_core::{JsRuntime, OpState, RuntimeOptions, serde_v8, v8};
 use deno_error::JsErrorBox;
 use parking_lot::RwLock;
@@ -13,8 +14,11 @@ use rustc_hash::FxHashMap;
 use crate::OpaquePointerKey;
 use crate::engine::types::ScriptFnMetadata;
 use crate::interop::params::{DataType, Param, Params};
+use crate::interop::types::ExtPointer;
 use crate::{EngineDataState, ExternalFunctions};
 use slotmap::KeyData;
+
+pub mod conversion;
 
 pub struct DenoEngine<Ext>
 where
@@ -23,168 +27,210 @@ where
     runtime: JsRuntime,
     module_name: Option<String>,
     deno_fns: FxHashMap<String, ScriptFnMetadata>,
+    deno_fn_handles: FxHashMap<String, v8::Global<v8::Function>>,
     data: Arc<RwLock<EngineDataState>>,
     _ext: PhantomData<Ext>,
 }
 
-fn param_to_js(
+// Convert a host Param into a V8 `Value` within the provided scope.
+fn param_to_v8<'s>(
+    scope: &mut deno_core::v8::PinScope<'s, '_>,
     param: Param,
     data: &Arc<RwLock<EngineDataState>>,
-) -> Result<serde_json::Value, JsErrorBox> {
-    Ok(match param {
-        Param::I8(i) => serde_json::Value::from(i),
-        Param::I16(i) => serde_json::Value::from(i),
-        Param::I32(i) => serde_json::Value::from(i),
-        Param::I64(i) => serde_json::Value::from(i),
-        Param::U8(u) => serde_json::Value::from(u),
-        Param::U16(u) => serde_json::Value::from(u),
-        Param::U32(u) => serde_json::Value::from(u),
-        Param::U64(u) => serde_json::Value::from(u),
-        Param::F32(f) => serde_json::Value::from(f),
-        Param::F64(f) => serde_json::Value::from(f),
-        Param::Bool(b) => serde_json::Value::from(b),
-        Param::String(s) => serde_json::Value::from(s),
-        Param::Void => serde_json::Value::Null,
-        Param::Object(ptr) => {
-            let mut s = data.write();
-            let key = s.get_opaque_pointer(ptr.into());
-            serde_json::Value::from(key.0.as_ffi())
-        }
-        Param::Error(e) => return Err(JsErrorBox::generic(e)),
-    })
-}
+) -> Result<v8::Local<'s, v8::Value>, JsErrorBox> {
+    // Convert Param -> serde_json -> V8 using serde_v8 to avoid scope type mismatches
 
-fn js_value_to_param(value: serde_json::Value) -> Param {
-    match value {
-        serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                Param::I64(i)
-            } else if let Some(u) = n.as_u64() {
-                Param::U64(u)
-            } else if let Some(f) = n.as_f64() {
-                Param::F64(f)
-            } else {
-                Param::Error("Invalid number".to_string())
-            }
+    match param {
+        Param::I8(i) => serde_v8::to_v8(scope, i).map_err(|e| JsErrorBox::generic(e.to_string())),
+        Param::I16(i) => serde_v8::to_v8(scope, i).map_err(|e| JsErrorBox::generic(e.to_string())),
+        Param::I32(i) => serde_v8::to_v8(scope, i).map_err(|e| JsErrorBox::generic(e.to_string())),
+        Param::I64(i) => serde_v8::to_v8(scope, i).map_err(|e| JsErrorBox::generic(e.to_string())),
+        Param::U8(u) => serde_v8::to_v8(scope, u).map_err(|e| JsErrorBox::generic(e.to_string())),
+        Param::U16(u) => serde_v8::to_v8(scope, u).map_err(|e| JsErrorBox::generic(e.to_string())),
+        Param::U32(u) => serde_v8::to_v8(scope, u).map_err(|e| JsErrorBox::generic(e.to_string())),
+        Param::U64(u) => serde_v8::to_v8(scope, u).map_err(|e| JsErrorBox::generic(e.to_string())),
+        Param::F32(f) => serde_v8::to_v8(scope, f).map_err(|e| JsErrorBox::generic(e.to_string())),
+        Param::F64(f) => serde_v8::to_v8(scope, f).map_err(|e| JsErrorBox::generic(e.to_string())),
+        Param::Bool(b) => serde_v8::to_v8(scope, b).map_err(|e| JsErrorBox::generic(e.to_string())),
+        Param::String(s) => {
+            serde_v8::to_v8(scope, s).map_err(|e| JsErrorBox::generic(e.to_string()))
         }
-        serde_json::Value::String(s) => Param::String(s),
-        serde_json::Value::Bool(b) => Param::Bool(b),
-        serde_json::Value::Null => Param::Void,
-        _ => Param::Error("Unsupported return type".to_string()),
+        Param::Void => serde_v8::to_v8(scope, ()).map_err(|e| JsErrorBox::generic(e.to_string())),
+        Param::Object(ptr) => {
+            let mut write = data.write();
+            let key = write.get_opaque_pointer(ExtPointer { ptr });
+            let id = key.0.as_ffi();
+            serde_v8::to_v8(scope, id).map_err(|e| JsErrorBox::generic(e.to_string()))
+        }
+        Param::Error(e) => Err(JsErrorBox::generic(e)),
     }
 }
+
+// Convert a V8 `Value` into a host `Param`.
+fn v8_to_param<'s>(
+    scope: &mut v8::PinnedRef<'s, HandleScope<'s>>,
+    data: &Arc<RwLock<EngineDataState>>,
+    value: v8::Local<'s, v8::Value>,
+    expect_type: Option<DataType>,
+) -> Param {
+    if let Some(expect_type) = expect_type {
+        return match expect_type {
+            DataType::Void => Param::Void,
+            DataType::Bool => {
+                if value.is_boolean() {
+                    Param::Bool(value.boolean_value(scope))
+                } else {
+                    Param::Error("expected boolean".to_string())
+                }
+            }
+            DataType::I32 => {
+                if value.is_int32() {
+                    Param::I32(value.int32_value(scope).unwrap())
+                } else {
+                    Param::Error("expected int32".to_string())
+                }
+            }
+            DataType::F64 => {
+                if value.is_number() {
+                    Param::F64(value.number_value(scope).unwrap())
+                } else {
+                    Param::Error("expected number".to_string())
+                }
+            }
+            DataType::RustString | DataType::ExtString => {
+                if value.is_string() {
+                    let s = value.to_rust_string_lossy(scope);
+                    Param::String(s)
+                } else {
+                    Param::Error("expected string".to_string())
+                }
+            }
+            DataType::Object => {
+                // expect a big integer id
+                if value.is_big_int() {
+                    let id = value.to_big_int(scope).unwrap().i64_value().0 as u64;
+                    let pointer_key = OpaquePointerKey::from(KeyData::from_ffi(id));
+
+                    let read = data.read();
+                    let Some(real) = read.opaque_pointers.get(pointer_key) else {
+                        return Param::Error(format!("Invalid opaque pointer id: {}", id));
+                    };
+                    return Param::Object(real.ptr);
+                } else {
+                    Param::Error("expected object id (bigint)".to_string())
+                }
+            }
+            _ => unreachable!("unsupported expected type {}", expect_type),
+        };
+    }
+
+    if value.is_undefined() || value.is_null() {
+        return Param::Void;
+    }
+    if value.is_boolean() {
+        return Param::Bool(value.boolean_value(scope));
+    }
+    if value.is_int32() {
+        return Param::I32(value.int32_value(scope).unwrap());
+    }
+    if value.is_uint32() {
+        return Param::U32(value.uint32_value(scope).unwrap());
+    }
+    if value.is_big_int() {
+        return Param::I64(value.to_big_int(scope).unwrap().i64_value().0);
+    }
+    if value.is_number() {
+        return Param::F64(value.number_value(scope).unwrap());
+    }
+    if value.is_string() {
+        let s = value.to_rust_string_lossy(scope);
+        return Param::String(s);
+    }
+    if value.is_object() {
+        // get the object's identity field
+        let obj = value.to_object(scope).unwrap();
+        let id_key = v8::String::new(scope, "__turing_pointer_id").unwrap();
+        let id_val = obj.get(scope, id_key.into()).unwrap();
+        // assume it's a big integer
+        let id = id_val.to_big_int(scope).unwrap().i64_value().0 as u64;
+        let pointer_key = OpaquePointerKey::from(KeyData::from_ffi(id));
+
+        let read = data.read();
+        let Some(real) = read.opaque_pointers.get(pointer_key) else {
+            return Param::Error(format!("Invalid opaque pointer id: {}", id));
+        };
+        return Param::Object(real.ptr);
+    }
+
+    if value.is_array() {
+        return Param::Error("Array return types are not supported".to_string());
+    }
+
+    if value.is_function() {
+        return Param::Error("Function return types are not supported".to_string());
+    }
+
+    unreachable!("Does not support {value:?}")
+}
+
+
+
 
 // Single dispatch op which receives a JSON array like `["fn.name", [arg0, arg1, ...]]`
 /// Handles calling registered FFI functions from JS.
 #[op2]
-#[serde]
+#[global]
 fn turing_dispatch<Ext: ExternalFunctions>(
     state: &mut OpState,
-    #[serde] payload: serde_json::Value,
-) -> Result<serde_json::Value, JsErrorBox> {
-    use crate::OpaquePointerKey;
-    use crate::interop::params::{DataType, Param, Params};
-    use slotmap::KeyData;
-
+    payload: v8::Local<v8::Value>,
+) -> Result<v8::Global<v8::Value>, JsErrorBox> {
     // payload expected to be [name, args]
-    let (name, args) = match payload {
-        serde_json::Value::Array(mut a) if !a.is_empty() => {
-            let name = a
-                .remove(0)
-                .as_str()
-                .ok_or_else(|| JsErrorBox::generic("invalid call name"))?
-                .to_string();
-            let args = if !a.is_empty() {
-                a.remove(0)
-            } else {
-                serde_json::Value::Array(vec![])
-            };
-            (name, args)
-        }
-        _ => return Err(JsErrorBox::generic("invalid payload")),
-    };
 
-    let map = state.borrow::<FxHashMap<String, ScriptFnMetadata>>();
-    let data = state.borrow::<Arc<RwLock<EngineDataState>>>();
+    if !payload.is_array() {
+        return Err(JsErrorBox::generic("invalid payload"));
+    }
+
+    let data = state.borrow::<Arc<RwLock<EngineDataState>>>().clone();
+    let map = state
+        .borrow::<FxHashMap<String, ScriptFnMetadata>>()
+        .clone();
+
+    // parse array
+    let array = v8::Local::<v8::Array>::try_from(payload)
+        .map_err(|_| JsErrorBox::generic("invalid payload"))?;
+
+    let runtime = state.borrow_mut::<JsRuntime>();
+    deno_core::scope!(scope, runtime);
+
+    let (name, args) = {
+        let length = array.length();
+        let name = array
+            .get_index(scope, 0)
+            .ok_or_else(|| JsErrorBox::generic("invalid payload"))?
+            .to_string(scope)
+            .ok_or_else(|| JsErrorBox::generic("invalid function name"))?
+            .to_rust_string_lossy(scope);
+        let args = (0..length)
+            .filter_map(|i| array.get_index(scope, i))
+            .collect::<Vec<_>>();
+
+        (name, args)
+    };
 
     let metadata = map
         .get(&name)
-        .ok_or_else(|| JsErrorBox::generic("function not found"))?;
+        .ok_or_else(|| JsErrorBox::generic("function not found"))?
+        .clone();
+
     let p_types = metadata.param_types.clone();
 
-    let args_arr = match args {
-        serde_json::Value::Array(a) => a,
-        other => vec![other],
-    };
-
     let mut params = Params::of_size(p_types.len() as u32);
-    for (t, v) in p_types.iter().zip(args_arr.into_iter()) {
-        let p = match t {
-            DataType::I8 => Param::I8(
-                v.as_i64()
-                    .ok_or_else(|| JsErrorBox::type_error("type mismatch"))? as i8,
-            ),
-            DataType::I16 => Param::I16(
-                v.as_i64()
-                    .ok_or_else(|| JsErrorBox::type_error("type mismatch"))? as i16,
-            ),
-            DataType::I32 => Param::I32(
-                v.as_i64()
-                    .ok_or_else(|| JsErrorBox::type_error("type mismatch"))? as i32,
-            ),
-            DataType::I64 => Param::I64(
-                v.as_i64()
-                    .ok_or_else(|| JsErrorBox::type_error("type mismatch"))?,
-            ),
-            DataType::U8 => Param::U8(
-                v.as_u64()
-                    .ok_or_else(|| JsErrorBox::type_error("type mismatch"))? as u8,
-            ),
-            DataType::U16 => Param::U16(
-                v.as_u64()
-                    .ok_or_else(|| JsErrorBox::type_error("type mismatch"))? as u16,
-            ),
-            DataType::U32 => Param::U32(
-                v.as_u64()
-                    .ok_or_else(|| JsErrorBox::type_error("type mismatch"))? as u32,
-            ),
-            DataType::U64 => Param::U64(
-                v.as_u64()
-                    .ok_or_else(|| JsErrorBox::type_error("type mismatch"))?,
-            ),
-            DataType::F32 => Param::F32(
-                v.as_f64()
-                    .ok_or_else(|| JsErrorBox::type_error("type mismatch"))? as f32,
-            ),
-            DataType::F64 => Param::F64(
-                v.as_f64()
-                    .ok_or_else(|| JsErrorBox::type_error("type mismatch"))?,
-            ),
-            DataType::Bool => Param::Bool(
-                v.as_bool()
-                    .ok_or_else(|| JsErrorBox::type_error("type mismatch"))?,
-            ),
-            DataType::RustString | DataType::ExtString => Param::String(
-                v.as_str()
-                    .ok_or_else(|| JsErrorBox::type_error("type mismatch"))?
-                    .to_string(),
-            ),
-            DataType::Object => {
-                let id = v
-                    .as_u64()
-                    .ok_or_else(|| JsErrorBox::type_error("type mismatch"))?;
-                let pointer_key = OpaquePointerKey::from(KeyData::from_ffi(id));
-                let real = data
-                    .read()
-                    .opaque_pointers
-                    .get(pointer_key)
-                    .copied()
-                    .unwrap_or_default();
-                Param::Object(real.ptr)
-            }
-            _ => return Err(JsErrorBox::type_error("unsupported parameter type")),
-        };
-        params.push(p);
+    for (i, exp_type) in p_types.iter().enumerate() {
+        let arg = args
+            .get(i)
+            .ok_or_else(|| JsErrorBox::generic("missing argument"))?;
+        let param = v8_to_param(scope, &data, *arg, Some(*exp_type));
+        params.push(param);
     }
 
     let ffi = params.to_ffi::<Ext>();
@@ -196,9 +242,11 @@ fn turing_dispatch<Ext: ExternalFunctions>(
         .into_param::<Ext>()
         .map_err(|e| JsErrorBox::generic("failed return value"))?;
 
-    let j = param_to_js(ret, data)?;
+    let j = param_to_v8(scope, ret, &data)?;
 
-    Ok(j)
+    let global = v8::Global::new(scope, j);
+
+    Ok(global)
 }
 
 #[doc = r""]
@@ -334,7 +382,33 @@ where
             .execute_script("__turing_helper", helper)
             .map_err(|e| anyhow!(e.to_string()))?;
 
+        // Pre-cache function handles for faster calls.
+        let mut fn_handles: FxHashMap<String, v8::Global<v8::Function>> = FxHashMap::default();
+        {
+            let context = runtime.main_context();
+            deno_core::scope!(scope, &mut runtime);
+
+            for name in js_functions.keys() {
+                let ctx = v8::Local::new(scope, &context);
+                let g = ctx.global(scope);
+                let Some(key) = v8::String::new(scope, name.as_str()) else {
+                    continue;
+                };
+                let Some(val) = g.get(scope, key.into()) else {
+                    continue;
+                };
+                if !val.is_function() {
+                    continue;
+                }
+                let Ok(func) = v8::Local::<v8::Function>::try_from(val) else {
+                    continue;
+                };
+                fn_handles.insert(name.clone(), v8::Global::new(scope, func));
+            }
+        }
+
         Ok(Self {
+            deno_fn_handles: fn_handles,
             runtime,
             module_name: None,
             deno_fns: js_functions.clone(),
@@ -365,24 +439,22 @@ where
         // Basic implementation: serialize params to JSON and invoke the global JS
         // function by name. For now the return value is not converted in full
         // generality — we return `Void` on success and `Error(...)` on failure.
-        use crate::interop::params::Param;
 
-        // build JSON array of args
-        let args_vec = params
+        // If we have a cached function handle, call it directly using V8 locals
+        if let Some(func_global) = self.deno_fn_handles.get(name).cloned() {
+            return self.quick_call(ret_type, &data, params, &func_global);
+        }
+        // Fallback: stringify args and run the helper (older path)
+        let json_args = params
             .into_iter()
-            .map(|p| param_to_js(p, &data))
-            .collect::<Result<_, _>>();
+            .map(|p| p.to_serde(&data))
+            .collect::<Result<Vec<_>, _>>();
 
-        let args_vec = match args_vec {
-            Ok(v) => v,
-            Err(e) => {
-                return Param::Error(format!("argument conversion error: {}", e));
-            }
+        let args_literal = match json_args {
+            Ok(vec) => serde_json::to_string(&serde_json::Value::Array(vec))
+                .unwrap_or_else(|_| "[]".to_string()),
+            Err(e) => return Param::Error(format!("argument conversion error: {}", e)),
         };
-
-        // Serialize the args as a JS array literal (no JSON.parse).
-        let args_literal = serde_json::to_string(&serde_json::Value::Array(args_vec))
-            .unwrap_or_else(|_| "[]".to_string());
 
         let call_code = format!(
             "__turing_call({}, {});",
@@ -391,37 +463,109 @@ where
         );
 
         let script_name = format!("turing_call:{}", name);
-        let exec_res = self.runtime.execute_script(script_name, call_code);
-
-        match exec_res {
+        match self.runtime.execute_script(script_name, call_code) {
             Ok(global_val) => {
-                deno_core::scope!(scope, &mut self.runtime);
+                // convert return value directly from V8
+                let runtime_ref = &mut self.runtime;
+                deno_core::scope!(scope, runtime_ref);
                 let local = v8::Local::new(scope, &global_val);
 
-                let json_val: serde_json::Value = match serde_v8::from_v8(scope, local) {
-                    Ok(v) => v,
-                    Err(e) => return Param::Error(format!("return conversion error: {}", e)),
-                };
+                let param = v8_to_param(scope, &data, local, Some(ret_type));
 
-                // If the caller expects an object (opaque pointer id), map it back.
                 if ret_type == DataType::Object {
-                    if let Some(id) = json_val.as_u64() {
-                        let pointer_key = OpaquePointerKey::from(KeyData::from_ffi(id));
-                        let real = data
-                            .read()
-                            .opaque_pointers
-                            .get(pointer_key)
-                            .copied()
-                            .unwrap_or_default();
-                        return Param::Object(real.ptr);
-                    } else {
-                        return Param::Error("expected object id (number) from JS".to_string());
+                    match param {
+                        Param::I64(i) => {
+                            let pointer_key = OpaquePointerKey::from(KeyData::from_ffi(i as u64));
+                            let real = data
+                                .read()
+                                .opaque_pointers
+                                .get(pointer_key)
+                                .copied()
+                                .unwrap_or_default();
+                            return Param::Object(real.ptr);
+                        }
+                        Param::U64(u) => {
+                            let pointer_key = OpaquePointerKey::from(KeyData::from_ffi(u));
+                            let real = data
+                                .read()
+                                .opaque_pointers
+                                .get(pointer_key)
+                                .copied()
+                                .unwrap_or_default();
+                            return Param::Object(real.ptr);
+                        }
+                        _ => {
+                            return Param::Error("expected object id (number) from JS".to_string());
+                        }
                     }
                 }
 
-                js_value_to_param(json_val)
+                param
             }
             Err(e) => Param::Error(e.to_string()),
         }
+    }
+
+    fn quick_call(
+        &mut self,
+        ret_type: DataType,
+        data: &Arc<parking_lot::lock_api::RwLock<parking_lot::RawRwLock, EngineDataState>>,
+        args_vec: Params,
+        func_global: &v8::Global<v8::Function>,
+    ) -> Param {
+        deno_core::scope!(scope, self.runtime);
+
+        // enter scope and convert Params -> V8 locals
+        let mut v8_args: Vec<v8::Local<v8::Value>> = match args_vec
+            .iter()
+            .map(|p| match param_to_v8(scope, p.clone(), &data) {
+                Ok(l) => Ok(l),
+                Err(e) => return Err(format!("argument conversion error: {}", e)),
+            })
+            .collect::<Result<_, _>>()
+        {
+            Ok(v) => v,
+            Err(e) => return Param::Error(e),
+        };
+
+        let local_func = v8::Local::new(scope, func_global);
+        let recv = v8::undefined(scope).into();
+        let result = local_func.call(scope, recv, &v8_args);
+        let result = match result {
+            Some(r) => r,
+            None => return Param::Error("JS call threw".to_string()),
+        };
+
+        // convert V8 value -> Param directly
+        let param = v8_to_param(scope, data, result, None);
+
+        // If the caller expects an object, interpret numeric return as opaque id
+        if ret_type == DataType::Object {
+            match param {
+                Param::I64(i) => {
+                    let pointer_key = OpaquePointerKey::from(KeyData::from_ffi(i as u64));
+                    let real = data
+                        .read()
+                        .opaque_pointers
+                        .get(pointer_key)
+                        .copied()
+                        .unwrap_or_default();
+                    return Param::Object(real.ptr);
+                }
+                Param::U64(u) => {
+                    let pointer_key = OpaquePointerKey::from(KeyData::from_ffi(u));
+                    let real = data
+                        .read()
+                        .opaque_pointers
+                        .get(pointer_key)
+                        .copied()
+                        .unwrap_or_default();
+                    return Param::Object(real.ptr);
+                }
+                _ => return Param::Error("expected object id (number) from JS".to_string()),
+            }
+        }
+
+        param
     }
 }

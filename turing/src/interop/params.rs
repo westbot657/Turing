@@ -1,17 +1,16 @@
+use crate::interop::types::ExtString;
+use crate::{EngineDataState, ExternalFunctions, OpaquePointerKey};
+use anyhow::{Result, anyhow};
+use num_enum::TryFromPrimitive;
 use parking_lot::RwLock;
+use slotmap::KeyData;
 use smallvec::SmallVec;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::fmt::Display;
 use std::marker::PhantomData;
 use std::mem;
 use std::ops::{Deref, DerefMut};
-use std::sync::{Arc};
-use anyhow::{anyhow, Result};
-use num_enum::TryFromPrimitive;
-use slotmap::KeyData;
-use crate::{ExternalFunctions, OpaquePointerKey, EngineDataState};
-use crate::interop::types::ExtString;
-
+use std::sync::Arc;
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFromPrimitive)]
@@ -74,19 +73,19 @@ impl DataType {
         matches!(
             self,
             DataType::I8
-            | DataType::I16
-            | DataType::I32
-            | DataType::I64
-            | DataType::U8
-            | DataType::U16
-            | DataType::U32
-            | DataType::U64
-            | DataType::F32
-            | DataType::F64
-            | DataType::Bool
-            | DataType::RustString
-            | DataType::ExtString
-            | DataType::Object
+                | DataType::I16
+                | DataType::I32
+                | DataType::I64
+                | DataType::U8
+                | DataType::U16
+                | DataType::U32
+                | DataType::U64
+                | DataType::F32
+                | DataType::F64
+                | DataType::Bool
+                | DataType::RustString
+                | DataType::ExtString
+                | DataType::Object
         )
     }
 
@@ -94,20 +93,20 @@ impl DataType {
         matches!(
             self,
             DataType::I8
-            | DataType::I16
-            | DataType::I32
-            | DataType::I64
-            | DataType::U8
-            | DataType::U16
-            | DataType::U32
-            | DataType::U64
-            | DataType::F32
-            | DataType::F64
-            | DataType::Bool
-            | DataType::RustString
-            | DataType::ExtString
-            | DataType::Object
-            | DataType::Void
+                | DataType::I16
+                | DataType::I32
+                | DataType::I64
+                | DataType::U8
+                | DataType::U16
+                | DataType::U32
+                | DataType::U64
+                | DataType::F32
+                | DataType::F64
+                | DataType::Bool
+                | DataType::RustString
+                | DataType::ExtString
+                | DataType::Object
+                | DataType::Void
         )
     }
 
@@ -130,14 +129,19 @@ impl DataType {
             DataType::F32 => Ok(wasmtime::ValType::F32),
             DataType::F64 => Ok(wasmtime::ValType::F64),
 
-            _ => Err(anyhow!("Invalid wasm value type: {}", self))
+            _ => Err(anyhow!("Invalid wasm value type: {}", self)),
         }
     }
 
     #[cfg(feature = "wasm")]
-    pub fn to_wasm_val_param(&self, val: &wasmtime::Val, caller: &mut wasmtime::Caller<'_, wasmtime_wasi::p1::WasiP1Ctx>, data: &Arc<RwLock<EngineDataState>>) -> Result<Param> {
-        use wasmtime::Val;
+    pub fn to_wasm_val_param(
+        &self,
+        val: &wasmtime::Val,
+        caller: &mut wasmtime::Caller<'_, wasmtime_wasi::p1::WasiP1Ctx>,
+        data: &Arc<RwLock<EngineDataState>>,
+    ) -> Result<Param> {
         use crate::engine::wasm_engine::get_wasm_string;
+        use wasmtime::Val;
 
         match (self, val) {
             (DataType::I8, Val::I32(i)) => Ok(Param::I8(*i as i8)),
@@ -152,62 +156,74 @@ impl DataType {
             (DataType::F64, Val::F64(f)) => Ok(Param::F64(f64::from_bits(*f))),
             (DataType::Bool, Val::I32(b)) => Ok(Param::Bool(*b != 0)),
             (DataType::RustString | DataType::ExtString, Val::I32(ptr)) => {
-
                 let ptr = *ptr as u32;
 
                 let Some(memory) = caller.get_export("memory").and_then(|e| e.into_memory()) else {
-                    return Err(anyhow!("wasm does not export memory"))
+                    return Err(anyhow!("wasm does not export memory"));
                 };
                 let st = get_wasm_string(ptr, memory.data(&caller));
                 Ok(Param::String(st))
             }
             (DataType::Object, Val::I64(pointer_id)) => {
-                let pointer_key =
-                    OpaquePointerKey::from(KeyData::from_ffi(*pointer_id as u64));
+                let pointer_key = OpaquePointerKey::from(KeyData::from_ffi(*pointer_id as u64));
 
                 if let Some(true_pointer) = data.read().opaque_pointers.get(pointer_key) {
                     Ok(Param::Object(**true_pointer))
                 } else {
-                    Err(anyhow!("opaque pointer does not correspond to a real pointer"))
+                    Err(anyhow!(
+                        "opaque pointer does not correspond to a real pointer"
+                    ))
                 }
-
             }
-            _ => Err(anyhow!("Mismatched parameter type"))
+            _ => Err(anyhow!("Mismatched parameter type")),
         }
     }
 
     #[cfg(feature = "lua")]
-    pub fn to_lua_val_param(&self, val: &mlua::Value, data: &Arc<RwLock<EngineDataState>>) -> mlua::Result<Param> {
+    pub fn to_lua_val_param(
+        &self,
+        val: &mlua::Value,
+        data: &Arc<RwLock<EngineDataState>>,
+    ) -> mlua::Result<Param> {
         match (self, val) {
-            (DataType::I8,  mlua::Value::Integer(i)) => Ok(Param::I8(*i as i8)),
+            (DataType::I8, mlua::Value::Integer(i)) => Ok(Param::I8(*i as i8)),
             (DataType::I16, mlua::Value::Integer(i)) => Ok(Param::I16(*i as i16)),
             (DataType::I32, mlua::Value::Integer(i)) => Ok(Param::I32(*i as i32)),
             (DataType::I64, mlua::Value::Integer(i)) => Ok(Param::I64(*i)),
-            (DataType::U8,  mlua::Value::Integer(u)) => Ok(Param::U8(*u as u8)),
+            (DataType::U8, mlua::Value::Integer(u)) => Ok(Param::U8(*u as u8)),
             (DataType::U16, mlua::Value::Integer(u)) => Ok(Param::U16(*u as u16)),
             (DataType::U32, mlua::Value::Integer(u)) => Ok(Param::U32(*u as u32)),
             (DataType::U64, mlua::Value::Integer(u)) => Ok(Param::U64(*u as u64)),
             (DataType::F32, mlua::Value::Number(f)) => Ok(Param::F32(*f as f32)),
             (DataType::F64, mlua::Value::Number(f)) => Ok(Param::F64(*f)),
             (DataType::Bool, mlua::Value::Boolean(b)) => Ok(Param::Bool(*b)),
-            (DataType::RustString | DataType::ExtString, mlua::Value::String(s)) => Ok(Param::String(s.to_string_lossy())),
+            (DataType::RustString | DataType::ExtString, mlua::Value::String(s)) => {
+                Ok(Param::String(s.to_string_lossy()))
+            }
             (DataType::Object, mlua::Value::Table(t)) => {
                 let key = t.raw_get::<mlua::Value>("opaqu")?;
                 let key = match key {
                     mlua::Value::Integer(i) => i as u64,
-                    _ => return Err(mlua::Error::RuntimeError("Incorrect type for opaque handle".to_string()))
+                    _ => {
+                        return Err(mlua::Error::RuntimeError(
+                            "Incorrect type for opaque handle".to_string(),
+                        ));
+                    }
                 };
                 let pointer_key = OpaquePointerKey::from(KeyData::from_ffi(key));
                 if let Some(true_pointer) = data.read().opaque_pointers.get(pointer_key) {
                     Ok(Param::Object(**true_pointer))
                 } else {
-                    Err(mlua::Error::RuntimeError("opaque pointer does not correspond to a real pointer".to_string()))
+                    Err(mlua::Error::RuntimeError(
+                        "opaque pointer does not correspond to a real pointer".to_string(),
+                    ))
                 }
             }
-            _ => Err(mlua::Error::RuntimeError(format!("Mismatched parameter type: {self} with {val:?}")))
+            _ => Err(mlua::Error::RuntimeError(format!(
+                "Mismatched parameter type: {self} with {val:?}"
+            ))),
         }
     }
-
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -229,9 +245,7 @@ pub enum Param {
     Void,
 }
 
-
 impl Param {
-
     /// Constructs a Param from a Wasmtime Val and type id.
     #[cfg(feature = "wasm")]
     pub fn from_wasm_type_val(
@@ -257,7 +271,6 @@ impl Param {
             DataType::Bool => Param::Bool(val.unwrap_i32() != 0),
             // allocated externally, we copy the string
             DataType::ExtString => {
-
                 let ptr = val.unwrap_i32() as u32;
                 let st = get_wasm_string(ptr, memory.data(caller));
                 Param::String(st)
@@ -267,7 +280,8 @@ impl Param {
                 let op = val.unwrap_i64() as u64;
                 let key = OpaquePointerKey::from(KeyData::from_ffi(op));
 
-                let real = data.read()
+                let real = data
+                    .read()
                     .opaque_pointers
                     .get(key)
                     .copied()
@@ -289,7 +303,7 @@ impl Param {
         typ: DataType,
         val: mlua::Value,
         data: &Arc<RwLock<EngineDataState>>,
-        lua: &mlua::Lua
+        lua: &mlua::Lua,
     ) -> Self {
         match typ {
             DataType::I8 => Param::I8(val.as_integer().unwrap() as i8),
@@ -311,7 +325,8 @@ impl Param {
                 let op = table.get("opaqu").unwrap();
                 let key = OpaquePointerKey::from(KeyData::from_ffi(op));
 
-                let real = data.read()
+                let real = data
+                    .read()
                     .opaque_pointers
                     .get(key)
                     .copied()
@@ -324,14 +339,61 @@ impl Param {
         }
     }
 
-
     pub fn to_rs_param(self) -> FfiParam {
         self.to_param_inner(DataType::RustString, DataType::RustError)
     }
     pub fn to_ext_param(self) -> FfiParam {
         self.to_param_inner(DataType::ExtString, DataType::ExtError)
     }
-    
+
+    pub fn to_serde(
+        self,
+        data: &Arc<RwLock<EngineDataState>>,
+    ) -> Result<serde_json::Value, anyhow::Error> {
+        Ok(match self {
+            Param::I8(i) => serde_json::Value::from(i),
+            Param::I16(i) => serde_json::Value::from(i),
+            Param::I32(i) => serde_json::Value::from(i),
+            Param::I64(i) => serde_json::Value::from(i),
+            Param::U8(u) => serde_json::Value::from(u),
+            Param::U16(u) => serde_json::Value::from(u),
+            Param::U32(u) => serde_json::Value::from(u),
+            Param::U64(u) => serde_json::Value::from(u),
+            Param::F32(f) => serde_json::Value::from(f),
+            Param::F64(f) => serde_json::Value::from(f),
+            Param::Bool(b) => serde_json::Value::from(b),
+            Param::String(s) => serde_json::Value::from(s),
+            Param::Void => serde_json::Value::Null,
+            Param::Object(ptr) => {
+                let mut s = data.write();
+                let key = s.get_opaque_pointer(ptr.into());
+                serde_json::Value::from(key.0.as_ffi())
+            }
+            Param::Error(e) => return Err(anyhow!("{}", e)),
+        })
+    }
+
+    pub fn from_serde(value: serde_json::Value) -> Self {
+        match value {
+            serde_json::Value::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    Param::I64(i)
+                } else if let Some(u) = n.as_u64() {
+                    Param::U64(u)
+                } else if let Some(f) = n.as_f64() {
+                    Param::F64(f)
+                } else {
+                    Param::Error("Invalid number".to_string())
+                }
+            }
+            serde_json::Value::String(s) => Param::String(s),
+            serde_json::Value::Bool(b) => Param::Bool(b),
+            serde_json::Value::Null => Param::Void,
+            _ => Param::Error("Unsupported return type".to_string()),
+        }
+    }
+
+
     #[rustfmt::skip]
     fn to_param_inner(self, str_type: DataType, err_type: DataType) -> FfiParam {
         match self {
@@ -357,7 +419,6 @@ impl Param {
     pub fn to_result<T: FromParam>(self) -> Result<T> {
         T::from_param(self)
     }
-
 }
 
 pub trait FromParam: Sized {
@@ -368,7 +429,7 @@ macro_rules! deref_param {
         match $param {
             Param::$case(v) => Ok(v),
             Param::Error(e) => Err(anyhow!("{}", e)),
-            _ => Err(anyhow!("Incorrect data type"))
+            _ => Err(anyhow!("Incorrect data type")),
         }
     };
     ( $tp:ty => $case:tt ) => {
@@ -377,7 +438,7 @@ macro_rules! deref_param {
                 deref_param!(param, $case)
             }
         }
-    }
+    };
 }
 deref_param! { i8     => I8     }
 deref_param! { i16    => I16    }
@@ -396,7 +457,7 @@ impl FromParam for () {
         match param {
             Param::Void => Ok(()),
             Param::Error(e) => Err(anyhow!("{}", e)),
-            _ => Err(anyhow!("Incorrect data type"))
+            _ => Err(anyhow!("Incorrect data type")),
         }
     }
 }
@@ -442,16 +503,19 @@ impl Params {
 
     /// Converts the Params into a vector of Wasmtime Val types for function calling.
     #[cfg(feature = "wasm")]
-    pub fn to_wasm_args(self, data: &Arc<RwLock<EngineDataState>>) -> Result<SmallVec<[wasmtime::Val; 4]>> {
+    pub fn to_wasm_args(
+        self,
+        data: &Arc<RwLock<EngineDataState>>,
+    ) -> Result<SmallVec<[wasmtime::Val; 4]>> {
         // Acquire a single write lock for the duration of conversion to avoid
         // repeated locking/unlocking when pushing strings or registering objects.
 
         use wasmtime::Val;
         let mut s = data.write();
-        
 
-        self.params.into_iter().map(|p| 
-            match p {
+        self.params
+            .into_iter()
+            .map(|p| match p {
                 Param::I8(i) => Ok(Val::I32(i as i32)),
                 Param::I16(i) => Ok(Val::I32(i as i32)),
                 Param::I32(i) => Ok(Val::I32(i)),
@@ -478,19 +542,23 @@ impl Params {
                         Val::I64(op.0.as_ffi() as i64)
                     })
                 }
-                Param::Error(st) => {
-                    Err(anyhow!("{st}"))
-                }
+                Param::Error(st) => Err(anyhow!("{st}")),
                 _ => unreachable!("Void shouldn't ever be added as an arg"),
-            }
-        ).collect()
+            })
+            .collect()
     }
 
     #[cfg(feature = "lua")]
-    pub fn to_lua_args(self, lua: &mlua::Lua, data: &Arc<RwLock<EngineDataState>>) -> Result<mlua::MultiValue> {
+    pub fn to_lua_args(
+        self,
+        lua: &mlua::Lua,
+        data: &Arc<RwLock<EngineDataState>>,
+    ) -> Result<mlua::MultiValue> {
         let mut s = data.write();
-        let vals = self.params.into_iter().map(|p|
-            match p {
+        let vals = self
+            .params
+            .into_iter()
+            .map(|p| match p {
                 Param::I8(i) => Ok(mlua::Value::Integer(i as i64)),
                 Param::I16(i) => Ok(mlua::Value::Integer(i as i64)),
                 Param::I32(i) => Ok(mlua::Value::Integer(i as i64)),
@@ -513,17 +581,18 @@ impl Params {
                         mlua::Value::Integer(op.0.as_ffi() as i64)
                     })
                 }
-                Param::Error(st) => {
-                    Err(anyhow!("{st}"))
-                }
-                _ => unreachable!("Void shouldn't ever be added as an arg")
-            }
-        ).collect::<Result<Vec<mlua::Value>>>()?;
+                Param::Error(st) => Err(anyhow!("{st}")),
+                _ => unreachable!("Void shouldn't ever be added as an arg"),
+            })
+            .collect::<Result<Vec<mlua::Value>>>()?;
 
         Ok(mlua::MultiValue::from_vec(vals))
     }
 
-    pub fn to_ffi<Ext>(self) -> FfiParams<Ext> where Ext: ExternalFunctions {
+    pub fn to_ffi<Ext>(self) -> FfiParams<Ext>
+    where
+        Ext: ExternalFunctions,
+    {
         FfiParams::from_params(self.params)
     }
 }
@@ -539,6 +608,15 @@ impl Deref for Params {
 impl DerefMut for Params {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.params
+    }
+}
+
+impl IntoIterator for Params {
+    type Item = Param;
+    type IntoIter = smallvec::IntoIter<[Param; 4]>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.params.into_iter()
     }
 }
 
@@ -578,8 +656,10 @@ pub struct FfiParams<Ext: ExternalFunctions> {
     marker: PhantomData<Ext>,
 }
 
-
-impl<Ext> Drop for FfiParams<Ext> where Ext: ExternalFunctions {
+impl<Ext> Drop for FfiParams<Ext>
+where
+    Ext: ExternalFunctions,
+{
     fn drop(&mut self) {
         if self.params.is_empty() {
             return;
@@ -598,21 +678,36 @@ impl<Ext> Drop for FfiParams<Ext> where Ext: ExternalFunctions {
     }
 }
 
-impl<Ext> Default for FfiParams<Ext> where Ext: ExternalFunctions {
+impl<Ext> Default for FfiParams<Ext>
+where
+    Ext: ExternalFunctions,
+{
     fn default() -> Self {
         Self::empty()
     }
 }
 
-impl<Ext> FfiParams<Ext> where Ext: ExternalFunctions {
+impl<Ext> FfiParams<Ext>
+where
+    Ext: ExternalFunctions,
+{
     pub fn empty() -> Self {
-        Self { params: SmallVec::new(), marker: PhantomData }
+        Self {
+            params: SmallVec::new(),
+            marker: PhantomData,
+        }
     }
 
     /// Creates FfiParams from a vector of Params.
-    pub fn from_params<T>(params: T) -> Self where T: IntoIterator<Item = Param> {
+    pub fn from_params<T>(params: T) -> Self
+    where
+        T: IntoIterator<Item = Param>,
+    {
         let ffi_params = params.into_iter().map(|p| p.to_rs_param()).collect();
-        Self { params: ffi_params, marker: PhantomData }
+        Self {
+            params: ffi_params,
+            marker: PhantomData,
+        }
     }
 
     /// Creates FfiParams from an FfiParamArray with 'static lifetime.
@@ -621,13 +716,14 @@ impl<Ext> FfiParams<Ext> where Ext: ExternalFunctions {
             return Ok(Self::default());
         }
         unsafe {
-            let raw_vec =
-                std::ptr::slice_from_raw_parts_mut(array.ptr as *mut FfiParam, array.count as usize);
+            let raw_vec = std::ptr::slice_from_raw_parts_mut(
+                array.ptr as *mut FfiParam,
+                array.count as usize,
+            );
             let raw_vec = Box::from_raw(raw_vec);
 
             // take ownership of the raw_vec
             let owned = raw_vec.into_vec();
-
 
             Ok(Self {
                 params: SmallVec::from_vec(owned),
@@ -656,7 +752,7 @@ impl<Ext> FfiParams<Ext> where Ext: ExternalFunctions {
     }
 
     /// Leaks the FfiParams into an FfiParamArray with 'static lifetime.
-    /// Caller is responsible for freeing the memory. 
+    /// Caller is responsible for freeing the memory.
     /// Freeing is possible by converting back via FfiParams::from_ffi_array and dropping the FfiParams.
     pub fn leak(mut self) -> FfiParamArray<'static> {
         let boxed_slice = mem::take(&mut self.params).into_boxed_slice();
@@ -704,7 +800,8 @@ impl<'a> FfiParamArray<'a> {
                 std::ptr::slice_from_raw_parts(self.ptr as *mut FfiParam, self.count as usize);
             let slice = &*raw_slice;
 
-            let result = slice.iter()
+            let result = slice
+                .iter()
                 .map(|p| p.as_param::<Ext>())
                 .collect::<Result<_>>()?;
             Ok(Params { params: result })
@@ -784,7 +881,6 @@ impl FfiParam {
             DataType::Void => Param::Void,
         })
     }
-
 }
 
 impl From<Param> for FfiParam {
@@ -792,4 +888,3 @@ impl From<Param> for FfiParam {
         value.to_rs_param()
     }
 }
-
