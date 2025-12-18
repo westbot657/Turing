@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use deno_core::op2;
-use deno_core::v8::{HandleScope, PinScope};
 use deno_core::{JsRuntime, OpState, RuntimeOptions, serde_v8, v8};
 use deno_error::JsErrorBox;
 use parking_lot::RwLock;
@@ -18,7 +17,6 @@ use crate::interop::types::ExtPointer;
 use crate::{EngineDataState, ExternalFunctions};
 use slotmap::KeyData;
 
-pub mod conversion;
 
 pub struct DenoEngine<Ext>
 where
@@ -68,7 +66,7 @@ fn param_to_v8<'s>(
 
 // Convert a V8 `Value` into a host `Param`.
 fn v8_to_param<'s>(
-    scope: &mut v8::PinnedRef<'s, HandleScope<'s>>,
+    scope: &mut deno_core::v8::PinScope<'s, '_>,
     data: &Arc<RwLock<EngineDataState>>,
     value: v8::Local<'s, v8::Value>,
     expect_type: Option<DataType>,
@@ -173,9 +171,6 @@ fn v8_to_param<'s>(
     unreachable!("Does not support {value:?}")
 }
 
-
-
-
 // Single dispatch op which receives a JSON array like `["fn.name", [arg0, arg1, ...]]`
 /// Handles calling registered FFI functions from JS.
 #[op2]
@@ -201,6 +196,7 @@ fn turing_dispatch<Ext: ExternalFunctions>(
 
     let runtime = state.borrow_mut::<JsRuntime>();
     deno_core::scope!(scope, runtime);
+    // let scope = state.borrow_mut();
 
     let (name, args) = {
         let length = array.length();
@@ -224,14 +220,19 @@ fn turing_dispatch<Ext: ExternalFunctions>(
 
     let p_types = metadata.param_types.clone();
 
-    let mut params = Params::of_size(p_types.len() as u32);
-    for (i, exp_type) in p_types.iter().enumerate() {
-        let arg = args
-            .get(i)
-            .ok_or_else(|| JsErrorBox::generic("missing argument"))?;
-        let param = v8_to_param(scope, &data, *arg, Some(*exp_type));
-        params.push(param);
-    }
+    let params = Params::from_iter(
+        p_types
+            .iter()
+            .enumerate()
+            .map(|(i, exp_type)| {
+                let arg = args
+                    .get(i)
+                    .ok_or_else(|| JsErrorBox::generic("missing argument"))?;
+                let param = v8_to_param(scope, &data, *arg, Some(*exp_type));
+                Ok(param)
+            })
+            .collect::<Result<Vec<Param>, JsErrorBox>>()?,
+    );
 
     let ffi = params.to_ffi::<Ext>();
     let ffi_arr = ffi.as_ffi_array();
@@ -245,6 +246,10 @@ fn turing_dispatch<Ext: ExternalFunctions>(
     let j = param_to_v8(scope, ret, &data)?;
 
     let global = v8::Global::new(scope, j);
+    drop(j);
+    drop(args);
+    drop(name);
+    drop(scope);
 
     Ok(global)
 }
@@ -466,8 +471,7 @@ where
         match self.runtime.execute_script(script_name, call_code) {
             Ok(global_val) => {
                 // convert return value directly from V8
-                let runtime_ref = &mut self.runtime;
-                deno_core::scope!(scope, runtime_ref);
+                deno_core::scope!(scope, self.runtime);
                 let local = v8::Local::new(scope, &global_val);
 
                 let param = v8_to_param(scope, &data, local, Some(ret_type));
@@ -514,13 +518,18 @@ where
         func_global: &v8::Global<v8::Function>,
     ) -> Param {
         deno_core::scope!(scope, self.runtime);
+        // let context = self.runtime.main_context();
+        // let isolate = self.runtime.v8_isolate();
+        // deno_core::v8::scope!(let scope, isolate);
+        // let context = v8::Local::new(scope, &context);
+        // let scope = &mut ContextScope::new(scope, context);
 
         // enter scope and convert Params -> V8 locals
-        let mut v8_args: Vec<v8::Local<v8::Value>> = match args_vec
-            .iter()
-            .map(|p| match param_to_v8(scope, p.clone(), &data) {
+        let v8_args: Vec<v8::Local<v8::Value>> = match args_vec
+            .into_iter()
+            .map(|p| match param_to_v8(scope, p, data) {
                 Ok(l) => Ok(l),
-                Err(e) => return Err(format!("argument conversion error: {}", e)),
+                Err(e) => Err(format!("argument conversion error: {}", e)),
             })
             .collect::<Result<_, _>>()
         {
