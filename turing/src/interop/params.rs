@@ -620,6 +620,12 @@ impl IntoIterator for Params {
     }
 }
 
+impl FromIterator<Param> for Params {
+    fn from_iter<T: IntoIterator<Item = Param>>(iter: T) -> Self {
+        Self { params: iter.into_iter().collect() }
+    }
+}
+
 /// C repr of ffi data
 #[repr(C)]
 pub union RawParam {
