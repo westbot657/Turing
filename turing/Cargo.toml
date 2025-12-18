@@ -7,9 +7,10 @@ edition = "2024"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [features]
-default = ["wasm", "lua"]
+default = ["wasm", "lua", "deno"]
 wasm = ["dep:wasmtime", "dep:wasmtime-wasi"]
 lua = ["dep:mlua"]
+deno = ["dep:deno_core", "dep:deno_error"]
 # Enables registration of global-based FFI functions for all engines
 global_ffi = []
 
@@ -39,11 +40,13 @@ smallvec = "1"
 parking_lot = "0.12.5"
 rustc-hash = "2"
 convert_case = "0.10.0"
+deno_core = {version = "0.375.0", optional = true}
+deno_error = {version = "0.7", optional = true}
 
 [dev-dependencies]
 # for testing with wasmtime
 wat = { version = "1.239.0" }
-wasmprinter = {version = "0.243.0" }
+wasmprinter = { version = "0.243.0" }
 
 serial_test = "3.2.0"
 criterion = "0.8"
