@@ -143,15 +143,17 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
         ).map_err(|e| anyhow!("Failed to add math module to environment: {e}"))?;
 
 
-        let require = engine.create_function(|lua, name: String| {
+        let env2 = env.clone();
+        let require = engine.create_function(move |_, name: String| -> mlua::Result<Value> {
             if name == "turing_api" {
-                lua.globals().get("turing_api")
+                env2.get::<Value>("turing_api")
             } else {
-                Err::<Table, _>(mlua::Error::RuntimeError(format!("Module '{name}' no found")))
+                Err(mlua::Error::RuntimeError(format!("Module '{name}' no found")))
             }
         }).map_err(|e| anyhow!("Failed to define 'require' function: {e}"))?;
 
         env.raw_set("require", require).map_err(|e| anyhow!("Failed to add 'require' to env: {e}"))?;
+
 
         let module: Table = engine.load(lua)
             .set_environment(env)
