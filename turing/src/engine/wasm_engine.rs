@@ -28,9 +28,15 @@ pub struct WasmInterpreter<Ext: ExternalFunctions> {
     memory: Option<Memory>,
     func_cache: FxHashMap<String, Func>,
     typed_cache: FxHashMap<String, TypedFuncEntry>,
+    fast_calls: FastCalls,
     _ext: PhantomData<Ext>,
 }
 
+#[derive(Default)]
+struct FastCalls {
+    update: Option<TypedFunc<f32, ()>>,
+    fixed_update: Option<TypedFunc<f32, ()>>,
+}
 
 struct OutputWriter<Ext: ExternalFunctions + Send> {
     inner: Arc<RwLock<Vec<u8>>>,
@@ -44,10 +50,13 @@ enum TypedFuncEntry {
     NoParamsI64(TypedFunc<(), i64>),
     NoParamsF32(TypedFunc<(), f32>),
     NoParamsF64(TypedFunc<(), f64>),
-    I32ToI32(TypedFunc<(i32,), i32>),
-    I64ToI64(TypedFunc<(i64,), i64>),
-    F32ToF32(TypedFunc<(f32,), f32>),
-    F64ToF64(TypedFunc<(f64,), f64>),
+    // update and fixed update
+    F32ToVoid(TypedFunc<f32, ()>),
+
+    I32ToI32(TypedFunc<i32, i32>),
+    I64ToI64(TypedFunc<i64, i64>),
+    F32ToF32(TypedFunc<f32, f32>),
+    F64ToF64(TypedFunc<f64, f64>),
     I32I32ToI32(TypedFunc<(i32,i32), i32>),
 }
 
@@ -65,7 +74,7 @@ impl TypedFuncEntry {
                     Param::I32(v) => *v,
                     _ => return Err("Arg conversion".to_string()),
                 };
-                t.call(store, (a0,)).map(Param::I32).map_err(|e| e.to_string())
+                t.call(store, a0).map(Param::I32).map_err(|e| e.to_string())
             }
             TypedFuncEntry::I64ToI64(t) => {
                 if args.len() != 1 { return Err("Arg mismatch".to_string()) }
@@ -73,7 +82,7 @@ impl TypedFuncEntry {
                     Param::I64(v) => *v,
                     _ => return Err("Arg conversion".to_string()),
                 };
-                t.call(store, (a0,)).map(Param::I64).map_err(|e| e.to_string())
+                t.call(store, a0).map(Param::I64).map_err(|e| e.to_string())
             }
             TypedFuncEntry::F32ToF32(t) => {
                 if args.len() != 1 { return Err("Arg mismatch".to_string()) }
@@ -81,15 +90,23 @@ impl TypedFuncEntry {
                     Param::F32(v) => *v,
                     _ => return Err("Arg conversion".to_string()),
                 };
-                t.call(store, (a0,)).map(Param::F32).map_err(|e| e.to_string())
+                t.call(store, a0).map(Param::F32).map_err(|e| e.to_string())
             }
+            TypedFuncEntry::F32ToVoid(typed_func) => {
+                if args.len() != 1 { return Err("Arg mismatch".to_string()) }
+                let a0 = match &args[0] {
+                    Param::F32(v) => *v,
+                    _ => return Err("Arg conversion".to_string()),
+                };
+                typed_func.call(store, a0).map(|_| Param::Void).map_err(|e| e.to_string())
+            },
             TypedFuncEntry::F64ToF64(t) => {
                 if args.len() != 1 { return Err("Arg mismatch".to_string()) }
                 let a0 = match &args[0] {
                     Param::F64(v) => *v,
                     _ => return Err("Arg conversion".to_string()),
                 };
-                t.call(store, (a0,)).map(Param::F64).map_err(|e| e.to_string())
+                t.call(store, a0).map(Param::F64).map_err(|e| e.to_string())
             }
             TypedFuncEntry::I32I32ToI32(t) => {
                 if args.len() != 2 { return Err("Arg mismatch".to_string()) }
@@ -103,6 +120,7 @@ impl TypedFuncEntry {
                 };
                 t.call(store, (a0, a1)).map(Param::I32).map_err(|e| e.to_string())
             }
+
         }
     }
 
@@ -115,10 +133,12 @@ impl TypedFuncEntry {
         if let Ok(t) = func.typed::<(), f64>(&store) { return Some(TypedFuncEntry::NoParamsF64(t)); }
 
         // 1 param -> same-typed returns
-        if let Ok(t) = func.typed::<(i32,), i32>(&store) { return Some(TypedFuncEntry::I32ToI32(t)); }
-        if let Ok(t) = func.typed::<(i64,), i64>(&store) { return Some(TypedFuncEntry::I64ToI64(t)); }
-        if let Ok(t) = func.typed::<(f32,), f32>(&store) { return Some(TypedFuncEntry::F32ToF32(t)); }
-        if let Ok(t) = func.typed::<(f64,), f64>(&store) { return Some(TypedFuncEntry::F64ToF64(t)); }
+        if let Ok(t) = func.typed::<f32, ()>(&store) { return Some(TypedFuncEntry::F32ToVoid(t)); }
+
+        if let Ok(t) = func.typed::<i32, i32>(&store) { return Some(TypedFuncEntry::I32ToI32(t)); }
+        if let Ok(t) = func.typed::<i64, i64>(&store) { return Some(TypedFuncEntry::I64ToI64(t)); }
+        if let Ok(t) = func.typed::<f32, f32>(&store) { return Some(TypedFuncEntry::F32ToF32(t)); }
+        if let Ok(t) = func.typed::<f64, f64>(&store) { return Some(TypedFuncEntry::F64ToF64(t)); }
 
         // 2 params (i32,i32)->i32
         if let Ok(t) = func.typed::<(i32,i32), i32>(&store) { return Some(TypedFuncEntry::I32I32ToI32(t)); }
@@ -267,6 +287,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             memory: None,
             func_cache: Default::default(),
             typed_cache: Default::default(),
+            fast_calls: FastCalls::default(),
             _ext: PhantomData::default()
         })
     }
@@ -349,8 +370,18 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             let name = export.name();
             let Some(func) = instance.get_func(&mut self.store, name) else { continue };
 
+
+
             if let Some(entry) = TypedFuncEntry::from_func(&mut self.store, func) {
                 self.typed_cache.insert(name.to_string(), entry);
+            }
+
+            if name == "update" {
+                let Ok(f) = func.typed::<f32, ()>(&mut self.store) else { continue };
+                self.fast_calls.update = Some(f);
+            } else if name == "fixed_update" {
+                let Ok(f) = func.typed::<f32, ()>(&mut self.store) else { continue };
+                self.fast_calls.fixed_update = Some(f);
             }
         }
 
@@ -371,6 +402,12 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         let Some(instance) = &mut self.script_instance else {
             return Param::Error("No script is loaded or reentry was attempted".to_string());
         };
+
+        // Fast-path: typed cache (common signatures). Falls back to dynamic call below.
+        if let Some(entry) = self.typed_cache.get(name) {
+            return entry.invoke(&mut self.store, params).unwrap_or_else(|e| Param::Error(e))
+        }
+
         // Try cache first to avoid repeated name lookup and Val boxing/unboxing.
         let Some(f) = self.func_cache.get(name).copied().or_else(|| {
             let found = instance.get_func(&mut self.store, name)?;
@@ -379,19 +416,6 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         }) else {
             return Param::Error("Function does not exist".to_string());
         };
-        let memory = match &self.memory {
-            Some(m) => m,
-            None => return Param::Error("WASM memory not initialized".to_string()),
-        };
-
-
-        // Fast-path: typed cache (common signatures). Falls back to dynamic call below.
-        if let Some(entry) = self.typed_cache.get(name) {
-            match entry.invoke(&mut self.store, params) {
-                Ok(p) => return p,
-                Err(e) => return Param::Error(e),
-            }
-        }
 
         let args = params.to_wasm_args(&data);
         if let Err(e) = args {
@@ -418,9 +442,35 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         }
         let rt = res[0];
 
+        let memory = match &self.memory {
+            Some(m) => m,
+            None => return Param::Error("WASM memory not initialized".to_string()),
+        };
+
         // convert Val to Param
         Param::from_wasm_type_val(ret_type, rt, &data, &memory, &self.store)
     }
+
+    pub fn fast_call_update(&mut self, delta_time: f32) -> std::result::Result<(), String> {
+        if self.script_instance.is_none() {
+            return Err("No script is loaded".to_string())
+        }
+        let Some(f) = &self.fast_calls.update else {
+            return Ok(())
+        };
+        f.call(&mut self.store, delta_time).map_err(|e| e.to_string())
+    }
+
+    pub fn fast_call_fixed_update(&mut self, delta_time: f32) -> std::result::Result<(), String> {
+        if self.script_instance.is_none() {
+            return Err("No script is loaded".to_string())
+        }
+        let Some(f) = &self.fast_calls.fixed_update else {
+            return Ok(())
+        };
+        f.call(&mut self.store, delta_time).map_err(|e| e.to_string())
+    }
+
 }
 
 
@@ -443,13 +493,13 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
     for (exp_typ, value) in p.iter().zip(ps) {
         params.push(exp_typ.to_wasm_val_param(value, &mut caller, &data)?)
     }
-    
+
     let ffi_params= params.to_ffi::<Ext>();
     let ffi_params_struct = ffi_params.as_ffi_array();
 
     // Call to C#/rust's provided callback using a clone so we can still cleanup
     let res = func(ffi_params_struct).into_param::<Ext>()?;
-    
+
     let mut s = data.write();
 
     // Convert Param back to Val for return
@@ -508,4 +558,3 @@ pub fn wasm_host_strcpy(
 
     Ok(())
 }
-

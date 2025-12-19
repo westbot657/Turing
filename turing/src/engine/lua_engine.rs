@@ -5,9 +5,10 @@ use std::sync::Arc;
 use mlua::prelude::*;
 use anyhow::{anyhow, Result};
 use convert_case::{Case, Casing};
-use mlua::{Table, Value};
+use mlua::{Function, Table, Value};
 use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
+use serde_json::Number;
 use crate::engine::types::{ScriptCallback, ScriptFnMetadata};
 use crate::{ExternalFunctions, EngineDataState};
 use crate::interop::params::{DataType, Param, Params};
@@ -17,7 +18,14 @@ pub struct LuaInterpreter<Ext: ExternalFunctions> {
     lua_fns: FxHashMap<String, ScriptFnMetadata>,
     data: Arc<RwLock<EngineDataState>>,
     engine: Option<(Lua, Table)>,
+    fast_calls: FastCallLua,
     _ext: PhantomData<Ext>
+}
+
+#[derive(Default)]
+struct FastCallLua {
+    update: Option<Function>,
+    fixed_update: Option<Function>,
 }
 
 impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
@@ -27,6 +35,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
             lua_fns: lua_functions.clone(),
             data,
             engine: None,
+            fast_calls: FastCallLua::default(),
             _ext: PhantomData::default()
         })
     }
@@ -158,7 +167,22 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
         let module: Table = engine.load(lua)
             .set_environment(env)
             .eval().map_err(|e| anyhow!("Failed to evaluate module: {e}"))?;
-
+        
+        let func = module.get::<Value>("update").map_err(|e| e.to_string());
+        match func {
+            Ok(Value::Function(f)) => {
+                self.fast_calls.update = Some(f);
+            }
+            _ => {}
+        }
+        let func = module.get::<Value>("fixed_update").map_err(|e| e.to_string());
+        match func {
+            Ok(Value::Function(f)) => {
+                self.fast_calls.fixed_update = Some(f);
+            }
+            _ => {}
+        }
+        
         self.engine = Some((engine, module));
 
         Ok(())
@@ -177,7 +201,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
 
         let func = module.get::<Value>(name);
         if let Err(e) = func {
-            return Param::Error(format!("Failed to find function '{name}'"));
+            return Param::Error(format!("Failed to find function '{name}': {e}"));
         }
         let func = func.unwrap();
         let args = params.to_lua_args(lua, &data);
@@ -203,7 +227,31 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
         
         Param::from_lua_type_val(ret_type, res, &data, &lua)
     }
+    
+    pub fn fast_call_update(&mut self, delta_time: f32) -> std::result::Result<(), String> {
+        if self.engine.is_none() {
+            return Err("No script is loaded".to_string())
+        };
+        
+        if let Some(f) = &self.fast_calls.update {
+            f.call::<Value>(Value::Number(delta_time as f64)).map(|_| ()).map_err(|e| e.to_string())
+        } else {
+            Ok(())
+        }
+    }
 
+    pub fn fast_call_fixed_update(&mut self, delta_time: f32) -> std::result::Result<(), String> {
+        if self.engine.is_none() {
+            return Err("No script is loaded".to_string())
+        };
+
+        if let Some(f) = &self.fast_calls.fixed_update {
+            f.call::<Value>(Value::Number(delta_time as f64)).map(|_| ()).map_err(|e| e.to_string())
+        } else {
+            Ok(())
+        }
+    }
+    
 }
 
 fn lua_bind_env<Ext: ExternalFunctions>(

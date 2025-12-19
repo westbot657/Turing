@@ -303,4 +303,33 @@ unsafe extern "C" fn call_fn(turing: *mut TuringInstance, name: *const c_char, p
 
 }
 
+#[unsafe(no_mangle)]
+unsafe extern "C" fn fast_call_update(turing: *mut TuringInstance, delta_time: f32) -> *const c_char {
+    if turing.is_null() {
+        CString::new("turing is null").unwrap().into_raw()
+    } else {
+        let turing = unsafe { &mut *turing };
+
+        if let Err(e) = turing.fast_call_update(delta_time) {
+            CString::new(e).unwrap().into_raw()
+        } else {
+            ptr::null()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn fast_call_fixed_update(turing: *mut TuringInstance, delta_time: f32) -> *const c_char {
+    if turing.is_null() {
+        CString::new("turing is null").unwrap().into_raw()
+    } else {
+        let turing = unsafe { &mut *turing };
+
+        if let Err(e) = turing.fast_call_fixed_update(delta_time) {
+            CString::new(e).unwrap().into_raw()
+        } else {
+            ptr::null()
+        }
+    }
+}
 

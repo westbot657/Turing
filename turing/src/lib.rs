@@ -179,5 +179,21 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
         )
     }
 
+    pub fn fast_call_update(&mut self, delta_time: f32) -> std::result::Result<(), String> {
+        let Some(engine) = &mut self.engine else {
+            return Err("Engine not initialized".to_string())
+        };
+
+        engine.fast_call_update(delta_time)
+    }
+
+    pub fn fast_call_fixed_update(&mut self, delta_time: f32) -> std::result::Result<(), String> {
+        let Some(engine) = &mut self.engine else {
+            return Err("Engine not initialized".to_string())
+        };
+
+        engine.fast_call_fixed_update(delta_time)
+    }
+
 
 }

@@ -44,4 +44,25 @@ where
             _ => Param::Error("No code engine is active".to_string()),
         }
     }
+
+    pub fn fast_call_update(&mut self, delta_time: f32) -> Result<(), String> {
+        match self {
+            #[cfg(feature = "wasm")]
+            Engine::Wasm(engine) => engine.fast_call_update(delta_time),
+            #[cfg(feature = "lua")]
+            Engine::Lua(engine) => engine.fast_call_update(delta_time),
+            _ => Err("No code engine is active".to_string()),
+        }
+    }
+
+    pub fn fast_call_fixed_update(&mut self, delta_time: f32) -> Result<(), String> {
+        match self {
+            #[cfg(feature = "wasm")]
+            Engine::Wasm(engine) => engine.fast_call_fixed_update(delta_time),
+            #[cfg(feature = "lua")]
+            Engine::Lua(engine) => engine.fast_call_fixed_update(delta_time),
+            _ => Err("No code engine is active".to_string()),
+        }
+    }
+
 }
