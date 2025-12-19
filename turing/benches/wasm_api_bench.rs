@@ -117,8 +117,8 @@ fn bench_call_wasm_update_and_fixed(c: &mut Criterion) {
 
     // create a tiny wasm module exporting `update(f32)` and `fixed_update(f32)`
     let wat = r#"(module (memory (export "memory") 1)
-        (func (export "update") (param f32) (local.get 0) drop)
-        (func (export "fixed_update") (param f32) (local.get 0) drop))"#;
+        (func (export "on_update") (param f32) (local.get 0) drop)
+        (func (export "on_fixed_update") (param f32) (local.get 0) drop))"#;
     let wasm = wat::parse_str(wat).unwrap();
 
     let mut path = env::temp_dir();
@@ -133,17 +133,13 @@ fn bench_call_wasm_update_and_fixed(c: &mut Criterion) {
 
     c.bench_function("turing_call_wasm_update", |b| {
         b.iter(|| {
-            let mut params = Params::new();
-            params.push(Param::F32(black_box(0.016_f32)));
-            let _ = turing.call_fn("update", params, DataType::Void);
+            let _ = turing.fast_call_update(black_box(0.016_f32));
         })
     });
 
     c.bench_function("turing_call_wasm_fixed_update", |b| {
         b.iter(|| {
-            let mut params = Params::new();
-            params.push(Param::F32(black_box(0.016_f32)));
-            let _ = turing.call_fn("fixed_update", params, DataType::Void);
+            let _ = turing.fast_call_fixed_update(black_box(0.016_f32));
         })
     });
 }
