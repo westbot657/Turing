@@ -444,6 +444,9 @@ impl Params {
     pub fn to_wasm_args(self, data: &Arc<RwLock<EngineDataState>>) -> Result<SmallVec<[wasmtime::Val; 4]>> {
         // Acquire a single write lock for the duration of conversion to avoid
         // repeated locking/unlocking when pushing strings or registering objects.
+        if self.is_empty() {
+            return Ok(SmallVec::default())
+        }
 
         use wasmtime::Val;
         let mut s = data.write();
@@ -487,6 +490,9 @@ impl Params {
 
     #[cfg(feature = "lua")]
     pub fn to_lua_args(self, lua: &mlua::Lua, data: &Arc<RwLock<EngineDataState>>) -> Result<mlua::MultiValue> {
+        if self.is_empty() {
+            return Ok(mlua::MultiValue::new())
+        }
         let mut s = data.write();
         let vals = self.params.into_iter().map(|p|
             match p {
