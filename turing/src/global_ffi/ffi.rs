@@ -304,6 +304,9 @@ unsafe extern "C" fn call_fn(turing: *mut TuringInstance, name: *const c_char, p
 }
 
 #[unsafe(no_mangle)]
+/// # Safety
+/// `turing` must be a valid pointer to a `Turing`.
+/// The caller is responsible for freeing the returned error string if not null
 unsafe extern "C" fn fast_call_update(turing: *mut TuringInstance, delta_time: f32) -> *const c_char {
     if turing.is_null() {
         CString::new("turing is null").unwrap().into_raw()
@@ -319,6 +322,9 @@ unsafe extern "C" fn fast_call_update(turing: *mut TuringInstance, delta_time: f
 }
 
 #[unsafe(no_mangle)]
+/// # Safety
+/// `turing` must be a valid pointer to a `Turing`.
+/// The caller is responsible for freeing the returned error string if not null
 unsafe extern "C" fn fast_call_fixed_update(turing: *mut TuringInstance, delta_time: f32) -> *const c_char {
     if turing.is_null() {
         CString::new("turing is null").unwrap().into_raw()
