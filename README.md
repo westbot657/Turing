@@ -87,6 +87,13 @@ This will either load the wasm or lua engine based on the source's file extensio
 ### `call_fn(turing: *mut TuringInstance, name: *const c_char, params: *mut Params, expected_return_type: DataType) -> FfiParam`
 Will automatically call the appropriate functions based on the current code engine.
 
+### `fast_call_update(turing: *mut TuringInstance, delta_time: f32) -> *const c_char`
+Bypasses the params system entirely to call `update` if it's loaded.  
+This function may return an error string, so check if it's non-null
+
+### `fast_call_fixed_update(turing: *mut TuringInstance, delta_time: f32) -> *const c_char`
+Same as `fast_call_update` but calls `fixed_update` instead
+
 ---
 ## Interop Structs
 ```rs
