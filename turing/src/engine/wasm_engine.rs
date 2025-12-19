@@ -11,7 +11,7 @@ use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use tokio::io::AsyncWrite;
-use wasmtime::{Caller, Config, Engine, FuncType, Func, Instance, Linker, Memory, MemoryAccessError, Module, Store, Val, ValType};
+use wasmtime::{Caller, Config, Engine, FuncType, Func, Instance, Linker, Memory, MemoryAccessError, Module, Store, TypedFunc, Val, ValType};
 use wasmtime_wasi::WasiCtxBuilder;
 use wasmtime_wasi::cli::{IsTerminal, StdoutStream};
 use wasmtime_wasi::p1::WasiP1Ctx;
@@ -27,6 +27,7 @@ pub struct WasmInterpreter<Ext: ExternalFunctions> {
     script_instance: Option<Instance>,
     memory: Option<Memory>,
     func_cache: FxHashMap<String, Func>,
+    typed_cache: FxHashMap<String, TypedFuncEntry>,
     _ext: PhantomData<Ext>,
 }
 
@@ -36,6 +37,79 @@ struct OutputWriter<Ext: ExternalFunctions + Send> {
     is_err: bool,
     _ext: PhantomData<Ext>,
 }
+
+enum TypedFuncEntry {
+    NoParamsVoid(TypedFunc<(), ()>),
+    NoParamsI32(TypedFunc<(), i32>),
+    NoParamsI64(TypedFunc<(), i64>),
+    NoParamsF32(TypedFunc<(), f32>),
+    NoParamsF64(TypedFunc<(), f64>),
+    I32ToI32(TypedFunc<(i32,), i32>),
+    I64ToI64(TypedFunc<(i64,), i64>),
+    F32ToF32(TypedFunc<(f32,), f32>),
+    F64ToF64(TypedFunc<(f64,), f64>),
+    I32I32ToI32(TypedFunc<(i32,i32), i32>),
+}
+
+impl TypedFuncEntry {
+    fn invoke(&self, store: &mut Store<WasiP1Ctx>, args: &[Val]) -> Result<Param, String> {
+        match self {
+            TypedFuncEntry::NoParamsVoid(t) => t.call(store, ()).map(|_| Param::Void).map_err(|e| e.to_string()),
+            TypedFuncEntry::NoParamsI32(t) => t.call(store, ()).map(Param::I32).map_err(|e| e.to_string()),
+            TypedFuncEntry::NoParamsI64(t) => t.call(store, ()).map(Param::I64).map_err(|e| e.to_string()),
+            TypedFuncEntry::NoParamsF32(t) => t.call(store, ()).map(Param::F32).map_err(|e| e.to_string()),
+            TypedFuncEntry::NoParamsF64(t) => t.call(store, ()).map(Param::F64).map_err(|e| e.to_string()),
+            TypedFuncEntry::I32ToI32(t) => {
+                if args.len() != 1 { return Err("Arg mismatch".to_string()) }
+                let a0 = args[0].i32().ok_or_else(|| "Arg conversion".to_string())?;
+                t.call(store, (a0,)).map(Param::I32).map_err(|e| e.to_string())
+            }
+            TypedFuncEntry::I64ToI64(t) => {
+                if args.len() != 1 { return Err("Arg mismatch".to_string()) }
+                let a0 = args[0].i64().ok_or_else(|| "Arg conversion".to_string())?;
+                t.call(store, (a0,)).map(Param::I64).map_err(|e| e.to_string())
+            }
+            TypedFuncEntry::F32ToF32(t) => {
+                if args.len() != 1 { return Err("Arg mismatch".to_string()) }
+                let a0 = args[0].f32().ok_or_else(|| "Arg conversion".to_string())?;
+                t.call(store, (a0,)).map(Param::F32).map_err(|e| e.to_string())
+            }
+            TypedFuncEntry::F64ToF64(t) => {
+                if args.len() != 1 { return Err("Arg mismatch".to_string()) }
+                let a0 = args[0].f64().ok_or_else(|| "Arg conversion".to_string())?;
+                t.call(store, (a0,)).map(Param::F64).map_err(|e| e.to_string())
+            }
+            TypedFuncEntry::I32I32ToI32(t) => {
+                if args.len() != 2 { return Err("Arg mismatch".to_string()) }
+                let a0 = args[0].i32().ok_or_else(|| "Arg conversion".to_string())?;
+                let a1 = args[1].i32().ok_or_else(|| "Arg conversion".to_string())?;
+                t.call(store, (a0, a1)).map(Param::I32).map_err(|e| e.to_string())
+            }
+        }
+    }
+
+    fn from_func(store: &mut Store<WasiP1Ctx>, func: Func) -> Option<Self> {
+        // try 0 params
+        if let Ok(t) = func.typed::<(), ()>(&store) { return Some(TypedFuncEntry::NoParamsVoid(t)); }
+        if let Ok(t) = func.typed::<(), i32>(&store) { return Some(TypedFuncEntry::NoParamsI32(t)); }
+        if let Ok(t) = func.typed::<(), i64>(&store) { return Some(TypedFuncEntry::NoParamsI64(t)); }
+        if let Ok(t) = func.typed::<(), f32>(&store) { return Some(TypedFuncEntry::NoParamsF32(t)); }
+        if let Ok(t) = func.typed::<(), f64>(&store) { return Some(TypedFuncEntry::NoParamsF64(t)); }
+
+        // 1 param -> same-typed returns
+        if let Ok(t) = func.typed::<(i32,), i32>(&store) { return Some(TypedFuncEntry::I32ToI32(t)); }
+        if let Ok(t) = func.typed::<(i64,), i64>(&store) { return Some(TypedFuncEntry::I64ToI64(t)); }
+        if let Ok(t) = func.typed::<(f32,), f32>(&store) { return Some(TypedFuncEntry::F32ToF32(t)); }
+        if let Ok(t) = func.typed::<(f64,), f64>(&store) { return Some(TypedFuncEntry::F64ToF64(t)); }
+
+        // 2 params (i32,i32)->i32
+        if let Ok(t) = func.typed::<(i32,i32), i32>(&store) { return Some(TypedFuncEntry::I32I32ToI32(t)); }
+
+        // Not a supported typed signature
+        None
+    }
+}
+
 impl<Ext: ExternalFunctions + Send> std::io::Write for OutputWriter<Ext> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.inner.write().extend(buf);
@@ -174,6 +248,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             script_instance: None,
             memory: None,
             func_cache: Default::default(),
+            typed_cache: Default::default(),
             _ext: PhantomData::default()
         })
     }
@@ -248,7 +323,21 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         self.memory = Some(memory);
         // clear any previous function cache and cache exports lazily
         self.func_cache.clear();
+        self.typed_cache.clear();
+
+        // Pre-create typed wrappers for exported functions where possible to avoid first-call overhead.
+        // Try a small set of common signatures and cache the TypedFunc if creation succeeds.
+        for export in module.exports() {
+            let name = export.name();
+            let Some(func) = instance.get_func(&mut self.store, name) else { continue };
+
+            if let Some(entry) = TypedFuncEntry::from_func(&mut self.store, func) {
+                self.typed_cache.insert(name.to_string(), entry);
+            }
+        }
+
         self.script_instance = Some(instance);
+
 
         Ok(())
     }
@@ -282,6 +371,15 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         }
         let args = args.unwrap();
 
+        // Fast-path: typed cache (common signatures). Falls back to dynamic call below.
+        if let Some(entry) = self.typed_cache.get(name) {
+            match entry.invoke(&mut self.store, &args) {
+                Ok(p) => return p,
+                Err(e) => return Param::Error(e),
+            }
+        }
+
+        // Fallback dynamic path
         let mut res: SmallVec<[Val; 1]> = match ret_type {
             DataType::Void => SmallVec::new(),
             DataType::F32 => SmallVec::from_buf([Val::F32(0)]),
