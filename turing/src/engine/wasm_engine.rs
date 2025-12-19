@@ -376,10 +376,10 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
                 self.typed_cache.insert(name.to_string(), entry);
             }
 
-            if name == "update" {
+            if name == "on_update" {
                 let Ok(f) = func.typed::<f32, ()>(&mut self.store) else { continue };
                 self.fast_calls.update = Some(f);
-            } else if name == "fixed_update" {
+            } else if name == "on_fixed_update" {
                 let Ok(f) = func.typed::<f32, ()>(&mut self.store) else { continue };
                 self.fast_calls.fixed_update = Some(f);
             }

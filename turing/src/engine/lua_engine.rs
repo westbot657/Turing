@@ -168,14 +168,14 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
             .set_environment(env)
             .eval().map_err(|e| anyhow!("Failed to evaluate module: {e}"))?;
         
-        let func = module.get::<Value>("update").map_err(|e| e.to_string());
+        let func = module.get::<Value>("on_update").map_err(|e| e.to_string());
         match func {
             Ok(Value::Function(f)) => {
                 self.fast_calls.update = Some(f);
             }
             _ => {}
         }
-        let func = module.get::<Value>("fixed_update").map_err(|e| e.to_string());
+        let func = module.get::<Value>("on_fixed_update").map_err(|e| e.to_string());
         match func {
             Ok(Value::Function(f)) => {
                 self.fast_calls.fixed_update = Some(f);
