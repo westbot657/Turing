@@ -112,11 +112,48 @@ fn bench_fetch_string_from_wasm(c: &mut Criterion) {
     });
 }
 
+fn bench_call_wasm_update_and_fixed(c: &mut Criterion) {
+    let mut turing = setup_turing_with_callbacks();
+
+    // create a tiny wasm module exporting `update(f32)` and `fixed_update(f32)`
+    let wat = r#"(module (memory (export "memory") 1)
+        (func (export "update") (param f32) (local.get 0) drop)
+        (func (export "fixed_update") (param f32) (local.get 0) drop))"#;
+    let wasm = wat::parse_str(wat).unwrap();
+
+    let mut path = env::temp_dir();
+    path.push("turing_bench_update.wasm");
+    let mut file = File::create(&path).unwrap();
+    file.write_all(&wasm).unwrap();
+
+    let capabilities = vec!["test"];
+    turing
+        .load_script(path.to_str().unwrap(), &capabilities)
+        .unwrap();
+
+    c.bench_function("turing_call_wasm_update", |b| {
+        b.iter(|| {
+            let mut params = Params::new();
+            params.push(Param::F32(black_box(0.016_f32)));
+            let _ = turing.call_fn("update", params, DataType::Void);
+        })
+    });
+
+    c.bench_function("turing_call_wasm_fixed_update", |b| {
+        b.iter(|| {
+            let mut params = Params::new();
+            params.push(Param::F32(black_box(0.016_f32)));
+            let _ = turing.call_fn("fixed_update", params, DataType::Void);
+        })
+    });
+}
+
 
 criterion_group!(
     benches,
     bench_call_wasm_add,
     bench_call_tests_wasm_math,
     bench_fetch_string_from_wasm,
+    bench_call_wasm_update_and_fixed,
 );
 criterion_main!(benches);
