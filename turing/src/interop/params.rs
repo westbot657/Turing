@@ -4,6 +4,7 @@ use std::ffi::{CStr, CString, c_char, c_void};
 use std::fmt::Display;
 use std::marker::PhantomData;
 use std::mem;
+use std::ops::{Deref, DerefMut};
 use std::sync::{Arc};
 use anyhow::{anyhow, Result};
 use num_enum::TryFromPrimitive;
@@ -530,6 +531,29 @@ impl Params {
 
     pub fn to_ffi<Ext>(self) -> FfiParams<Ext> where Ext: ExternalFunctions {
         FfiParams::from_params(self.params)
+    }
+}
+
+impl IntoIterator for Params {
+    type Item = Param;
+    type IntoIter = smallvec::IntoIter<[Param; 4]>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.params.into_iter()
+    }
+}
+
+impl Deref for Params {
+    type Target = SmallVec<[Param; 4]>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.params
+    }
+}
+
+impl DerefMut for Params {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.params
     }
 }
 

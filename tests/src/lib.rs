@@ -1,4 +1,5 @@
 use std::ffi::{CString, c_char, CStr};
+use std::path::{Path, PathBuf};
 use std::{fs, io};
 
 
@@ -30,7 +31,9 @@ extern "C" fn on_load() {
 #[unsafe(no_mangle)]
 extern "C" fn file_access_test() {
 
-    let bytes = fs::read("/home/westbot/turing/Turing/README.md").unwrap();
+    let current_path = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let readme = current_path.parent().unwrap().join("README.md");
+    let bytes = fs::read(readme).unwrap();
 
     let content = String::from_utf8(bytes);
 
