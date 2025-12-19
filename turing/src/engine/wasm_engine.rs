@@ -52,7 +52,7 @@ enum TypedFuncEntry {
 }
 
 impl TypedFuncEntry {
-    fn invoke(&self, store: &mut Store<WasiP1Ctx>, args: &[Val]) -> Result<Param, String> {
+    fn invoke(&self, store: &mut Store<WasiP1Ctx>, args: Params) -> Result<Param, String> {
         match self {
             TypedFuncEntry::NoParamsVoid(t) => t.call(store, ()).map(|_| Param::Void).map_err(|e| e.to_string()),
             TypedFuncEntry::NoParamsI32(t) => t.call(store, ()).map(Param::I32).map_err(|e| e.to_string()),
@@ -61,28 +61,46 @@ impl TypedFuncEntry {
             TypedFuncEntry::NoParamsF64(t) => t.call(store, ()).map(Param::F64).map_err(|e| e.to_string()),
             TypedFuncEntry::I32ToI32(t) => {
                 if args.len() != 1 { return Err("Arg mismatch".to_string()) }
-                let a0 = args[0].i32().ok_or_else(|| "Arg conversion".to_string())?;
+                let a0 = match &args[0] {
+                    Param::I32(v) => *v,
+                    _ => return Err("Arg conversion".to_string()),
+                };
                 t.call(store, (a0,)).map(Param::I32).map_err(|e| e.to_string())
             }
             TypedFuncEntry::I64ToI64(t) => {
                 if args.len() != 1 { return Err("Arg mismatch".to_string()) }
-                let a0 = args[0].i64().ok_or_else(|| "Arg conversion".to_string())?;
+                let a0 = match &args[0] {
+                    Param::I64(v) => *v,
+                    _ => return Err("Arg conversion".to_string()),
+                };
                 t.call(store, (a0,)).map(Param::I64).map_err(|e| e.to_string())
             }
             TypedFuncEntry::F32ToF32(t) => {
                 if args.len() != 1 { return Err("Arg mismatch".to_string()) }
-                let a0 = args[0].f32().ok_or_else(|| "Arg conversion".to_string())?;
+                let a0 = match &args[0] {
+                    Param::F32(v) => *v,
+                    _ => return Err("Arg conversion".to_string()),
+                };
                 t.call(store, (a0,)).map(Param::F32).map_err(|e| e.to_string())
             }
             TypedFuncEntry::F64ToF64(t) => {
                 if args.len() != 1 { return Err("Arg mismatch".to_string()) }
-                let a0 = args[0].f64().ok_or_else(|| "Arg conversion".to_string())?;
+                let a0 = match &args[0] {
+                    Param::F64(v) => *v,
+                    _ => return Err("Arg conversion".to_string()),
+                };
                 t.call(store, (a0,)).map(Param::F64).map_err(|e| e.to_string())
             }
             TypedFuncEntry::I32I32ToI32(t) => {
                 if args.len() != 2 { return Err("Arg mismatch".to_string()) }
-                let a0 = args[0].i32().ok_or_else(|| "Arg conversion".to_string())?;
-                let a1 = args[1].i32().ok_or_else(|| "Arg conversion".to_string())?;
+                let a0 = match &args[0] {
+                    Param::I32(v) => *v,
+                    _ => return Err("Arg conversion".to_string()),
+                };
+                let a1 = match &args[1] {
+                    Param::I32(v) => *v,
+                    _ => return Err("Arg conversion".to_string()),
+                };
                 t.call(store, (a0, a1)).map(Param::I32).map_err(|e| e.to_string())
             }
         }
@@ -365,19 +383,21 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             Some(m) => m,
             None => return Param::Error("WASM memory not initialized".to_string()),
         };
+
+
+        // Fast-path: typed cache (common signatures). Falls back to dynamic call below.
+        if let Some(entry) = self.typed_cache.get(name) {
+            match entry.invoke(&mut self.store, params) {
+                Ok(p) => return p,
+                Err(e) => return Param::Error(e),
+            }
+        }
+
         let args = params.to_wasm_args(&data);
         if let Err(e) = args {
             return Param::Error(format!("{e}"))
         }
         let args = args.unwrap();
-
-        // Fast-path: typed cache (common signatures). Falls back to dynamic call below.
-        if let Some(entry) = self.typed_cache.get(name) {
-            match entry.invoke(&mut self.store, &args) {
-                Ok(p) => return p,
-                Err(e) => return Param::Error(e),
-            }
-        }
 
         // Fallback dynamic path
         let mut res: SmallVec<[Val; 1]> = match ret_type {
