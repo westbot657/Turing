@@ -18,7 +18,7 @@ use wasmtime_wasi::p1::WasiP1Ctx;
 use crate::engine::types::{ScriptCallback, ScriptFnMetadata};
 use crate::{ExternalFunctions, EngineDataState};
 use crate::interop::params::{DataType, FfiParam, FfiParamArray, Param, Params};
-use crate::interop::types::ExtPointer;
+use crate::interop::types::{ExtPointer, Semver};
 
 pub struct WasmInterpreter<Ext: ExternalFunctions> {
     engine: Engine,
@@ -29,8 +29,10 @@ pub struct WasmInterpreter<Ext: ExternalFunctions> {
     func_cache: FxHashMap<String, Func>,
     typed_cache: FxHashMap<String, TypedFuncEntry>,
     fast_calls: FastCalls,
+    pub api_versions: FxHashMap<String, Semver>,
     _ext: PhantomData<Ext>,
 }
+
 
 #[derive(Default)]
 struct FastCalls {
@@ -288,6 +290,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             func_cache: Default::default(),
             typed_cache: Default::default(),
             fast_calls: FastCalls::default(),
+            api_versions: Default::default(),
             _ext: PhantomData::default()
         })
     }
@@ -382,6 +385,14 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             } else if name == "on_fixed_update" {
                 let Ok(f) = func.typed::<f32, ()>(&mut self.store) else { continue };
                 self.fast_calls.fixed_update = Some(f);
+            }
+            
+            if name.starts_with("_") && name.ends_with("_semver") {
+                let Ok(f) = func.typed::<(), u64>(&mut self.store) else { continue };
+                let Ok(ver) = f.call(&mut self.store, ()) else { continue };
+                let loaded_mod = name.strip_prefix("_").unwrap().strip_suffix("_semver").unwrap().to_string();
+                let version = Semver::from_u64(ver);
+                self.api_versions.insert(loaded_mod, version);
             }
         }
 

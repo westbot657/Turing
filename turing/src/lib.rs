@@ -13,7 +13,7 @@ use parking_lot::RwLock;
 use rustc_hash::{FxHashMap, FxHashSet};
 use slotmap::{new_key_type, SlotMap};
 use crate::interop::params::{DataType, Param, Params};
-use crate::interop::types::ExtPointer;
+use crate::interop::types::{ExtPointer, Semver};
 
 pub mod engine;
 pub mod interop;
@@ -195,5 +195,12 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
         engine.fast_call_fixed_update(delta_time)
     }
 
+    pub fn get_api_versions(&self) -> Option<&FxHashMap<String, Semver>> {
+        let Some(engine) = &self.engine else {
+            return None;
+        };
+        
+        engine.get_api_versions()
+    }
 
 }

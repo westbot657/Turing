@@ -5,20 +5,21 @@ use std::sync::Arc;
 use mlua::prelude::*;
 use anyhow::{anyhow, Result};
 use convert_case::{Case, Casing};
-use mlua::{Function, Table, Value};
+use mlua::{Function, MultiValue, Table, Value};
 use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
 use serde_json::Number;
 use crate::engine::types::{ScriptCallback, ScriptFnMetadata};
 use crate::{ExternalFunctions, EngineDataState};
 use crate::interop::params::{DataType, Param, Params};
-use crate::interop::types::ExtPointer;
+use crate::interop::types::{ExtPointer, Semver};
 
 pub struct LuaInterpreter<Ext: ExternalFunctions> {
     lua_fns: FxHashMap<String, ScriptFnMetadata>,
     data: Arc<RwLock<EngineDataState>>,
     engine: Option<(Lua, Table)>,
     fast_calls: FastCallLua,
+    pub api_versions: FxHashMap<String, Semver>,
     _ext: PhantomData<Ext>
 }
 
@@ -36,6 +37,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
             data,
             engine: None,
             fast_calls: FastCallLua::default(),
+            api_versions: Default::default(),
             _ext: PhantomData::default()
         })
     }
@@ -181,6 +183,20 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
                 self.fast_calls.fixed_update = Some(f);
             }
             _ => {}
+        }
+
+        for pair in module.pairs::<mlua::String, Function>() {
+            let Ok((name, val)) = pair else { continue };
+            let name = name.to_string_lossy();
+            if name.starts_with("_") && name.ends_with("_semver") {
+                let Ok(version) = val.call::<Value>(MultiValue::new()) else { continue };
+                let version = match version {
+                    Value::Integer(i) => i as u64,
+                    _ => continue
+                };
+                let name = name.strip_prefix("_").unwrap().strip_suffix("_semver").unwrap().to_string();
+                self.api_versions.insert(name, Semver::from_u64(version));
+            }
         }
         
         self.engine = Some((engine, module));

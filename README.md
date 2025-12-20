@@ -9,7 +9,7 @@ Here are the true types of type aliases, for ffi however,
 these concrete types are only to tell you which functions
 should be given what values.
 
-type `WasmFnMap` = `HashMap<String, WasmFnMetadata>`  
+type `ScriptFnMap` = `HashMap<String, ScriptFnMetadata>`  
 type `TuringInstance` = `Turing<CsFns>`  
 type `TuringInit` = `Result<Turing<CsFns>>`  
 
@@ -32,15 +32,15 @@ valid functions are:
 ---
 # Wasm initialization phase functions
 
-### `create_wasm_fn_map() -> *mut WasmFnMap`
+### `create_fn_map() -> *mut ScriptFnMap`
 
-### `create_wasm_fn_metadata(capability: *const c_char, callback: WasmCallback) -> *mut WasmFnMetadata`
+### `create_fn_metadata(capability: *const c_char, callback: WasmCallback) -> *mut ScriptFnMetadata`
 
-### `add_param_types_to_wasm_fn_data(data: *mut WasmFnMetadata, params: *mut DataType, params_count: u32) -> *const c_char`
+### `add_param_types_to_fn_data(data: *mut ScriptFnMetadata, params: *mut DataType, params_count: u32) -> *const c_char`
 
-### `set_wasm_fn_return_type(data: *mut WasmFnMetadata, return_type: DataType) -> *const c_char`
+### `set_fn_return_type(data: *mut ScriptFnMetadata, return_type: DataType) -> *const c_char`
 
-### `add_wasm_fn_to_map(map: *mut WasmFnMap, name: *const c_char, data: *mut WasmFnMetadata)`
+### `add_fn_to_map(map: *mut ScriptFnMap, name: *const c_char, data: *mut ScriptFnMetadata)`
 name should be in one of these formats:
 - `ClassName:methodName`
 - `ClassName.functionName`
@@ -48,16 +48,16 @@ name should be in one of these formats:
 case style doesn't matter, only the `:` and `.`
 
 
-### `copy_wasm_fn_map(map: *mut WasmFnMap) -> *mut WasmFnMap`
+### `copy_fn_map(map: *mut ScriptFnMap) -> *mut ScriptFnMap`
 
-### `delete_wasm_fn_map(map: *mut WasmFnMap)`
+### `delete_fn_map(map: *mut ScriptFnMap)`
 
 ## 
 
 ---
 ## Turing Instance creation
 
-### `create_instance(wasm_fns_ptr: *mut WasmFnMap) -> *mut TuringInit`
+### `create_instance(fns_ptr: *mut ScriptFnMap) -> *mut TuringInit`
 
 ### `check_error(res_ptr: *mut TuringInit) -> *const c_char`
 
@@ -79,9 +79,9 @@ case style doesn't matter, only the `:` and `.`
 ### `delete_param(param: FfiParam)`
 
 ---
-# Wasm runtime
+# Script runtime
 
-### `load_wasm_script(turing: *mut TuringInstance, source: *const c_char, loaded_capabilities: *mut *const c_char, capability_count: u32) -> FfiParam`
+### `load_script(turing: *mut TuringInstance, source: *const c_char, loaded_capabilities: *mut *const c_char, capability_count: u32) -> FfiParam`
 This will either load the wasm or lua engine based on the source's file extension.
 
 ### `call_fn(turing: *mut TuringInstance, name: *const c_char, params: *mut Params, expected_return_type: DataType) -> FfiParam`
@@ -93,6 +93,19 @@ This function may return an error string, so check if it's non-null
 
 ### `fast_call_fixed_update(turing: *mut TuringInstance, delta_time: f32) -> *const c_char`
 Same as `fast_call_update` but calls `on_fixed_update` instead
+
+---
+# Script validation
+
+### `get_api_versions(turing: *mut TuringInstance) -> *mut VersionTable`
+
+### `versions_contains_mod(versions: *mut VersionTable, name: *const c_char) -> bool`
+
+### `get_mod_version(versions: *mut VersionTable, name: *const c_char) -> u64`
+returns a semantic version in the form of (major: u32, minor: u16, patch: u16) in that specific packing order
+
+### `free_versions_table(versions: *mut VersionTable)`
+
 
 ---
 ## Interop Structs

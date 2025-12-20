@@ -1,11 +1,12 @@
 use std::sync::Arc;
 
 use parking_lot::RwLock;
-
+use rustc_hash::FxHashMap;
 use crate::{
     EngineDataState, ExternalFunctions,
     interop::params::{DataType, Param, Params},
 };
+use crate::interop::types::Semver;
 
 #[cfg(feature = "lua")]
 pub mod lua_engine;
@@ -36,6 +37,7 @@ where
         ret_type: DataType,
         data: Arc<RwLock<EngineDataState>>,
     ) -> Param {
+        #[allow(unreachable_patterns)]
         match self {
             #[cfg(feature = "wasm")]
             Engine::Wasm(engine) => engine.call_fn(name, params, ret_type, data),
@@ -46,6 +48,7 @@ where
     }
 
     pub fn fast_call_update(&mut self, delta_time: f32) -> Result<(), String> {
+        #[allow(unreachable_patterns)]
         match self {
             #[cfg(feature = "wasm")]
             Engine::Wasm(engine) => engine.fast_call_update(delta_time),
@@ -56,12 +59,29 @@ where
     }
 
     pub fn fast_call_fixed_update(&mut self, delta_time: f32) -> Result<(), String> {
+        #[allow(unreachable_patterns)]
         match self {
             #[cfg(feature = "wasm")]
             Engine::Wasm(engine) => engine.fast_call_fixed_update(delta_time),
             #[cfg(feature = "lua")]
             Engine::Lua(engine) => engine.fast_call_fixed_update(delta_time),
             _ => Err("No code engine is active".to_string()),
+        }
+    }
+
+    pub fn get_api_versions(&self) -> Option<&FxHashMap<String, Semver>> {
+        #[allow(unreachable_patterns)]
+        let map = match self {
+            #[cfg(feature = "wasm")]
+            Engine::Wasm(engine) => &engine.api_versions,
+            #[cfg(feature = "lua")]
+            Engine::Lua(engine) => &engine.api_versions,
+            _ => return None,
+        };
+        if map.is_empty() {
+            None
+        } else {
+            Some(map)
         }
     }
 
