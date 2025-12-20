@@ -15,19 +15,33 @@ use crate::global_ffi::wrappers::*;
 pub type ScriptFnMap = FxHashMap<String, ScriptFnMetadata>;
 pub type TuringInstance = Turing<CsFns>;
 pub type TuringInit = Result<Turing<CsFns>>;
-pub type VersionTable = FxHashMap<String, Semver>;
+pub type VersionTable = Vec<(String, Semver)>;
+
+trait VerTableImpl {
+    fn contains_key(&self, key: &str) -> bool;
+    fn get_ver(&self, key: &str) -> Option<&Semver>;
+}
+
+impl VerTableImpl for VersionTable {
+    fn contains_key(&self, key: &str) -> bool {
+        self.iter().any(|(k, _)| key == k)
+    }
+    fn get_ver(&self, key: &str) -> Option<&Semver> {
+        self.iter().find_map(|(k, v)| if k == key { Some(v) } else { None })
+    }
+}
+
 
 #[unsafe(no_mangle)]
 /// # Safety
 /// `ptr` must be a valid pointer to a string made via rust's `CString::into_raw` method.
 /// If `ptr` is null this function returns without attempting to free.
-unsafe extern "C" fn free_string(ptr: *mut c_char) {
-    if ptr.is_null() { return }
+unsafe extern "C" fn turing_free_string(ptr: *mut c_char) {
     let _ = unsafe { CString::from_raw(ptr) };
 }
 
 #[unsafe(no_mangle)]
-extern "C" fn register_function(name: *const c_char, callback: *const c_void) {
+extern "C" fn turing_register_function(name: *const c_char, callback: *const c_void) {
     unsafe {
         let cstr = CStr::from_ptr(name).to_string_lossy().into_owned();
         CS_FNS.link(&cstr, callback);
@@ -35,16 +49,45 @@ extern "C" fn register_function(name: *const c_char, callback: *const c_void) {
 }
 
 #[unsafe(no_mangle)]
-extern "C" fn create_fn_map() -> *mut ScriptFnMap {
+extern "C" fn turing_create_fn_map() -> *mut ScriptFnMap {
     let map = Box::new(FxHashMap::default());
     Box::into_raw(map)
 }
 
 #[unsafe(no_mangle)]
 /// # Safety
+/// `map` must be a valid pointer to a `HashMap<String, ScriptFnMetadata>`.
+/// `name` must be a non-null `UTF-8` string.
+/// `data` must be a valid pointer to a `ScriptFnMetadata`.
+unsafe extern "C" fn turing_fn_map_add_data(map: *mut ScriptFnMap, name: *const c_char, data: *mut ScriptFnMetadata) {
+    let data = unsafe { *Box::from_raw(data) };
+
+    let name = unsafe { CStr::from_ptr(name).to_string_lossy().into_owned() };
+    let map = unsafe { &mut *map };
+
+    map.insert(name, data);
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `map` must be a valid pointer to a `HashMap<String, ScriptFnMetadata>`
+unsafe extern "C" fn turing_fn_map_copy(map: *mut ScriptFnMap) -> *mut ScriptFnMap {
+    Box::into_raw(Box::new(unsafe { &*map }.clone()))
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `map` must be a valid pointer to a `HashMap<String, ScriptFnMetadata>`.
+/// This function should only be called if a map is made and then never ends up getting used
+unsafe extern "C" fn turing_delete_fn_map(map: *mut ScriptFnMap) {
+    let _ = unsafe { Box::from_raw(map) };
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
 /// `capability` must be a valid C string pointer of valid `UTF-8`.
 /// `callback` must be a valid pointer to a function: `extern "C" fn(FfiParamsArray) -> FfiParam`.
-unsafe extern "C" fn create_fn_metadata(capability: *const c_char, callback: ScriptCallback) -> *mut ScriptFnMetadata {
+unsafe extern "C" fn turing_create_script_data(capability: *const c_char, callback: ScriptCallback) -> *mut ScriptFnMetadata {
     let cap = unsafe { CStr::from_ptr(capability).to_string_lossy() };
     let data = ScriptFnMetadata::new(cap, callback);
     Box::into_raw(Box::new(data))
@@ -57,10 +100,7 @@ unsafe extern "C" fn create_fn_metadata(capability: *const c_char, callback: Scr
 /// `params_count` must be the accurate size of the `params` array.
 /// Returns a pointer to an error message, if the pointer is null then no error occurred. Caller is responsible for freeing this string.
 /// none of the passed data is freed.
-unsafe extern "C" fn add_param_types_to_fn_data(data: *mut ScriptFnMetadata, params: *mut DataType, params_count: u32) -> *const c_char {
-    if data.is_null() || params.is_null() {
-        return CString::new("data or params was null".to_string()).unwrap().into_raw()
-    }
+unsafe extern "C" fn turing_script_data_add_param_type(data: *mut ScriptFnMetadata, params: *mut DataType, params_count: u32) -> *const c_char {
     let data = unsafe { &mut *data };
     let array = unsafe { slice::from_raw_parts(params, params_count as usize) };
 
@@ -77,10 +117,7 @@ unsafe extern "C" fn add_param_types_to_fn_data(data: *mut ScriptFnMetadata, par
 /// `data` must be a valid pointer to a `ScriptFnMetadata`.
 /// Returns a pointer to an error message, if the pointer is null then no error occurred. Caller is responsible for freeing this string.
 /// none of the passed data is freed.
-unsafe extern "C" fn set_fn_return_type(data: *mut ScriptFnMetadata, return_type: DataType) -> *const c_char {
-    if data.is_null() {
-        return CString::new("data is null".to_string()).unwrap().into_raw()
-    }
+unsafe extern "C" fn turing_script_data_set_return_type(data: *mut ScriptFnMetadata, return_type: DataType) -> *const c_char {
     let data = unsafe { &mut *data };
     if let Err(e) = data.add_return_type(return_type) {
         return CString::new(format!("{}", e)).unwrap().into_raw()
@@ -90,163 +127,11 @@ unsafe extern "C" fn set_fn_return_type(data: *mut ScriptFnMetadata, return_type
 
 #[unsafe(no_mangle)]
 /// # Safety
-/// `map` must be a valid pointer to a `HashMap<String, ScriptFnMetadata>`.
-/// `name` must be a non-null `UTF-8` string.
-/// `data` must be a valid pointer to a `ScriptFnMetadata`.
-/// Will silently fail if any are null so check before calling.
-/// If `data` is not null it will be freed regardless of validity of other args.
-/// Only `data` will be freed.
-unsafe extern "C" fn add_fn_to_map(map: *mut ScriptFnMap, name: *const c_char, data: *mut ScriptFnMetadata) {
-    if data.is_null() { return }
-
-    let data = unsafe { *Box::from_raw(data) };
-    if map.is_null() || name.is_null() { return }
-
-    let name = unsafe { CStr::from_ptr(name).to_string_lossy().into_owned() };
-    let map = unsafe { &mut *map };
-
-    map.insert(name, data);
-}
-
-#[unsafe(no_mangle)]
-/// # Safety
-/// `map` must be a valid pointer to a `HashMap<String, ScriptFnMetadata>`
-unsafe extern "C" fn copy_fn_map(map: *mut ScriptFnMap) -> *mut ScriptFnMap {
-    if map.is_null() { return map }
-    Box::into_raw(Box::new(unsafe { &*map }.clone()))
-}
-
-
-#[unsafe(no_mangle)]
-/// # Safety
-/// `map` must be a valid pointer to a `HashMap<String, ScriptFnMetadata>`.
-/// This function should only be called if a map is made and then never ends up getting used
-unsafe extern "C" fn delete_fn_map(map: *mut ScriptFnMap) {
-    let _ = unsafe { Box::from_raw(map) };
-}
-
-
-#[unsafe(no_mangle)]
-/// # Safety
-/// `wasm_fns_ptr` must be a valid pointer to a `HashMap<String, ScriptFnMetadata>`.
-/// `wasm_fns_ptr` will be freed during this function and must no longer be used.
-unsafe extern "C" fn create_instance(wasm_fns_ptr: *mut ScriptFnMap) -> *mut TuringInit {
-    let map = unsafe { Box::from_raw(wasm_fns_ptr) };
-    let mut turing = Turing::new();
-    turing.script_fns = *map;
-    let turing = Box::new(turing.build());
-    Box::into_raw(turing)
-}
-
-
-#[unsafe(no_mangle)]
-/// # Safety
-/// `res_ptr` must be a valid pointer to a `Result<Turing>`.
-/// the caller is responsible for freeing the returned string if not null.
-unsafe extern "C" fn check_error(res_ptr: *mut TuringInit) -> *const c_char {
-    let res = unsafe { &*res_ptr };
-
-    if let Err(e) = res {
-        CString::new(format!("{}", e)).unwrap().into_raw()
-    } else {
-        ptr::null()
-    }
-}
-
-#[unsafe(no_mangle)]
-/// # Safety
-/// `res_ptr` must be a valid pointer to a `Result<Turing>`.
-/// `res_ptr` must have been checked with `check_error` and handled if an error was returned.
-/// If `res_ptr` points to an `Err` value, this function will abort the process.
-/// `res_ptr` will be freed during this function and must no longer be used.
-unsafe extern "C" fn unwrap_instance(res_ptr: *mut TuringInit) -> *mut TuringInstance {
-    let res = unsafe { *Box::from_raw(res_ptr) };
-
-    let Ok(turing) = res else {
-        eprintln!("unwrap_turing(): res_ptr pointed to Err, aborting process");
-        std::process::abort();
-    };
-    let turing = Box::new(turing);
-    Box::into_raw(turing)
-}
-
-#[unsafe(no_mangle)]
-/// # Safety
-/// `turing` must be a valid pointer to a `Turing`
-unsafe extern "C" fn delete_instance(turing: *mut TuringInstance) {
-    let _ = unsafe { Box::from_raw(turing) };
-}
-
-
-#[unsafe(no_mangle)]
-extern "C" fn create_params(size: u32) -> *mut Params {
-    Box::into_raw(Box::new(if size == 0 {
-        Params::new()
-    } else {
-        Params::of_size(size)
-    }))
-}
-
-#[unsafe(no_mangle)]
-/// # Safety
-/// `params` must be a valid pointer to a `Params`.
-/// This function silently fails if params is null.
-unsafe extern "C" fn add_param(params: *mut Params, param: FfiParam) {
-    if params.is_null() { return }
-    let params = unsafe { &mut *params };
-    let param = param.as_param::<CsFns>().unwrap();
-    params.push(param);
-}
-
-#[unsafe(no_mangle)]
-/// # Safety
-/// `params` must be a valid pointer to a `Params` and must not be used after this call.
-unsafe extern "C" fn delete_params(params: *mut Params) {
-    if params.is_null() { return }
-    let _ = unsafe { Box::from_raw(params) };
-}
-
-#[unsafe(no_mangle)]
-/// # Safety
-/// `params` must be a valid pointer to a `Params`.
-/// Returns a copy of an `FfiParam` which may be an error value if an error occurs.
-unsafe extern "C" fn get_param(params: *mut Params, index: u32) -> FfiParam {
-    if params.is_null() {
-        return Param::Error("params is null".to_string()).to_rs_param()
-    }
-
-    let params = unsafe { &*params };
-
-    if let Some(p) = params.get(index as usize) {
-        p.clone().to_rs_param()
-    } else {
-        Param::Error("index out of bounds".to_string()).to_rs_param()
-    }
-}
-
-#[unsafe(no_mangle)]
-/// This will correctly (probably) free an FfiParam including rust and ext strings
-extern "C" fn delete_param(param: FfiParam) {
-    let _ = param.into_param::<CsFns>().unwrap();
-}
-
-#[unsafe(no_mangle)]
-/// # Safety
 /// `turing` must be a valid pointer to a `Turing`.
 /// `source` must be a valid `UTF-8` string.
 /// `loaded_capabilities` must be a valid pointer to an array of valid string pointers.
 /// Returns an `FfiParam` that is either void or an error value.
-unsafe extern "C" fn load_script(turing: *mut TuringInstance, source: *const c_char, loaded_capabilities: *mut *const c_char, capability_count: u32) -> FfiParam {
-    if turing.is_null() {
-        return Param::Error("turing is null".to_string()).to_rs_param()
-    }
-    if source.is_null() {
-        return Param::Error("source is null".to_string()).to_rs_param()
-    }
-    if loaded_capabilities.is_null() {
-        return Param::Error("loaded_capabilities is null".to_string()).to_rs_param()
-    }
-
+unsafe extern "C" fn turing_script_load(turing: *mut TuringInstance, source: *const c_char, loaded_capabilities: *mut *const c_char, capability_count: u32) -> FfiParam {
     let turing = unsafe { &mut *turing };
     let source = unsafe { CStr::from_ptr(source).to_string_lossy() };
 
@@ -276,7 +161,6 @@ unsafe extern "C" fn load_script(turing: *mut TuringInstance, source: *const c_c
 
 }
 
-
 #[unsafe(no_mangle)]
 /// # Safety
 /// `turing` must be a valid pointer to a `Turing`.
@@ -284,13 +168,7 @@ unsafe extern "C" fn load_script(turing: *mut TuringInstance, source: *const c_c
 /// `params` must be a valid pointer to a `Params`.
 /// If `params` is null, an empty `Params` will be used for the function call instead.
 /// `params` will not be freed.
-unsafe extern "C" fn call_fn(turing: *mut TuringInstance, name: *const c_char, params: *mut Params, expected_return_type: DataType) -> FfiParam {
-    if turing.is_null() {
-        return Param::Error("turing is null".to_string()).to_rs_param()
-    }
-    if name.is_null() {
-        return Param::Error("name is null".to_string()).to_rs_param()
-    }
+unsafe extern "C" fn turing_script_call_fn(turing: *mut TuringInstance, name: *const c_char, params: *mut Params, expected_return_type: DataType) -> FfiParam {
     let turing = unsafe { &mut *turing };
 
     let name = unsafe { CStr::from_ptr(name).to_string_lossy() };
@@ -309,48 +187,136 @@ unsafe extern "C" fn call_fn(turing: *mut TuringInstance, name: *const c_char, p
 /// # Safety
 /// `turing` must be a valid pointer to a `Turing`.
 /// The caller is responsible for freeing the returned error string if not null
-unsafe extern "C" fn fast_call_update(turing: *mut TuringInstance, delta_time: f32) -> *const c_char {
-    if turing.is_null() {
-        CString::new("turing is null").unwrap().into_raw()
-    } else {
-        let turing = unsafe { &mut *turing };
+unsafe extern "C" fn turing_script_fast_call_update(turing: *mut TuringInstance, delta_time: f32) -> *const c_char {
+    let turing = unsafe { &mut *turing };
 
-        if let Err(e) = turing.fast_call_update(delta_time) {
-            CString::new(e).unwrap().into_raw()
-        } else {
-            ptr::null()
-        }
+    if let Err(e) = turing.fast_call_update(delta_time) {
+        CString::new(e).unwrap().into_raw()
+    } else {
+        ptr::null()
     }
+
 }
 
 #[unsafe(no_mangle)]
 /// # Safety
 /// `turing` must be a valid pointer to a `Turing`.
 /// The caller is responsible for freeing the returned error string if not null
-unsafe extern "C" fn fast_call_fixed_update(turing: *mut TuringInstance, delta_time: f32) -> *const c_char {
-    if turing.is_null() {
-        CString::new("turing is null").unwrap().into_raw()
+unsafe extern "C" fn turing_script_fast_call_fixed_update(turing: *mut TuringInstance, delta_time: f32) -> *const c_char {
+    let turing = unsafe { &mut *turing };
+    if let Err(e) = turing.fast_call_fixed_update(delta_time) {
+        CString::new(e).unwrap().into_raw()
     } else {
-        let turing = unsafe { &mut *turing };
-
-        if let Err(e) = turing.fast_call_fixed_update(delta_time) {
-            CString::new(e).unwrap().into_raw()
-        } else {
-            ptr::null()
-        }
+        ptr::null()
     }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `wasm_fns_ptr` must be a valid pointer to a `HashMap<String, ScriptFnMetadata>`.
+/// `wasm_fns_ptr` will be freed during this function and must no longer be used.
+unsafe extern "C" fn turing_create_instance(wasm_fns_ptr: *mut ScriptFnMap) -> *mut TuringInit {
+    let map = unsafe { Box::from_raw(wasm_fns_ptr) };
+    let mut turing = Turing::new();
+    turing.script_fns = *map;
+    let turing = Box::new(turing.build());
+    Box::into_raw(turing)
+}
+
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `res_ptr` must be a valid pointer to a `Result<Turing>`.
+/// the caller is responsible for freeing the returned string if not null.
+unsafe extern "C" fn turing_instance_check_error(res_ptr: *mut TuringInit) -> *const c_char {
+    let res = unsafe { &*res_ptr };
+
+    if let Err(e) = res {
+        CString::new(format!("{}", e)).unwrap().into_raw()
+    } else {
+        ptr::null()
+    }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `res_ptr` must be a valid pointer to a `Result<Turing>`.
+/// `res_ptr` must have been checked with `check_error` and handled if an error was returned.
+/// If `res_ptr` points to an `Err` value, this function will abort the process.
+/// `res_ptr` will be freed during this function and must no longer be used.
+unsafe extern "C" fn turing_instance_unwrap(res_ptr: *mut TuringInit) -> *mut TuringInstance {
+    let res = unsafe { *Box::from_raw(res_ptr) };
+
+    let Ok(turing) = res else {
+        eprintln!("unwrap_turing(): res_ptr pointed to Err, aborting process");
+        std::process::abort();
+    };
+    let turing = Box::new(turing);
+    Box::into_raw(turing)
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `turing` must be a valid pointer to a `Turing`
+unsafe extern "C" fn turing_delete_instance(turing: *mut TuringInstance) {
+    let _ = unsafe { Box::from_raw(turing) };
+}
+
+
+#[unsafe(no_mangle)]
+extern "C" fn turing_create_params(size: u32) -> *mut Params {
+    Box::into_raw(Box::new(if size == 0 {
+        Params::new()
+    } else {
+        Params::of_size(size)
+    }))
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `params` must be a valid pointer to a `Params`.
+/// This function silently fails if params is null.
+unsafe extern "C" fn turing_params_add_param(params: *mut Params, param: FfiParam) {
+    let params = unsafe { &mut *params };
+    let param = param.as_param::<CsFns>().unwrap();
+    params.push(param);
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `params` must be a valid pointer to a `Params` and must not be used after this call.
+unsafe extern "C" fn turing_delete_params(params: *mut Params) {
+    let _ = unsafe { Box::from_raw(params) };
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `params` must be a valid pointer to a `Params`.
+/// Returns a copy of an `FfiParam` which may be an error value if an error occurs.
+unsafe extern "C" fn turing_params_get_param(params: *mut Params, index: u32) -> FfiParam {
+    let params = unsafe { &*params };
+
+    if let Some(p) = params.get(index as usize) {
+        p.clone().to_rs_param()
+    } else {
+        Param::Error("index out of bounds".to_string()).to_rs_param()
+    }
+}
+
+#[unsafe(no_mangle)]
+/// This will correctly (probably) free an FfiParam including rust and ext strings
+extern "C" fn turing_delete_param(param: FfiParam) {
+    let _ = param.into_param::<CsFns>().unwrap();
 }
 
 #[unsafe(no_mangle)]
 /// # Safety
 /// `turing` must be a valid pointer to a `Turing`.
 /// The returned table may be null if no engine is active or no script is loaded.
-unsafe extern "C" fn get_api_versions(turing: *mut TuringInstance) -> *mut VersionTable {
-    if turing.is_null() {
-        return ptr::null::<VersionTable>() as *mut _
-    }
+unsafe extern "C" fn turing_versions_get(turing: *mut TuringInstance) -> *mut VersionTable {
     let turing = unsafe { &*turing };
     if let Some(versions) = turing.get_api_versions() {
+        let versions: VersionTable = versions.iter().map(|(n, v)| (n.clone(), v.clone())).collect();
         let versions = Box::new(versions.clone());
         Box::into_raw(versions)
     } else {
@@ -363,10 +329,7 @@ unsafe extern "C" fn get_api_versions(turing: *mut TuringInstance) -> *mut Versi
 /// # Safety
 /// `versions` must be a valid pointer to a `VersionTable`.
 /// will return false if `versions` is null
-unsafe extern "C" fn versions_contains_mod(versions: *mut VersionTable, name: *const c_char) -> bool {
-    if versions.is_null() {
-        return false;
-    }
+unsafe extern "C" fn turing_versions_contains_mod(versions: *mut VersionTable, name: *const c_char) -> bool {
     let versions = unsafe { &*versions };
     let name = unsafe { CStr::from_ptr(name).to_string_lossy().into_owned() };
     versions.contains_key(&name)
@@ -377,13 +340,10 @@ unsafe extern "C" fn versions_contains_mod(versions: *mut VersionTable, name: *c
 /// `versions` must be a valid pointer to a `VersionTable`.
 /// returns the version as a packed u64 of (major u32, minor u16, patch u16)
 /// will return 0 if `versions` is null or if the specified mod name is not in the table.
-unsafe extern "C" fn get_mod_version(versions: *mut VersionTable, name: *const c_char) -> u64 {
-    if versions.is_null() {
-        return 0;
-    }
+unsafe extern "C" fn turing_versions_get_mod_version(versions: *mut VersionTable, name: *const c_char) -> u64 {
     let versions = unsafe { &*versions };
     let name = unsafe { CStr::from_ptr(name).to_string_lossy().into_owned() };
-    let Some(v) = versions.get(&name) else {
+    let Some(v) = versions.get_ver(&name) else {
         return 0;
     };
     v.as_u64()
@@ -392,9 +352,42 @@ unsafe extern "C" fn get_mod_version(versions: *mut VersionTable, name: *const c
 #[unsafe(no_mangle)]
 /// # Safety
 /// `versions` must be a valid pointer to a `VersionTable`
-unsafe extern "C" fn free_versions_table(versions: *mut VersionTable) {
-    if versions.is_null() { return }
+unsafe extern "C" fn turing_delete_versions(versions: *mut VersionTable) {
     let _ = unsafe { *Box::from_raw(versions) };
 }
 
+#[unsafe(no_mangle)]
+/// # Safety
+/// `versions` must be a valid pointer to a `VersionTable`
+unsafe extern "C" fn turing_versions_get_count(versions: *mut VersionTable) -> u32 {
+    let versions = unsafe { &*versions };
+    versions.len() as u32
+}
 
+#[unsafe(no_mangle)]
+/// # Safety
+/// `versions` must be a valid pointer to a `VersionTable`
+/// `index` must be within `0..<versions.len()` (checked with turing_versions_get_count)
+unsafe extern "C" fn turing_versions_get_mod_name(versions: *mut VersionTable, index: u32) -> *const c_char {
+    let versions = unsafe { &*versions };
+
+    let Some((name, _)) = versions.get(index as usize) else {
+        return ptr::null()
+    };
+
+    CString::new(name.clone()).unwrap().into_raw()
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `versions` must be a valid pointer to a `VersionTable`
+/// `index` must be within `0..<versions.len()` (checked with turing_versions_get_count)
+unsafe extern "C" fn turing_versions_get_mod_version_indexed(versions: *mut VersionTable, index: u32) -> u64 {
+    let versions = unsafe { &*versions };
+
+    let Some((_, v)) = versions.get(index as usize) else {
+        return 0;
+    };
+
+    v.as_u64()
+}
