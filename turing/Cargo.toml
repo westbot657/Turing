@@ -26,8 +26,8 @@ harness = false
 anyhow = "1.0"
 serde_json = "1.0"
 
-wasmtime = { version = "39.0", optional = true }
-wasmtime-wasi = { version = "39.0", optional = true }
+wasmtime = { version = "40.0.0", optional = true }
+wasmtime-wasi = { version = "40.0.0", optional = true }
 mlua = { version = "0.11.5", features = ["lua54", "vendored"], optional = true }
 
 # todo: necessary?
@@ -42,7 +42,7 @@ convert_case = "0.10.0"
 
 [dev-dependencies]
 # for testing with wasmtime
-wat = { version = "1.239.0" }
+wat = { version = "1.243.0" }
 wasmprinter = {version = "0.243.0" }
 
 serial_test = "3.2.0"
