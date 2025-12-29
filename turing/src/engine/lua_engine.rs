@@ -8,11 +8,127 @@ use convert_case::{Case, Casing};
 use mlua::{Function, MultiValue, Table, Value};
 use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
-use serde_json::Number;
+use slotmap::KeyData;
 use crate::engine::types::{ScriptCallback, ScriptFnMetadata};
-use crate::{ExternalFunctions, EngineDataState};
+use crate::{ExternalFunctions, EngineDataState, OpaquePointerKey};
 use crate::interop::params::{DataType, Param, Params};
 use crate::interop::types::{ExtPointer, Semver};
+
+
+impl DataType {
+    pub fn to_lua_val_param(&self, val: &Value, data: &Arc<RwLock<EngineDataState>>) -> mlua::Result<Param> {
+        match (self, val) {
+            (DataType::I8,  Value::Integer(i)) => Ok(Param::I8(*i as i8)),
+            (DataType::I16, Value::Integer(i)) => Ok(Param::I16(*i as i16)),
+            (DataType::I32, Value::Integer(i)) => Ok(Param::I32(*i as i32)),
+            (DataType::I64, Value::Integer(i)) => Ok(Param::I64(*i)),
+            (DataType::U8,  Value::Integer(u)) => Ok(Param::U8(*u as u8)),
+            (DataType::U16, Value::Integer(u)) => Ok(Param::U16(*u as u16)),
+            (DataType::U32, Value::Integer(u)) => Ok(Param::U32(*u as u32)),
+            (DataType::U64, Value::Integer(u)) => Ok(Param::U64(*u as u64)),
+            (DataType::F32, Value::Number(f)) => Ok(Param::F32(*f as f32)),
+            (DataType::F64, Value::Number(f)) => Ok(Param::F64(*f)),
+            (DataType::Bool, Value::Boolean(b)) => Ok(Param::Bool(*b)),
+            (DataType::RustString | DataType::ExtString, Value::String(s)) => Ok(Param::String(s.to_string_lossy())),
+            (DataType::Object, Value::Table(t)) => {
+                let key = t.raw_get::<Value>("opaqu")?;
+                let key = match key {
+                    Value::Integer(i) => i as u64,
+                    _ => return Err(mlua::Error::RuntimeError("Incorrect type for opaque handle".to_string()))
+                };
+                let pointer_key = OpaquePointerKey::from(KeyData::from_ffi(key));
+                if let Some(true_pointer) = data.read().opaque_pointers.get(pointer_key) {
+                    Ok(Param::Object(**true_pointer))
+                } else {
+                    Err(mlua::Error::RuntimeError("opaque pointer does not correspond to a real pointer".to_string()))
+                }
+            }
+            _ => Err(mlua::Error::RuntimeError(format!("Mismatched parameter type: {self} with {val:?}")))
+        }
+    }
+}
+
+impl Param {
+    pub fn from_lua_type_val(
+        typ: DataType,
+        val: Value,
+        data: &Arc<RwLock<EngineDataState>>,
+        lua: &Lua
+    ) -> Self {
+        match typ {
+            DataType::I8 => Param::I8(val.as_integer().unwrap() as i8),
+            DataType::I16 => Param::I16(val.as_integer().unwrap() as i16),
+            DataType::I32 => Param::I32(val.as_integer().unwrap() as i32),
+            DataType::I64 => Param::I64(val.as_integer().unwrap()),
+            DataType::U8 => Param::U8(val.as_integer().unwrap() as u8),
+            DataType::U16 => Param::U16(val.as_integer().unwrap() as u16),
+            DataType::U32 => Param::U32(val.as_integer().unwrap() as u32),
+            DataType::U64 => Param::U64(val.as_integer().unwrap() as u64),
+            DataType::F32 => Param::F32(val.as_number().unwrap() as f32),
+            DataType::F64 => Param::F64(val.as_number().unwrap()),
+            DataType::Bool => Param::Bool(val.as_boolean().unwrap()),
+            // allocated externally, we copy the string
+            DataType::ExtString => Param::String(val.as_string().unwrap().to_string_lossy()),
+            DataType::RustString => unreachable!("RustString should not be used in from_typval"),
+            DataType::Object => {
+                let table = val.as_table().unwrap();
+                let op = table.get("opaqu").unwrap();
+                let key = OpaquePointerKey::from(KeyData::from_ffi(op));
+
+                let real = data.read()
+                    .opaque_pointers
+                    .get(key)
+                    .copied()
+                    .unwrap_or_default();
+                Param::Object(real.ptr)
+            }
+            DataType::ExtError => Param::Error(val.as_error().unwrap().to_string()),
+            DataType::RustError => unreachable!("RustError should not be used in from_typval"),
+            DataType::Void => Param::Void,
+        }
+    }
+}
+
+impl Params {
+    pub fn to_lua_args(self, lua: &Lua, data: &Arc<RwLock<EngineDataState>>) -> Result<MultiValue> {
+        if self.is_empty() {
+            return Ok(MultiValue::new())
+        }
+        let mut s = data.write();
+        let vals = self.params.into_iter().map(|p|
+            match p {
+                Param::I8(i) => Ok(Value::Integer(i as i64)),
+                Param::I16(i) => Ok(Value::Integer(i as i64)),
+                Param::I32(i) => Ok(Value::Integer(i as i64)),
+                Param::I64(i) => Ok(Value::Integer(i)),
+                Param::U8(u) => Ok(Value::Integer(u as i64)),
+                Param::U16(u) => Ok(Value::Integer(u as i64)),
+                Param::U32(u) => Ok(Value::Integer(u as i64)),
+                Param::U64(u) => Ok(Value::Integer(u as i64)),
+                Param::F32(f) => Ok(Value::Number(f as f64)),
+                Param::F64(f) => Ok(Value::Number(f)),
+                Param::Bool(b) => Ok(Value::Boolean(b)),
+                Param::String(s) => Ok(Value::String(lua.create_string(&s).unwrap())),
+                Param::Object(rp) => {
+                    let pointer = rp.into();
+                    Ok(if let Some(op) = s.pointer_backlink.get(&pointer) {
+                        Value::Integer(op.0.as_ffi() as i64)
+                    } else {
+                        let op = s.opaque_pointers.insert(pointer);
+                        s.pointer_backlink.insert(pointer, op);
+                        Value::Integer(op.0.as_ffi() as i64)
+                    })
+                }
+                Param::Error(st) => {
+                    Err(anyhow!("{st}"))
+                }
+                _ => unreachable!("Void shouldn't ever be added as an arg")
+            }
+        ).collect::<Result<Vec<Value>>>()?;
+
+        Ok(MultiValue::from_vec(vals))
+    }
+}
 
 pub struct LuaInterpreter<Ext: ExternalFunctions> {
     lua_fns: FxHashMap<String, ScriptFnMetadata>,

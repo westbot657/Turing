@@ -9,6 +9,7 @@ use anyhow::{anyhow, Result};
 use convert_case::{Case, Casing};
 use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
+use slotmap::KeyData;
 use smallvec::SmallVec;
 use tokio::io::AsyncWrite;
 use wasmtime::{Caller, Config, Engine, FuncType, Func, Instance, Linker, Memory, MemoryAccessError, Module, Store, TypedFunc, Val, ValType};
@@ -16,9 +17,155 @@ use wasmtime_wasi::WasiCtxBuilder;
 use wasmtime_wasi::cli::{IsTerminal, StdoutStream};
 use wasmtime_wasi::p1::WasiP1Ctx;
 use crate::engine::types::{ScriptCallback, ScriptFnMetadata};
-use crate::{ExternalFunctions, EngineDataState};
-use crate::interop::params::{DataType, FfiParam, FfiParamArray, Param, Params};
+use crate::{ExternalFunctions, EngineDataState, OpaquePointerKey};
+use crate::interop::params::{DataType, Param, Params};
 use crate::interop::types::{ExtPointer, Semver};
+
+impl DataType {
+    pub fn to_wasm_val_param(&self, val: &wasmtime::Val, caller: &mut wasmtime::Caller<'_, wasmtime_wasi::p1::WasiP1Ctx>, data: &Arc<RwLock<EngineDataState>>) -> Result<Param> {
+        use wasmtime::Val;
+        use crate::engine::wasm_engine::get_wasm_string;
+
+        match (self, val) {
+            (DataType::I8, Val::I32(i)) => Ok(Param::I8(*i as i8)),
+            (DataType::I16, Val::I32(i)) => Ok(Param::I16(*i as i16)),
+            (DataType::I32, Val::I32(i)) => Ok(Param::I32(*i)),
+            (DataType::I64, Val::I64(i)) => Ok(Param::I64(*i)),
+            (DataType::U8, Val::I32(u)) => Ok(Param::U8(*u as u8)),
+            (DataType::U16, Val::I32(u)) => Ok(Param::U16(*u as u16)),
+            (DataType::U32, Val::I32(u)) => Ok(Param::U32(*u as u32)),
+            (DataType::U64, Val::I64(u)) => Ok(Param::U64(*u as u64)),
+            (DataType::F32, Val::F32(f)) => Ok(Param::F32(f32::from_bits(*f))),
+            (DataType::F64, Val::F64(f)) => Ok(Param::F64(f64::from_bits(*f))),
+            (DataType::Bool, Val::I32(b)) => Ok(Param::Bool(*b != 0)),
+            (DataType::RustString | DataType::ExtString, Val::I32(ptr)) => {
+
+                let ptr = *ptr as u32;
+
+                let Some(memory) = caller.get_export("memory").and_then(|e| e.into_memory()) else {
+                    return Err(anyhow!("wasm does not export memory"))
+                };
+                let st = get_wasm_string(ptr, memory.data(&caller));
+                Ok(Param::String(st))
+            }
+            (DataType::Object, Val::I64(pointer_id)) => {
+                let pointer_key =
+                    OpaquePointerKey::from(KeyData::from_ffi(*pointer_id as u64));
+
+                if let Some(true_pointer) = data.read().opaque_pointers.get(pointer_key) {
+                    Ok(Param::Object(**true_pointer))
+                } else {
+                    Err(anyhow!("opaque pointer does not correspond to a real pointer"))
+                }
+
+            }
+            _ => Err(anyhow!("Mismatched parameter type"))
+        }
+    }
+
+}
+
+impl Param {
+    pub fn from_wasm_type_val(
+        typ: DataType,
+        val: Val,
+        data: &Arc<RwLock<EngineDataState>>,
+        memory: &Memory,
+        caller: &Store<WasiP1Ctx>,
+    ) -> Self {
+        use crate::engine::wasm_engine::get_wasm_string;
+
+        match typ {
+            DataType::I8 => Param::I8(val.unwrap_i32() as i8),
+            DataType::I16 => Param::I16(val.unwrap_i32() as i16),
+            DataType::I32 => Param::I32(val.unwrap_i32()),
+            DataType::I64 => Param::I64(val.unwrap_i64()),
+            DataType::U8 => Param::U8(val.unwrap_i32() as u8),
+            DataType::U16 => Param::U16(val.unwrap_i32() as u16),
+            DataType::U32 => Param::U32(val.unwrap_i32() as u32),
+            DataType::U64 => Param::U64(val.unwrap_i64() as u64),
+            DataType::F32 => Param::F32(val.unwrap_f32()),
+            DataType::F64 => Param::F64(val.unwrap_f64()),
+            DataType::Bool => Param::Bool(val.unwrap_i32() != 0),
+            DataType::ExtString => {
+
+                let ptr = val.unwrap_i32() as u32;
+                let st = get_wasm_string(ptr, memory.data(caller));
+                Param::String(st)
+            }
+            DataType::RustString => unreachable!("RustString should not be used in from_typval"),
+            DataType::Object => {
+                let op = val.unwrap_i64() as u64;
+                let key = OpaquePointerKey::from(KeyData::from_ffi(op));
+
+                let real = data.read()
+                    .opaque_pointers
+                    .get(key)
+                    .copied()
+                    .unwrap_or_default();
+                Param::Object(real.ptr)
+            }
+            DataType::ExtError => {
+                let ptr = val.unwrap_i32() as u32;
+                let st = get_wasm_string(ptr, memory.data(caller));
+                Param::Error(st)
+            }
+            DataType::RustError => unreachable!("RustError should not be used in from_typval"),
+            DataType::Void => Param::Void,
+        }
+    }
+}
+
+impl Params {
+    /// Converts the Params into a vector of Wasmtime Val types for function calling.
+    pub fn to_wasm_args(self, data: &Arc<RwLock<EngineDataState>>) -> Result<SmallVec<[wasmtime::Val; 4]>> {
+        // Acquire a single write lock for the duration of conversion to avoid
+        // repeated locking/unlocking when pushing strings or registering objects.
+        if self.is_empty() {
+            return Ok(SmallVec::default())
+        }
+
+        use wasmtime::Val;
+        let mut s = data.write();
+        let vals = self.params.into_iter().map(|p|
+            match p {
+                Param::I8(i) => Ok(Val::I32(i as i32)),
+                Param::I16(i) => Ok(Val::I32(i as i32)),
+                Param::I32(i) => Ok(Val::I32(i)),
+                Param::I64(i) => Ok(Val::I64(i)),
+                Param::U8(u) => Ok(Val::I32(u as i32)),
+                Param::U16(u) => Ok(Val::I32(u as i32)),
+                Param::U32(u) => Ok(Val::I32(u as i32)),
+                Param::U64(u) => Ok(Val::I64(u as i64)),
+                Param::F32(f) => Ok(Val::F32(f.to_bits())),
+                Param::F64(f) => Ok(Val::F64(f.to_bits())),
+                Param::Bool(b) => Ok(Val::I32(if b { 1 } else { 0 })),
+                Param::String(st) => {
+                    let l = st.len() + 1;
+                    s.str_cache.push_back(st);
+                    Ok(Val::I32(l as i32))
+                }
+                Param::Object(rp) => {
+                    let pointer = rp.into();
+                    Ok(if let Some(op) = s.pointer_backlink.get(&pointer) {
+                        Val::I64(op.0.as_ffi() as i64)
+                    } else {
+                        let op = s.opaque_pointers.insert(pointer);
+                        s.pointer_backlink.insert(pointer, op);
+                        Val::I64(op.0.as_ffi() as i64)
+                    })
+                }
+                Param::Error(st) => {
+                    Err(anyhow!("{st}"))
+                }
+                _ => unreachable!("Void shouldn't ever be added as an arg"),
+            }
+        ).collect();
+
+        vals
+    }
+
+}
 
 pub struct WasmInterpreter<Ext: ExternalFunctions> {
     engine: Engine,
