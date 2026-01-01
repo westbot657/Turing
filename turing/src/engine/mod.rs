@@ -16,6 +16,7 @@ pub mod wasm_engine;
 
 pub mod types;
 
+#[allow(clippy::large_enum_variant)]
 pub enum Engine<Ext>
 where
     Ext: ExternalFunctions + Send + Sync + 'static,

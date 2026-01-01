@@ -7,7 +7,7 @@ use std::ops::Deref;
 use std::ptr;
 use crate::ExternalFunctions;
 
-#[derive(Default, Eq, Ord, Clone)]
+#[derive(Default, Eq, Clone)]
 pub struct Semver {
     pub major: u32,
     pub minor: u16,
@@ -45,7 +45,13 @@ impl PartialEq for Semver {
 
 impl PartialOrd for Semver {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.as_u64().partial_cmp(&other.as_u64())
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Semver {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other.as_u64().cmp(&other.as_u64())
     }
 }
 
@@ -64,7 +70,7 @@ pub struct ExtString<Ext: ExternalFunctions> {
 
 impl<Ext: ExternalFunctions> ExtString<Ext> {
     pub fn new(ptr: *const c_char) -> Self {
-        ExtString { ptr, _ext: PhantomData::default() }
+        ExtString { ptr, _ext: PhantomData }
     }
 }
 
@@ -80,7 +86,7 @@ impl<Ext: ExternalFunctions> From<&CStr> for ExtString<Ext> {
     fn from(s: &CStr) -> Self {
         ExtString {
             ptr: s.as_ptr() as *mut c_char,
-            _ext: PhantomData::default()
+            _ext: PhantomData
         }
     }
 }
@@ -89,7 +95,7 @@ impl<Ext: ExternalFunctions> From<*const c_char> for ExtString<Ext> {
     fn from(ptr: *const c_char) -> Self {
         ExtString {
             ptr: ptr as *mut c_char,
-            _ext: PhantomData::default()
+            _ext: PhantomData
         }
     }
 }
@@ -108,13 +114,13 @@ impl<Ext: ExternalFunctions> Display for ExtString<Ext> {
     }
 }
 
-#[derive(Debug)]
-pub struct ExtPointer<T> {
-    pub ptr: *const T,
+#[derive(Debug, Copy, Clone)]
+pub struct ExtPointer {
+    pub ptr: *const c_void
 }
 
-impl <T> ExtPointer<T> {
-    pub fn new(ptr: *const T) -> Self {
+impl ExtPointer {
+    pub fn new(ptr: *const c_void) -> Self {
         ExtPointer { ptr }
     }
 
@@ -123,44 +129,44 @@ impl <T> ExtPointer<T> {
     }
 }
 
-unsafe impl<T> Send for ExtPointer<T> {}
-unsafe impl<T> Sync for ExtPointer<T> {}
+unsafe impl Send for ExtPointer {}
+unsafe impl Sync for ExtPointer {}
 
-impl<T> Deref for ExtPointer<T> {
-    type Target = *const T;
+impl Deref for ExtPointer {
+    type Target = *const c_void;
 
     fn deref(&self) -> &Self::Target {
         &self.ptr
     }
 }
 
-impl<T> From<*const T> for ExtPointer<T> {
-    fn from(ptr: *const T) -> Self {
+impl From<*const c_void> for ExtPointer {
+    fn from(ptr: *const c_void) -> Self {
         ExtPointer { ptr }
     }
 }
 
-impl<T> Hash for ExtPointer<T> {
+impl Hash for ExtPointer {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        (self.ptr as *const c_void).hash(state);
+        self.ptr.hash(state);
     }
 }
 
-impl<T> Clone for ExtPointer<T> {
-    fn clone(&self) -> Self {
-        ExtPointer { ptr: self.ptr }
-    }
-}
-
-impl<T> Copy for ExtPointer<T> {}
-impl<T> PartialEq for ExtPointer<T> {
+// impl Clone for ExtPointer {
+//     fn clone(&self) -> Self {
+//         ExtPointer { ptr: self.ptr }
+//     }
+// }
+//
+// impl Copy for ExtPointer {}
+impl PartialEq for ExtPointer {
     fn eq(&self, other: &Self) -> bool {
         ptr::addr_eq(self.ptr, other.ptr)
     }
 }
 
-impl<T> Eq for ExtPointer<T> {}
-impl<T> Default for ExtPointer<T> {
+impl Eq for ExtPointer {}
+impl Default for ExtPointer {
     fn default() -> Self {
         ExtPointer { ptr: ptr::null() }
     }

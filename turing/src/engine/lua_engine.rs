@@ -53,7 +53,7 @@ impl Param {
         typ: DataType,
         val: Value,
         data: &Arc<RwLock<EngineDataState>>,
-        lua: &Lua
+        _lua: &Lua
     ) -> Self {
         match typ {
             DataType::I8 => Param::I8(val.as_integer().unwrap() as i8),
@@ -154,7 +154,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
             engine: None,
             fast_calls: FastCallLua::default(),
             api_versions: Default::default(),
-            _ext: PhantomData::default()
+            _ext: PhantomData,
         })
     }
 
@@ -255,9 +255,9 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
         let lua = fs::read_to_string(path)?;
 
         let engine = Lua::new();
-        let mut api = engine.create_table().map_err(|e| anyhow!("Failed to create lua table: {e}"))?;
+        let api = engine.create_table().map_err(|e| anyhow!("Failed to create lua table: {e}"))?;
 
-        self.bind_lua(&mut api, &engine)?;
+        self.bind_lua(&api, &engine)?;
 
         let env = engine.create_table().map_err(|e| anyhow!("Failed to create lua table: {e}"))?;
 
@@ -287,18 +287,12 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
             .eval().map_err(|e| anyhow!("Failed to evaluate module: {e}"))?;
         
         let func = module.get::<Value>("on_update").map_err(|e| e.to_string());
-        match func {
-            Ok(Value::Function(f)) => {
-                self.fast_calls.update = Some(f);
-            }
-            _ => {}
+        if let Ok(Value::Function(f)) = func {
+            self.fast_calls.update = Some(f);
         }
         let func = module.get::<Value>("on_fixed_update").map_err(|e| e.to_string());
-        match func {
-            Ok(Value::Function(f)) => {
-                self.fast_calls.fixed_update = Some(f);
-            }
-            _ => {}
+        if let Ok(Value::Function(f)) = func {
+            self.fast_calls.fixed_update = Some(f);
         }
 
         for pair in module.pairs::<mlua::String, Function>() {
@@ -357,7 +351,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
             return Param::Void;
         }
         
-        Param::from_lua_type_val(ret_type, res, &data, &lua)
+        Param::from_lua_type_val(ret_type, res, &data, lua)
     }
     
     pub fn fast_call_update(&mut self, delta_time: f32) -> std::result::Result<(), String> {
@@ -401,13 +395,13 @@ fn lua_bind_env<Ext: ExternalFunctions>(
 
     let mut params = Params::of_size(p.len() as u32);
     for (exp_typ, value) in p.iter().zip(ps.iter()) {
-        params.push(exp_typ.to_lua_val_param(value, &data)?)
+        params.push(exp_typ.to_lua_val_param(value, data)?)
     }
 
     let ffi_params = params.to_ffi::<Ext>();
     let ffi_params_struct = ffi_params.as_ffi_array();
 
-    let res = func(ffi_params_struct).into_param::<Ext>().map_err(|e| mlua::Error::RuntimeError("unreachable".to_string()))?;
+    let res = func(ffi_params_struct).into_param::<Ext>().map_err(|_| mlua::Error::RuntimeError("unreachable".to_string()))?;
 
     let mut s = data.write();
 

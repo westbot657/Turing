@@ -1,14 +1,13 @@
 extern crate core;
 
 use std::collections::VecDeque;
-use std::ffi::{c_char, c_void};
+use std::ffi::c_char;
 use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::{Arc};
 use crate::engine::Engine;
 use crate::engine::types::ScriptFnMetadata;
 use anyhow::{anyhow, Result};
-use convert_case::{Case, Casing};
 use parking_lot::RwLock;
 use rustc_hash::{FxHashMap, FxHashSet};
 use slotmap::{new_key_type, SlotMap};
@@ -40,9 +39,9 @@ new_key_type! {
 #[derive(Default)]
 pub struct EngineDataState {
     /// maps opaque pointer ids to real pointers
-    pub opaque_pointers: SlotMap<OpaquePointerKey, ExtPointer<c_void>>,
+    pub opaque_pointers: SlotMap<OpaquePointerKey, ExtPointer>,
     /// maps real pointers back to their opaque pointer ids
-    pub pointer_backlink: FxHashMap<ExtPointer<c_void>, OpaquePointerKey>,
+    pub pointer_backlink: FxHashMap<ExtPointer, OpaquePointerKey>,
     /// queue of strings for wasm to fetch (needed due to reentrancy limitations)
     pub str_cache: VecDeque<String>,
     /// which mods are currently active
@@ -50,7 +49,7 @@ pub struct EngineDataState {
 }
 
 impl EngineDataState {
-    pub fn get_opaque_pointer(&mut self, pointer: ExtPointer<c_void>) -> OpaquePointerKey {
+    pub fn get_opaque_pointer(&mut self, pointer: ExtPointer) -> OpaquePointerKey {
         if let Some(opaque) = self.pointer_backlink.get(&pointer) {
             *opaque
         } else {
@@ -96,10 +95,11 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> TuringSetup<Ext> {
 
 impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
 
+    #[allow(clippy::new_ret_no_self)]
     pub fn new() -> TuringSetup<Ext> {
         TuringSetup {
             script_fns: Default::default(),
-            _ext: PhantomData::default(),
+            _ext: PhantomData,
         }
     }
 
@@ -108,7 +108,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
             engine: None,
             script_fns,
             data,
-            _ext: PhantomData::default(),
+            _ext: PhantomData,
         }
     }
     pub fn load_script(

@@ -22,7 +22,7 @@ use crate::interop::params::{DataType, Param, Params};
 use crate::interop::types::{ExtPointer, Semver};
 
 impl DataType {
-    pub fn to_wasm_val_param(&self, val: &wasmtime::Val, caller: &mut wasmtime::Caller<'_, wasmtime_wasi::p1::WasiP1Ctx>, data: &Arc<RwLock<EngineDataState>>) -> Result<Param> {
+    pub fn to_wasm_val_param(&self, val: &Val, caller: &mut Caller<'_, WasiP1Ctx>, data: &Arc<RwLock<EngineDataState>>) -> Result<Param> {
         use wasmtime::Val;
         use crate::engine::wasm_engine::get_wasm_string;
 
@@ -60,6 +60,29 @@ impl DataType {
 
             }
             _ => Err(anyhow!("Mismatched parameter type"))
+        }
+    }
+
+    #[cfg(feature = "wasm")]
+    pub fn to_val_type(&self) -> Result<ValType> {
+        match self {
+            DataType::I8
+            | DataType::I16
+            | DataType::I32
+            | DataType::U8
+            | DataType::U16
+            | DataType::U32
+            | DataType::Bool
+            | DataType::RustString
+            | DataType::ExtString
+            | DataType::Object => Ok(ValType::I32),
+
+            DataType::I64 | DataType::U64 => Ok(ValType::I64),
+
+            DataType::F32 => Ok(ValType::F32),
+            DataType::F64 => Ok(ValType::F64),
+
+            _ => Err(anyhow!("Invalid wasm value type: {}", self))
         }
     }
 
@@ -118,16 +141,15 @@ impl Param {
 
 impl Params {
     /// Converts the Params into a vector of Wasmtime Val types for function calling.
-    pub fn to_wasm_args(self, data: &Arc<RwLock<EngineDataState>>) -> Result<SmallVec<[wasmtime::Val; 4]>> {
+    pub fn to_wasm_args(self, data: &Arc<RwLock<EngineDataState>>) -> Result<SmallVec<[Val; 4]>> {
         // Acquire a single write lock for the duration of conversion to avoid
         // repeated locking/unlocking when pushing strings or registering objects.
         if self.is_empty() {
             return Ok(SmallVec::default())
         }
 
-        use wasmtime::Val;
         let mut s = data.write();
-        let vals = self.params.into_iter().map(|p|
+        self.params.into_iter().map(|p|
             match p {
                 Param::I8(i) => Ok(Val::I32(i as i32)),
                 Param::I16(i) => Ok(Val::I32(i as i32)),
@@ -160,9 +182,7 @@ impl Params {
                 }
                 _ => unreachable!("Void shouldn't ever be added as an arg"),
             }
-        ).collect();
-
-        vals
+        ).collect()
     }
 
 }
@@ -371,7 +391,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> StdoutStream for WriterInit
         Box::new(OutputWriter::<Ext> {
             inner: self.0.clone(),
             is_err: self.1,
-            _ext: PhantomData::default()
+            _ext: PhantomData,
         })
     }
 }
@@ -413,8 +433,8 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         config.consume_fuel(false);
 
         let wasi = WasiCtxBuilder::new()
-            .stdout(WriterInit::<Ext>(Arc::new(RwLock::new(Vec::new())), false, PhantomData::default()))
-            .stderr(WriterInit::<Ext>(Arc::new(RwLock::new(Vec::new())), true, PhantomData::default()))
+            .stdout(WriterInit::<Ext>(Arc::new(RwLock::new(Vec::new())), false, PhantomData))
+            .stderr(WriterInit::<Ext>(Arc::new(RwLock::new(Vec::new())), true, PhantomData))
             .allow_tcp(false)
             .allow_udp(false)
             .build_p1();
@@ -438,7 +458,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             typed_cache: Default::default(),
             fast_calls: FastCalls::default(),
             api_versions: Default::default(),
-            _ext: PhantomData::default()
+            _ext: PhantomData
         })
     }
 
@@ -467,7 +487,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         )?;
 
         // External functions
-        for (name, metadata) in wasm_fns.into_iter() {
+        for (name, metadata) in wasm_fns.iter() {
 
             // Convert from `ClassName::functionName` to `_class_name_function_name`
             let mut name = name.replace(":", "_").replace(".", "_").to_case(Case::Snake);
@@ -563,7 +583,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
 
         // Fast-path: typed cache (common signatures). Falls back to dynamic call below.
         if let Some(entry) = self.typed_cache.get(name) {
-            return entry.invoke(&mut self.store, params).unwrap_or_else(|e| Param::Error(e))
+            return entry.invoke(&mut self.store, params).unwrap_or_else(Param::Error)
         }
 
         // Try cache first to avoid repeated name lookup and Val boxing/unboxing.
@@ -606,7 +626,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         };
 
         // convert Val to Param
-        Param::from_wasm_type_val(ret_type, rt, &data, &memory, &self.store)
+        Param::from_wasm_type_val(ret_type, rt, &data, memory, &self.store)
     }
 
     pub fn fast_call_update(&mut self, delta_time: f32) -> std::result::Result<(), String> {
@@ -649,7 +669,7 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
     // pre-allocate params to avoid repeated reallocations
     let mut params = Params::of_size(p.len() as u32);
     for (exp_typ, value) in p.iter().zip(ps) {
-        params.push(exp_typ.to_wasm_val_param(value, &mut caller, &data)?)
+        params.push(exp_typ.to_wasm_val_param(value, &mut caller, data)?)
     }
 
     let ffi_params= params.to_ffi::<Ext>();

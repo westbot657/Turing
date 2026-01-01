@@ -1,15 +1,12 @@
-use parking_lot::RwLock;
 use smallvec::SmallVec;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::fmt::Display;
 use std::marker::PhantomData;
 use std::mem;
 use std::ops::{Deref, DerefMut};
-use std::sync::{Arc};
 use anyhow::{anyhow, Result};
 use num_enum::TryFromPrimitive;
-use slotmap::KeyData;
-use crate::{ExternalFunctions, OpaquePointerKey, EngineDataState};
+use crate::ExternalFunctions;
 use crate::interop::types::ExtString;
 
 
@@ -111,28 +108,6 @@ impl DataType {
         )
     }
 
-    #[cfg(feature = "wasm")]
-    pub fn to_val_type(&self) -> Result<wasmtime::ValType> {
-        match self {
-            DataType::I8
-            | DataType::I16
-            | DataType::I32
-            | DataType::U8
-            | DataType::U16
-            | DataType::U32
-            | DataType::Bool
-            | DataType::RustString
-            | DataType::ExtString
-            | DataType::Object => Ok(wasmtime::ValType::I32),
-
-            DataType::I64 | DataType::U64 => Ok(wasmtime::ValType::I64),
-
-            DataType::F32 => Ok(wasmtime::ValType::F32),
-            DataType::F64 => Ok(wasmtime::ValType::F64),
-
-            _ => Err(anyhow!("Invalid wasm value type: {}", self))
-        }
-    }
 
 }
 
@@ -159,14 +134,14 @@ pub enum Param {
 impl Param {
 
     pub fn to_rs_param(self) -> FfiParam {
-        self.to_param_inner(DataType::RustString, DataType::RustError)
+        self.into_param_inner(DataType::RustString, DataType::RustError)
     }
     pub fn to_ext_param(self) -> FfiParam {
-        self.to_param_inner(DataType::ExtString, DataType::ExtError)
+        self.into_param_inner(DataType::ExtString, DataType::ExtError)
     }
     
     #[rustfmt::skip]
-    fn to_param_inner(self, str_type: DataType, err_type: DataType) -> FfiParam {
+    fn into_param_inner(self, str_type: DataType, err_type: DataType) -> FfiParam {
         match self {
             Param::I8(x) => FfiParam { type_id: DataType::I8, value: RawParam { i8: x } },
             Param::I16(x) => FfiParam { type_id: DataType::I16, value: RawParam { i16: x } },
