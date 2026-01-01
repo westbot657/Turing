@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 use std::ffi::c_char;
 use std::marker::PhantomData;
 use std::path::Path;
-use std::sync::{Arc};
+use std::sync::Arc;
 use crate::engine::Engine;
 use crate::engine::types::ScriptFnMetadata;
 use anyhow::{anyhow, Result};

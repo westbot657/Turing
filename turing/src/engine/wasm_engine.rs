@@ -2,7 +2,7 @@ use std::ffi::{CStr, CString};
 use std::fs;
 use std::marker::PhantomData;
 use std::path::Path;
-use std::sync::{Arc};
+use std::sync::Arc;
 use std::task::Poll;
 
 use anyhow::{anyhow, Result};
