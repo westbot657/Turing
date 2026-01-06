@@ -1,7 +1,7 @@
 extern crate core;
 
 use std::collections::VecDeque;
-use std::ffi::c_char;
+use std::ffi::{c_char, c_void};
 use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::Arc;
@@ -11,7 +11,7 @@ use anyhow::{anyhow, Result};
 use parking_lot::RwLock;
 use rustc_hash::{FxHashMap, FxHashSet};
 use slotmap::{new_key_type, SlotMap};
-use crate::interop::params::{DataType, Param, Params};
+use crate::interop::params::{DataType, FreeableDataType, Param, Params};
 use crate::interop::types::{ExtPointer, Semver};
 
 pub mod engine;
@@ -30,6 +30,7 @@ pub trait ExternalFunctions {
     fn log_debug(msg: impl ToString);
     fn log_critical(msg: impl ToString);
     fn free_string(ptr: *const c_char);
+    fn free_of_type(ptr: *mut c_void, typ: FreeableDataType);
 }
 
 new_key_type! {
@@ -46,6 +47,8 @@ pub struct EngineDataState {
     pub str_cache: VecDeque<String>,
     /// which mods are currently active
     pub active_capabilities: FxHashSet<String>,
+    /// queue for algebraic type's data
+    pub f32_queue: VecDeque<f32>,
 }
 
 impl EngineDataState {

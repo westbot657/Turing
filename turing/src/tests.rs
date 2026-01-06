@@ -1,8 +1,9 @@
-use std::ffi::{c_char, CString};
+use std::ffi::{c_char, c_void, CString};
 use anyhow::Result;
+use glam::{Mat2, Mat3, Mat4, Quat, Vec4};
 use crate::engine::types::ScriptFnMetadata;
 use crate::{ExternalFunctions, Turing};
-use crate::interop::params::{DataType, FfiParam, FfiParamArray, Param, Params};
+use crate::interop::params::{DataType, FfiParam, FfiParamArray, FreeableDataType, Param, Params};
 
 
 struct DirectExt {}
@@ -30,6 +31,19 @@ impl ExternalFunctions for DirectExt {
     fn free_string(ptr: *const c_char) {
         let _ = unsafe { CString::from_raw(ptr as *mut c_char) };
     }
+
+    fn free_of_type(ptr: *mut c_void, typ: FreeableDataType)  {
+        unsafe {
+            match typ {
+                FreeableDataType::ExtVec4 => { drop(Box::from_raw(ptr as *mut Vec4)); }
+                FreeableDataType::ExtQuat => { drop(Box::from_raw(ptr as *mut Quat)); }
+                FreeableDataType::ExtMat2 => { drop(Box::from_raw(ptr as *mut Mat2)); }
+                FreeableDataType::ExtMat3 => { drop(Box::from_raw(ptr as *mut Mat3)); }
+                FreeableDataType::ExtMat4 => { drop(Box::from_raw(ptr as *mut Mat4)); }
+            }
+        }
+    }
+    
 }
 
 extern "C" fn log_info_wasm(params: FfiParamArray) -> FfiParam {

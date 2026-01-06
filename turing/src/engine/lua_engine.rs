@@ -55,6 +55,11 @@ impl Param {
         data: &Arc<RwLock<EngineDataState>>,
         _lua: &Lua
     ) -> Self {
+
+        macro_rules! unpack_table {
+            () => {};
+        }
+
         match typ {
             DataType::I8 => Param::I8(val.as_integer().unwrap() as i8),
             DataType::I16 => Param::I16(val.as_integer().unwrap() as i16),
@@ -68,8 +73,7 @@ impl Param {
             DataType::F64 => Param::F64(val.as_number().unwrap()),
             DataType::Bool => Param::Bool(val.as_boolean().unwrap()),
             // allocated externally, we copy the string
-            DataType::ExtString => Param::String(val.as_string().unwrap().to_string_lossy()),
-            DataType::RustString => unreachable!("RustString should not be used in from_typval"),
+            DataType::RustString | DataType::ExtString => Param::String(val.as_string().unwrap().to_string_lossy()),
             DataType::Object => {
                 let table = val.as_table().unwrap();
                 let op = table.get("opaqu").unwrap();
@@ -82,11 +86,57 @@ impl Param {
                     .unwrap_or_default();
                 Param::Object(real.ptr)
             }
-            DataType::ExtError => Param::Error(val.as_error().unwrap().to_string()),
-            DataType::RustError => unreachable!("RustError should not be used in from_typval"),
+            DataType::RustError | DataType::ExtError => Param::Error(val.as_error().unwrap().to_string()),
             DataType::Void => Param::Void,
+            DataType::Vec2 => todo!(),
+            DataType::Vec3 => todo!(),
+            DataType::RustVec4 | DataType::ExtVec4 => todo!(),
+            DataType::RustQuat | DataType::ExtQuat => todo!(),
+            DataType::RustMat2 | DataType::ExtMat2 => todo!(),
+            DataType::RustMat3 | DataType::ExtMat3 => todo!(),
+            DataType::RustMat4 | DataType::ExtMat4 => todo!(),
         }
     }
+
+    pub fn into_lua_val(
+        self,
+        data: &Arc<RwLock<EngineDataState>>,
+        lua: &Lua
+    ) -> mlua::Result<Value> {
+        let mut s = data.write();
+
+        Ok(match self {
+            Param::I8(i) => Value::Integer(i as i64),
+            Param::I16(i) => Value::Integer(i as i64),
+            Param::I32(i) => Value::Integer(i as i64),
+            Param::I64(i) => Value::Integer(i),
+            Param::U8(u) => Value::Integer(u as i64),
+            Param::U16(u) => Value::Integer(u as i64),
+            Param::U32(u) => Value::Integer(u as i64),
+            Param::U64(u) => Value::Integer(u as i64),
+            Param::F32(f) => Value::Number(f as f64),
+            Param::F64(f) => Value::Number(f),
+            Param::Bool(b) => Value::Boolean(b),
+            Param::String(s) => Value::String(lua.create_string(&s)?),
+            Param::Object(pointer) => {
+                let pointer = ExtPointer::from(pointer);
+                let opaque = s.get_opaque_pointer(pointer);
+                Value::Integer(opaque.0.as_ffi() as i64)
+            }
+            Param::Error(er) => {
+                return Err(mlua::Error::RuntimeError(format!("Error executing C# function: {er}")))
+            }
+            Param::Void => Value::Nil,
+            Param::Vec2(v) => todo!(),
+            Param::Vec3(v) => todo!(),
+            Param::Vec4(v) => todo!(),
+            Param::Quat(q) => todo!(),
+            Param::Mat2(m) => todo!(),
+            Param::Mat3(m) => todo!(),
+            Param::Mat4(m) => todo!(),
+        })
+    }
+
 }
 
 impl Params {
@@ -122,7 +172,14 @@ impl Params {
                 Param::Error(st) => {
                     Err(anyhow!("{st}"))
                 }
-                _ => unreachable!("Void shouldn't ever be added as an arg")
+                Param::Void => unreachable!("Void shouldn't ever be added as an arg"),
+                Param::Vec2(v) => todo!(),
+                Param::Vec3(v) => todo!(),
+                Param::Vec4(v) => todo!(),
+                Param::Quat(q) => todo!(),
+                Param::Mat2(m) => todo!(),
+                Param::Mat3(m) => todo!(),
+                Param::Mat4(m) => todo!(),
             }
         ).collect::<Result<Vec<Value>>>()?;
 
@@ -401,31 +458,6 @@ fn lua_bind_env<Ext: ExternalFunctions>(
     let ffi_params = params.to_ffi::<Ext>();
     let ffi_params_struct = ffi_params.as_ffi_array();
 
-    let res = func(ffi_params_struct).into_param::<Ext>().map_err(|_| mlua::Error::RuntimeError("unreachable".to_string()))?;
+    func(ffi_params_struct).into_param::<Ext>().map_err(|_| mlua::Error::RuntimeError("unreachable".to_string()))?.into_lua_val(data, lua)
 
-    let mut s = data.write();
-
-    Ok(match res {
-        Param::I8(i) => Value::Integer(i as i64),
-        Param::I16(i) => Value::Integer(i as i64),
-        Param::I32(i) => Value::Integer(i as i64),
-        Param::I64(i) => Value::Integer(i),
-        Param::U8(u) => Value::Integer(u as i64),
-        Param::U16(u) => Value::Integer(u as i64),
-        Param::U32(u) => Value::Integer(u as i64),
-        Param::U64(u) => Value::Integer(u as i64),
-        Param::F32(f) => Value::Number(f as f64),
-        Param::F64(f) => Value::Number(f),
-        Param::Bool(b) => Value::Boolean(b),
-        Param::String(s) => Value::String(lua.create_string(&s)?),
-        Param::Object(pointer) => {
-            let pointer = ExtPointer::from(pointer);
-            let opaque = s.get_opaque_pointer(pointer);
-            Value::Integer(opaque.0.as_ffi() as i64)
-        }
-        Param::Error(er) => {
-            return Err(mlua::Error::RuntimeError(format!("Error executing C# function: {er}")))
-        }
-        Param::Void => Value::Nil
-    })
 }

@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::ffi::{CStr, CString};
 use std::fs;
 use std::marker::PhantomData;
@@ -7,6 +8,7 @@ use std::task::Poll;
 
 use anyhow::{anyhow, Result};
 use convert_case::{Case, Casing};
+use glam::{Mat2, Quat};
 use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
 use slotmap::KeyData;
@@ -96,7 +98,14 @@ impl Param {
         memory: &Memory,
         caller: &Store<WasiP1Ctx>,
     ) -> Self {
-        use crate::engine::wasm_engine::get_wasm_string;
+
+        macro_rules! dequeue {
+            ($typ:tt :: $init:tt; $x:tt ) => {
+                { let mut s = data.write();
+                let arr = s.f32_queue.drain(..$x).collect::<Vec<f32>>();
+                Param::$typ(glam::$typ::$init(arr.as_slice().try_into().unwrap())) }
+            };
+        }
 
         match typ {
             DataType::I8 => Param::I8(val.unwrap_i32() as i8),
@@ -110,13 +119,12 @@ impl Param {
             DataType::F32 => Param::F32(val.unwrap_f32()),
             DataType::F64 => Param::F64(val.unwrap_f64()),
             DataType::Bool => Param::Bool(val.unwrap_i32() != 0),
-            DataType::ExtString => {
+            DataType::RustString | DataType::ExtString => {
 
                 let ptr = val.unwrap_i32() as u32;
                 let st = get_wasm_string(ptr, memory.data(caller));
                 Param::String(st)
             }
-            DataType::RustString => unreachable!("RustString should not be used in from_typval"),
             DataType::Object => {
                 let op = val.unwrap_i64() as u64;
                 let key = OpaquePointerKey::from(KeyData::from_ffi(op));
@@ -128,15 +136,71 @@ impl Param {
                     .unwrap_or_default();
                 Param::Object(real.ptr)
             }
-            DataType::ExtError => {
+            DataType::RustError | DataType::ExtError => {
                 let ptr = val.unwrap_i32() as u32;
                 let st = get_wasm_string(ptr, memory.data(caller));
                 Param::Error(st)
             }
-            DataType::RustError => unreachable!("RustError should not be used in from_typval"),
             DataType::Void => Param::Void,
+            DataType::Vec2 => dequeue!(Vec2::from_array; 2),
+            DataType::Vec3 => dequeue!(Vec3::from_array; 3),
+            DataType::RustVec4 | DataType::ExtVec4 => dequeue!(Vec4::from_array; 4),
+            DataType::RustQuat | DataType::ExtQuat => dequeue!(Quat::from_array; 4),
+            DataType::RustMat2 | DataType::ExtMat2 => dequeue!(Mat2::from_cols_array; 4),
+            DataType::RustMat3 | DataType::ExtMat3 => dequeue!(Mat3::from_cols_array; 9),
+            DataType::RustMat4 | DataType::ExtMat4 => dequeue!(Mat4::from_cols_array; 16),
+            _ => unreachable!("Cannot convert to {} from wasm value", typ)
         }
     }
+
+    pub fn into_wasm_val(self, data: &Arc<RwLock<EngineDataState>>) -> Result<Option<Val>> {
+        let mut s = data.write();
+        macro_rules! enqueue {
+            ( $v:tt ; $sz:tt ) => {
+                { s.f32_queue.append(&mut $v.to_array().into());
+                Val::I32($sz) }
+            };
+            ($m:tt # $sz:tt) => {
+                { s.f32_queue.append(&mut $m.to_cols_array().into());
+                Val::I32($sz) }
+            }
+        }
+        Ok(Some(match self {
+            Param::I8(i) => Val::I32(i as i32),
+            Param::I16(i) => Val::I32(i as i32),
+            Param::I32(i) => Val::I32(i),
+            Param::I64(i) => Val::I64(i),
+            Param::U8(u) => Val::I32(u as i32),
+            Param::U16(u) => Val::I32(u as i32),
+            Param::U32(u) => Val::I32(u as i32),
+            Param::U64(u) => Val::I64(u as i64),
+            Param::F32(f) => Val::F32(f.to_bits()),
+            Param::F64(f) => Val::F64(f.to_bits()),
+            Param::Bool(b) => Val::I32(if b { 1 } else { 0 }),
+            Param::String(st) => {
+                let l = st.len() + 1;
+                s.str_cache.push_back(st);
+                Val::I32(l as i32)
+            }
+            Param::Object(pointer) => {
+                let pointer = ExtPointer::from(pointer);
+                let opaque = s.get_opaque_pointer(pointer);
+                Val::I64(opaque.0.as_ffi() as i64)
+            }
+            Param::Error(er) => {
+                return Err(anyhow!("Error executing C# function: {}", er));
+            }
+            Param::Void => return Ok(None),
+            Param::Vec2(v) => enqueue!(v; 2),
+            Param::Vec3(v) => enqueue!(v; 3),
+            Param::Vec4(v) => enqueue!(v; 4),
+            Param::Quat(q) => enqueue!(q; 4),
+            Param::Mat2(m) => enqueue!(m # 4),
+            Param::Mat3(m) => enqueue!(m # 9),
+            Param::Mat4(m) => enqueue!(m # 16),
+        }))
+    }
+
 }
 
 impl Params {
@@ -149,38 +213,58 @@ impl Params {
         }
 
         let mut s = data.write();
+        macro_rules! enqueue {
+            ( $v:tt ; $sz:tt ) => {
+                { s.f32_queue.append(&mut $v.to_array().into());
+                Ok(Val::I32($sz)) }
+            };
+            ($m:tt # $sz:tt) => {
+                { s.f32_queue.append(&mut $m.to_cols_array().into());
+                Ok(Val::I32($sz)) }
+            }
+        }
+
         self.params.into_iter().map(|p|
-            match p {
-                Param::I8(i) => Ok(Val::I32(i as i32)),
-                Param::I16(i) => Ok(Val::I32(i as i32)),
-                Param::I32(i) => Ok(Val::I32(i)),
-                Param::I64(i) => Ok(Val::I64(i)),
-                Param::U8(u) => Ok(Val::I32(u as i32)),
-                Param::U16(u) => Ok(Val::I32(u as i32)),
-                Param::U32(u) => Ok(Val::I32(u as i32)),
-                Param::U64(u) => Ok(Val::I64(u as i64)),
-                Param::F32(f) => Ok(Val::F32(f.to_bits())),
-                Param::F64(f) => Ok(Val::F64(f.to_bits())),
-                Param::Bool(b) => Ok(Val::I32(if b { 1 } else { 0 })),
-                Param::String(st) => {
-                    let l = st.len() + 1;
-                    s.str_cache.push_back(st);
-                    Ok(Val::I32(l as i32))
+            {
+                match p {
+                    Param::I8(i) => Ok(Val::I32(i as i32)),
+                    Param::I16(i) => Ok(Val::I32(i as i32)),
+                    Param::I32(i) => Ok(Val::I32(i)),
+                    Param::I64(i) => Ok(Val::I64(i)),
+                    Param::U8(u) => Ok(Val::I32(u as i32)),
+                    Param::U16(u) => Ok(Val::I32(u as i32)),
+                    Param::U32(u) => Ok(Val::I32(u as i32)),
+                    Param::U64(u) => Ok(Val::I64(u as i64)),
+                    Param::F32(f) => Ok(Val::F32(f.to_bits())),
+                    Param::F64(f) => Ok(Val::F64(f.to_bits())),
+                    Param::Bool(b) => Ok(Val::I32(if b { 1 } else { 0 })),
+                    Param::String(st) => {
+                        let l = st.len() + 1;
+                        s.str_cache.push_back(st);
+                        Ok(Val::I32(l as i32))
+                    }
+                    Param::Object(rp) => {
+                        let pointer = rp.into();
+                        Ok(if let Some(op) = s.pointer_backlink.get(&pointer) {
+                            Val::I64(op.0.as_ffi() as i64)
+                        } else {
+                            let op = s.opaque_pointers.insert(pointer);
+                            s.pointer_backlink.insert(pointer, op);
+                            Val::I64(op.0.as_ffi() as i64)
+                        })
+                    }
+                    Param::Error(st) => {
+                        Err(anyhow!("{st}"))
+                    }
+                    Param::Void => unreachable!("Void shouldn't ever be added as an arg"),
+                    Param::Vec2(v) => enqueue!(v; 2),
+                    Param::Vec3(v) => enqueue!(v; 3),
+                    Param::Vec4(v) => enqueue!(v; 4),
+                    Param::Quat(q) => enqueue!(q; 4),
+                    Param::Mat2(m) => enqueue!(m # 4),
+                    Param::Mat3(m) => enqueue!(m # 9),
+                    Param::Mat4(m) => enqueue!(m # 16),
                 }
-                Param::Object(rp) => {
-                    let pointer = rp.into();
-                    Ok(if let Some(op) = s.pointer_backlink.get(&pointer) {
-                        Val::I64(op.0.as_ffi() as i64)
-                    } else {
-                        let op = s.opaque_pointers.insert(pointer);
-                        s.pointer_backlink.insert(pointer, op);
-                        Val::I64(op.0.as_ffi() as i64)
-                    })
-                }
-                Param::Error(st) => {
-                    Err(anyhow!("{st}"))
-                }
-                _ => unreachable!("Void shouldn't ever be added as an arg"),
             }
         ).collect()
     }
@@ -677,36 +761,10 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
 
     // Call to C#/rust's provided callback using a clone so we can still cleanup
     let res = func(ffi_params_struct).into_param::<Ext>()?;
-
-    let mut s = data.write();
-
+    
     // Convert Param back to Val for return
-    let rv = match res {
-        Param::I8(i) => Val::I32(i as i32),
-        Param::I16(i) => Val::I32(i as i32),
-        Param::I32(i) => Val::I32(i),
-        Param::I64(i) => Val::I64(i),
-        Param::U8(u) => Val::I32(u as i32),
-        Param::U16(u) => Val::I32(u as i32),
-        Param::U32(u) => Val::I32(u as i32),
-        Param::U64(u) => Val::I64(u as i64),
-        Param::F32(f) => Val::F32(f.to_bits()),
-        Param::F64(f) => Val::F64(f.to_bits()),
-        Param::Bool(b) => Val::I32(if b { 1 } else { 0 }),
-        Param::String(st) => {
-            let l = st.len() + 1;
-            s.str_cache.push_back(st);
-            Val::I32(l as i32)
-        }
-        Param::Object(pointer) => {
-            let pointer = ExtPointer::from(pointer);
-            let opaque = s.get_opaque_pointer(pointer);
-            Val::I64(opaque.0.as_ffi() as i64)
-        }
-        Param::Error(er) => {
-            return Err(anyhow!("Error executing C# function: {}", er));
-        }
-        Param::Void => return Ok(()),
+    let Some(rv) = res.into_wasm_val(data)? else {
+        return Ok(())
     };
     rs[0] = rv;
 

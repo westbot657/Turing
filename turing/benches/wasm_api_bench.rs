@@ -1,12 +1,12 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use turing::engine::types::ScriptFnMetadata;
 use std::env;
-use std::ffi::CString;
+use std::ffi::{c_void, CString};
 use std::fs::File;
 use std::hint::black_box;
 use std::io::Write;
-
-use turing::interop::params::{DataType, FfiParam, FfiParamArray, Param, Params};
+use glam::{Mat2, Mat3, Mat4, Quat, Vec4};
+use turing::interop::params::{DataType, FfiParam, FfiParamArray, FreeableDataType, Param, Params};
 use turing::{ExternalFunctions, Turing};
 
 struct DirectExt {}
@@ -25,6 +25,18 @@ impl ExternalFunctions for DirectExt {
 
     fn free_string(ptr: *const std::os::raw::c_char) {
         let _ = unsafe { CString::from_raw(ptr as *mut std::os::raw::c_char) };
+    }
+
+    fn free_of_type(ptr: *mut c_void, typ: FreeableDataType)  {
+        unsafe {
+            match typ {
+                FreeableDataType::ExtVec4 => { drop(Box::from_raw(ptr as *mut Vec4)); }
+                FreeableDataType::ExtQuat => { drop(Box::from_raw(ptr as *mut Quat)); }
+                FreeableDataType::ExtMat2 => { drop(Box::from_raw(ptr as *mut Mat2)); }
+                FreeableDataType::ExtMat3 => { drop(Box::from_raw(ptr as *mut Mat3)); }
+                FreeableDataType::ExtMat4 => { drop(Box::from_raw(ptr as *mut Mat4)); }
+            }
+        }
     }
 }
 
