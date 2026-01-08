@@ -42,11 +42,11 @@ extern "C" fn fetch_string(
 fn setup_turing_for_lua() -> Turing<DirectExt> {
     let mut turing = Turing::new();
 
-    let mut meta = ScriptFnMetadata::new("test", log_info_wasm);
+    let mut meta = ScriptFnMetadata::new("test", log_info_wasm, "::info(msg: &str) -> void : _log_info".to_string(), None);
     let _ = meta.add_param_type(DataType::RustString);
     turing.add_function("Log.info", meta).unwrap();
 
-    let mut meta = ScriptFnMetadata::new("test", fetch_string);
+    let mut meta = ScriptFnMetadata::new("test", fetch_string, "fetch_string() -> String : _fetch_string".to_string(), None);
     let _ = meta.add_return_type(DataType::ExtString);
     turing.add_function("fetch_string", meta).unwrap();
 

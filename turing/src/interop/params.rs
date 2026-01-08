@@ -7,12 +7,14 @@ use std::ops::{Deref, DerefMut};
 use anyhow::{anyhow, Result};
 use glam::{Mat2, Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
 use num_enum::TryFromPrimitive;
+use serde::{Deserialize, Serialize};
 use crate::ExternalFunctions;
 use crate::interop::types::ExtString;
 
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFromPrimitive)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum DataType {
     I8 = 1,
     I16 = 2,

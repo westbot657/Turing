@@ -1,6 +1,6 @@
 extern crate core;
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::{c_char, c_void};
 use std::marker::PhantomData;
 use std::path::Path;
@@ -13,9 +13,11 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use slotmap::{new_key_type, SlotMap};
 use crate::interop::params::{DataType, FreeableDataType, Param, Params};
 use crate::interop::types::{ExtPointer, Semver};
+use crate::spec_gen::generator::generate_specs;
 
 pub mod engine;
 pub mod interop;
+mod spec_gen;
 
 #[cfg(test)]
 mod tests;
@@ -69,6 +71,7 @@ pub struct Turing<Ext: ExternalFunctions + Send + Sync + 'static> {
     pub engine: Option<Engine<Ext>>,
     pub data: Arc<RwLock<EngineDataState>>,
     pub script_fns: FxHashMap<String, ScriptFnMetadata>,
+    pub available_capabilities: HashMap<String, Semver>,
     _ext: PhantomData<Ext>
 }
 
@@ -111,9 +114,21 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
             engine: None,
             script_fns,
             data,
+            available_capabilities: HashMap::new(),
             _ext: PhantomData,
         }
     }
+    
+    /// Calling this is only required for the spec generator to work correctly.
+    pub fn register_api_version(&mut self, name: impl ToString, version: Semver) {
+        self.available_capabilities.insert(name.to_string(), version);
+    }
+    
+    /// This is a dev function for generating the spec files used to generate binding files, not meant to be called in production.
+    pub fn generate_specs(&self, output_directory: &Path) -> Result<()> {
+        generate_specs(&self.script_fns, &self.available_capabilities, output_directory)
+    }
+    
     pub fn load_script(
         &mut self,
         source: impl ToString,

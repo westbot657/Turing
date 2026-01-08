@@ -7,7 +7,7 @@ use std::ops::Deref;
 use std::ptr;
 use crate::ExternalFunctions;
 
-#[derive(Default, Eq, Clone)]
+#[derive(Default, Eq, Clone, Copy)]
 pub struct Semver {
     pub major: u32,
     pub minor: u16,

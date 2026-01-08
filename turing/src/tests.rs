@@ -62,11 +62,11 @@ extern "C" fn fetch_string(_params: FfiParamArray) -> FfiParam {
 fn common_setup_direct(source: &str) -> Result<Turing<DirectExt>> {
     let mut turing = Turing::new();
 
-    let mut metadata = ScriptFnMetadata::new("test", log_info_wasm);
+    let mut metadata = ScriptFnMetadata::new("test", log_info_wasm, "::info(msg: &str) -> void : _log_info".to_string(), None);
     metadata.add_param_type(DataType::RustString)?;
     turing.add_function("log.info", metadata)?;
 
-    let mut metadata = ScriptFnMetadata::new("test", fetch_string);
+    let mut metadata = ScriptFnMetadata::new("test", fetch_string, "fetch_string() -> String : _fetch_string".to_string(), None);
     metadata.add_return_type(DataType::ExtString)?;
     turing.add_function("fetch_string", metadata)?;
 

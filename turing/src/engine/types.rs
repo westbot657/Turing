@@ -1,25 +1,32 @@
 use anyhow::anyhow;
-
-use crate::interop::params::{DataType, FfiParam, FfiParamArray};
-
+use crate::interop::params::{DataType, FfiParam, FfiParamArray, Param};
 
 pub type ScriptCallback = extern "C" fn(FfiParamArray) -> FfiParam;
 
+extern "C" fn null_fn(_: FfiParamArray) -> FfiParam { Param::Void.into() }
+fn null_ptr() -> ScriptCallback { null_fn }
+
 #[derive(Clone)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct ScriptFnMetadata {
     pub capability: String,
+    #[serde(skip, default="null_ptr")]
     pub callback: ScriptCallback,
     pub param_types: Vec<DataType>,
-    pub return_type: Vec<DataType>
+    pub return_type: Vec<DataType>,
+    pub signature: String,
+    pub doc_comment: Option<String>,
 }
 
 impl ScriptFnMetadata {
-    pub fn new(capability: impl ToString, callback: ScriptCallback) -> Self {
+    pub fn new(capability: impl ToString, callback: ScriptCallback, signature: impl ToString, doc_comment: Option<String>) -> Self {
         Self {
             capability: capability.to_string(),
             callback,
             param_types: Vec::new(),
             return_type: Vec::new(),
+            signature: signature.to_string(),
+            doc_comment,
         }
     }
 

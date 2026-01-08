@@ -93,9 +93,17 @@ unsafe extern "C" fn turing_delete_fn_map(map: *mut ScriptFnMap) {
 /// # Safety
 /// `capability` must be a valid C string pointer of valid `UTF-8`.
 /// `callback` must be a valid pointer to a function: `extern "C" fn(FfiParamsArray) -> FfiParam`.
-unsafe extern "C" fn turing_create_script_data(capability: *const c_char, callback: ScriptCallback) -> *mut ScriptFnMetadata {
+/// `signature` must be a valid pointer to a string.
+/// `doc_comment` must be either null or a valid pointer to a string. When null, the function is considered to not have a doc comment.
+unsafe extern "C" fn turing_create_script_data(capability: *const c_char, callback: ScriptCallback, signature: *const c_char, doc_comment: *const c_char) -> *mut ScriptFnMetadata {
     let cap = unsafe { CStr::from_ptr(capability).to_string_lossy() };
-    let data = ScriptFnMetadata::new(cap, callback);
+    let signature = unsafe { CStr::from_ptr(signature).to_string_lossy() };
+    let doc = if doc_comment.is_null() {
+        None
+    } else {
+        Some(unsafe { CStr::from_ptr(doc_comment).to_string_lossy().to_string() })
+    };
+    let data = ScriptFnMetadata::new(cap, callback, signature, doc);
     Box::into_raw(Box::new(data))
 }
 
