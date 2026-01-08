@@ -1,11 +1,9 @@
 #![allow(static_mut_refs)]
 
 use core::slice;
-use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::ptr;
 use anyhow::{anyhow, Result};
-use glam::{Mat4, Quat, Vec4};
 use rustc_hash::FxHashMap;
 use crate::interop::params::{DataType, FfiParam, FreeableDataType, Param, Params};
 use crate::interop::types::Semver;

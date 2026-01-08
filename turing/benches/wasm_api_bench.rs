@@ -5,7 +5,6 @@ use std::ffi::{c_void, CString};
 use std::fs::File;
 use std::hint::black_box;
 use std::io::Write;
-use glam::{Mat2, Mat3, Mat4, Quat, Vec4};
 use turing::interop::params::{DataType, FfiParam, FfiParamArray, FreeableDataType, Param, Params};
 use turing::{ExternalFunctions, Turing};
 
@@ -27,7 +26,7 @@ impl ExternalFunctions for DirectExt {
         let _ = unsafe { CString::from_raw(ptr as *mut std::os::raw::c_char) };
     }
 
-    fn free_of_type(ptr: *mut c_void, typ: FreeableDataType)  {
+    fn free_of_type(ptr: *mut c_void, typ: FreeableDataType) {
         unsafe { typ.free_ptr(ptr) }
     }
 }

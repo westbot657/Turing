@@ -1,6 +1,5 @@
 use std::ffi::{c_char, c_void, CString};
 use anyhow::Result;
-use glam::{Mat2, Mat3, Mat4, Quat, Vec4};
 use crate::engine::types::ScriptFnMetadata;
 use crate::{ExternalFunctions, Turing};
 use crate::interop::params::{DataType, FfiParam, FfiParamArray, FreeableDataType, Param, Params};

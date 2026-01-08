@@ -2,10 +2,8 @@
 
 use std::ffi::{c_char, c_void, CString};
 use std::mem;
-use std::sync::Mutex;
-use slotmap::{new_key_type, SlotMap};
 use crate::ExternalFunctions;
-use crate::interop::params::{FreeableDataType, Params};
+use crate::interop::params::FreeableDataType;
 
 pub type CsAbort = extern "C" fn(*const c_char, *const c_char);
 pub type CsLog = extern "C" fn(*const c_char);
