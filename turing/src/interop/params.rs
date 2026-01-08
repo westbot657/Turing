@@ -14,7 +14,6 @@ use crate::interop::types::ExtString;
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFromPrimitive)]
-#[derive(serde::Serialize, serde::Deserialize)]
 pub enum DataType {
     I8 = 1,
     I16 = 2,

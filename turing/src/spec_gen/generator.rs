@@ -158,23 +158,12 @@ impl DataType {
 
 #[cfg(test)]
 mod generator_tests {
-    use std::collections::HashMap;
     use anyhow::Result;
-    use serde_json::json;
-    use crate::engine::types::ScriptFnMetadata;
 
     #[test]
     fn test_generator_turing() -> Result<()> {
 
-        // let script_fns: HashMap<String, ScriptFnMetadata> = json!({
-        //     "test_function": {
-        //         "capability": "test",
-        //         "param_types": [],
-        //         "return_types": [],
-        //         "signature": "",
-        //         "doc_comment": ""
-        //     }
-        // }).into();
+        
 
         Ok(())
     }
