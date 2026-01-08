@@ -819,7 +819,7 @@ pub fn wasm_host_f32_dequeue(
     let Some(next) = d.f32_queue.pop_front() else {
         return Err(anyhow!("f32 queue is empty"));
     };
-    rs[0] = Val::f32(next);
+    rs[0] = Val::F32(next.to_bits());
     Ok(())
 }
 
