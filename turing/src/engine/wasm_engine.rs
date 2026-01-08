@@ -561,12 +561,30 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         //    failing to retrieve all param strings in the correct order will invalidate
         //    the strings with no way to recover.
         let data_strcpy = Arc::clone(&data);
+        let data_enqueue = Arc::clone(&data);
+        let data_dequeue = Arc::clone(&data);
         linker.func_new(
             "env",
             "_host_strcpy",
             FuncType::new(engine, vec![ValType::I32, ValType::I32], vec![ValType::I32]),
             move |caller, p, r| {
                 wasm_host_strcpy(&data_strcpy, caller, p, r)
+            }
+        )?;
+        linker.func_new(
+            "env",
+            "_host_f32_enqueue",
+            FuncType::new(engine, vec![ValType::F32], Vec::new()),
+            move |caller, p, r| {
+                wasm_host_f32_enqueue(&data_enqueue, p)
+            }
+        )?;
+        linker.func_new(
+            "env",
+            "_host_f32_dequeue",
+            FuncType::new(engine, Vec::new(), vec![ValType::F32]),
+            move |caller, p, r| {
+                wasm_host_f32_dequeue(&data_dequeue, r)
             }
         )?;
 
@@ -624,8 +642,6 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             let name = export.name();
             let Some(func) = instance.get_func(&mut self.store, name) else { continue };
 
-
-
             if let Some(entry) = TypedFuncEntry::from_func(&mut self.store, func) {
                 self.typed_cache.insert(name.to_string(), entry);
             }
@@ -637,7 +653,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
                 let Ok(f) = func.typed::<f32, ()>(&mut self.store) else { continue };
                 self.fast_calls.fixed_update = Some(f);
             }
-            
+
             if name.starts_with("_") && name.ends_with("_semver") {
                 let Ok(f) = func.typed::<(), u64>(&mut self.store) else { continue };
                 let Ok(ver) = f.call(&mut self.store, ()) else { continue };
@@ -761,7 +777,7 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
 
     // Call to C#/rust's provided callback using a clone so we can still cleanup
     let res = func(ffi_params_struct).into_param::<Ext>()?;
-    
+
     // Convert Param back to Val for return
     let Some(rv) = res.into_wasm_val(data)? else {
         return Ok(())
@@ -794,3 +810,30 @@ pub fn wasm_host_strcpy(
 
     Ok(())
 }
+
+pub fn wasm_host_f32_dequeue(
+    data: &Arc<RwLock<EngineDataState>>,
+    rs: &mut [Val],
+) -> Result<(), anyhow::Error> {
+    let mut d = data.write();
+    let Some(next) = d.f32_queue.pop_front() else {
+        return Err(anyhow!("f32 queue is empty"));
+    };
+    rs[0] = Val::f32(next);
+    Ok(())
+}
+
+pub fn wasm_host_f32_enqueue(
+    data: &Arc<RwLock<EngineDataState>>,
+    ps: &[Val],
+) -> Result<(), anyhow::Error> {
+
+    let new = ps.get(0).ok_or_else(|| anyhow!("no first parameter provided"))?
+        .f32().ok_or_else(|| anyhow!("parameter is not f32"))?;
+
+    let mut d = data.write();
+    d.f32_queue.push_back(new);
+
+    Ok(())
+}
+
