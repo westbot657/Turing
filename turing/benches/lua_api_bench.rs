@@ -27,15 +27,7 @@ impl ExternalFunctions for DirectExt {
     }
 
     fn free_of_type(ptr: *mut c_void, typ: FreeableDataType)  {
-        unsafe {
-            match typ {
-                FreeableDataType::ExtVec4 => { drop(Box::from_raw(ptr as *mut Vec4)); }
-                FreeableDataType::ExtQuat => { drop(Box::from_raw(ptr as *mut Quat)); }
-                FreeableDataType::ExtMat2 => { drop(Box::from_raw(ptr as *mut Mat2)); }
-                FreeableDataType::ExtMat3 => { drop(Box::from_raw(ptr as *mut Mat3)); }
-                FreeableDataType::ExtMat4 => { drop(Box::from_raw(ptr as *mut Mat4)); }
-            }
-        }
+        unsafe { typ.free_ptr(ptr) }
     }
 }
 

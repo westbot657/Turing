@@ -92,8 +92,6 @@ impl Param {
             DataType::Vec3 => todo!(),
             DataType::RustVec4 | DataType::ExtVec4 => todo!(),
             DataType::RustQuat | DataType::ExtQuat => todo!(),
-            DataType::RustMat2 | DataType::ExtMat2 => todo!(),
-            DataType::RustMat3 | DataType::ExtMat3 => todo!(),
             DataType::RustMat4 | DataType::ExtMat4 => todo!(),
         }
     }
@@ -131,8 +129,6 @@ impl Param {
             Param::Vec3(v) => todo!(),
             Param::Vec4(v) => todo!(),
             Param::Quat(q) => todo!(),
-            Param::Mat2(m) => todo!(),
-            Param::Mat3(m) => todo!(),
             Param::Mat4(m) => todo!(),
         })
     }
@@ -177,8 +173,6 @@ impl Params {
                 Param::Vec3(v) => todo!(),
                 Param::Vec4(v) => todo!(),
                 Param::Quat(q) => todo!(),
-                Param::Mat2(m) => todo!(),
-                Param::Mat3(m) => todo!(),
                 Param::Mat4(m) => todo!(),
             }
         ).collect::<Result<Vec<Value>>>()?;

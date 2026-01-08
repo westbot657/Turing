@@ -146,8 +146,6 @@ impl Param {
             DataType::Vec3 => dequeue!(Vec3::from_array; 3),
             DataType::RustVec4 | DataType::ExtVec4 => dequeue!(Vec4::from_array; 4),
             DataType::RustQuat | DataType::ExtQuat => dequeue!(Quat::from_array; 4),
-            DataType::RustMat2 | DataType::ExtMat2 => dequeue!(Mat2::from_cols_array; 4),
-            DataType::RustMat3 | DataType::ExtMat3 => dequeue!(Mat3::from_cols_array; 9),
             DataType::RustMat4 | DataType::ExtMat4 => dequeue!(Mat4::from_cols_array; 16),
             _ => unreachable!("Cannot convert to {} from wasm value", typ)
         }
@@ -195,8 +193,6 @@ impl Param {
             Param::Vec3(v) => enqueue!(v; 3),
             Param::Vec4(v) => enqueue!(v; 4),
             Param::Quat(q) => enqueue!(q; 4),
-            Param::Mat2(m) => enqueue!(m # 4),
-            Param::Mat3(m) => enqueue!(m # 9),
             Param::Mat4(m) => enqueue!(m # 16),
         }))
     }
@@ -261,8 +257,6 @@ impl Params {
                     Param::Vec3(v) => enqueue!(v; 3),
                     Param::Vec4(v) => enqueue!(v; 4),
                     Param::Quat(q) => enqueue!(q; 4),
-                    Param::Mat2(m) => enqueue!(m # 4),
-                    Param::Mat3(m) => enqueue!(m # 9),
                     Param::Mat4(m) => enqueue!(m # 16),
                 }
             }

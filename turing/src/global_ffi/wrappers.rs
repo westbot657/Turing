@@ -5,7 +5,7 @@ use std::mem;
 use std::sync::Mutex;
 use slotmap::{new_key_type, SlotMap};
 use crate::ExternalFunctions;
-use crate::interop::params::Params;
+use crate::interop::params::{FreeableDataType, Params};
 
 pub type CsAbort = extern "C" fn(*const c_char, *const c_char);
 pub type CsLog = extern "C" fn(*const c_char);
@@ -111,4 +111,9 @@ impl ExternalFunctions for CsFns {
             (CS_FNS.free_cs_string)(ptr)
         }
     }
+
+    fn free_of_type(ptr: *mut c_void, typ: FreeableDataType) {
+        todo!()
+    }
+
 }

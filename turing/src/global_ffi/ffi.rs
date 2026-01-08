@@ -5,8 +5,9 @@ use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::ptr;
 use anyhow::{anyhow, Result};
+use glam::{Mat4, Quat, Vec4};
 use rustc_hash::FxHashMap;
-use crate::interop::params::{DataType, FfiParam, Param, Params};
+use crate::interop::params::{DataType, FfiParam, FreeableDataType, Param, Params};
 use crate::interop::types::Semver;
 use crate::Turing;
 use crate::engine::types::{ScriptCallback, ScriptFnMetadata};
@@ -35,9 +36,16 @@ impl VerTableImpl for VersionTable {
 #[unsafe(no_mangle)]
 /// # Safety
 /// `ptr` must be a valid pointer to a string made via rust's `CString::into_raw` method.
-/// If `ptr` is null this function returns without attempting to free.
 unsafe extern "C" fn turing_free_string(ptr: *mut c_char) {
     let _ = unsafe { CString::from_raw(ptr) };
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `ptr` must be a valid pointer to a `Mat4`, `Vec4`, or `Quat`.
+/// `typ` must be a `FreeableDataType` compatible number, and must match the type the `ptr` points to.
+unsafe extern "C" fn turing_free_of_type(ptr: *mut c_void, typ: FreeableDataType) {
+    unsafe { typ.free_ptr(ptr) }
 }
 
 #[unsafe(no_mangle)]

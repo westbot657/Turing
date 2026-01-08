@@ -37,12 +37,8 @@ pub enum DataType {
     ExtVec4  = 21,
     RustQuat = 22,
     ExtQuat  = 23,
-    RustMat2 = 24,
-    ExtMat2  = 25,
-    RustMat3 = 26,
-    ExtMat3  = 27,
-    RustMat4 = 28,
-    ExtMat4  = 29,
+    RustMat4 = 24,
+    ExtMat4  = 25,
 }
 
 #[repr(u32)]
@@ -50,9 +46,19 @@ pub enum DataType {
 pub enum FreeableDataType {
     ExtVec4  = DataType::ExtVec4 as u32,
     ExtQuat  = DataType::ExtQuat as u32,
-    ExtMat2  = DataType::ExtMat2 as u32,
-    ExtMat3  = DataType::ExtMat3 as u32,
     ExtMat4  = DataType::ExtMat4 as u32,
+}
+
+impl FreeableDataType {
+    pub unsafe fn free_ptr(&self, ptr: *mut c_void) {
+        unsafe {
+            match self {
+                FreeableDataType::ExtVec4 => { drop(Box::from_raw(ptr as *mut Vec4)); }
+                FreeableDataType::ExtQuat => { drop(Box::from_raw(ptr as *mut Quat)); }
+                FreeableDataType::ExtMat4 => { drop(Box::from_raw(ptr as *mut Mat4)); }
+            }
+        }
+    }
 }
 
 trait InnerFfiType {
@@ -60,8 +66,6 @@ trait InnerFfiType {
     const ERROR: DataType;
     const VEC4: DataType;
     const QUAT: DataType;
-    const MAT2: DataType;
-    const MAT3: DataType;
     const MAT4: DataType;
 }
 
@@ -73,8 +77,6 @@ impl InnerFfiType for RustTypes {
     const ERROR: DataType = DataType::RustError;
     const VEC4: DataType = DataType::RustVec4;
     const QUAT: DataType = DataType::RustQuat;
-    const MAT2: DataType = DataType::RustMat2;
-    const MAT3: DataType = DataType::RustMat3;
     const MAT4: DataType = DataType::RustMat4;
 }
 
@@ -83,8 +85,6 @@ impl InnerFfiType for ExtTypes {
     const ERROR: DataType = DataType::ExtError;
     const VEC4: DataType = DataType::ExtVec4;
     const QUAT: DataType = DataType::ExtQuat;
-    const MAT2: DataType = DataType::ExtMat2;
-    const MAT3: DataType = DataType::ExtMat3;
     const MAT4: DataType = DataType::ExtMat4;
 }
 
@@ -115,10 +115,6 @@ impl Display for DataType {
             DataType::ExtVec4 => "EXT_VEC4",
             DataType::RustQuat => "RUST_QUAT",
             DataType::ExtQuat => "EXT_QUAT",
-            DataType::RustMat2 => "RUST_MAT2",
-            DataType::ExtMat2 => "EXT_MAT2",
-            DataType::RustMat3 => "RUST_MAT3",
-            DataType::ExtMat3 => "EXT_MAT3",
             DataType::RustMat4 => "RUST_MAT4",
             DataType::ExtMat4 => "EXT_MAT4",
         };
@@ -173,8 +169,6 @@ pub enum Param {
     Vec3(Vec3),
     Vec4(Vec4),
     Quat(Quat),
-    Mat2(Mat2),
-    Mat3(Mat3),
     Mat4(Mat4),
 }
 
@@ -211,9 +205,7 @@ impl Param {
             Param::Vec3(v) => FfiParam { type_id: DataType::Vec3, value: RawParam { vec3: v } },
             Param::Vec4(v) => FfiParam { type_id: T::VEC4, value: RawParam { vec4: Box::into_raw(Box::new(v)) } },
             Param::Quat(q) => FfiParam { type_id: T::QUAT, value: RawParam { quat: Box::into_raw(Box::new(q)) } },
-            Param::Mat2(m) => FfiParam { type_id: T::MAT2, value: RawParam { mat2: Box::into_raw(Box::new(m)) } },
-            Param::Mat3(m) => FfiParam { type_id: T::MAT2, value: RawParam { mat3: Box::into_raw(Box::new(m)) } },
-            Param::Mat4(m) => FfiParam { type_id: T::MAT2, value: RawParam { mat4: Box::into_raw(Box::new(m)) } },
+            Param::Mat4(m) => FfiParam { type_id: T::MAT4, value: RawParam { mat4: Box::into_raw(Box::new(m)) } },
         }
     }
 
@@ -258,8 +250,6 @@ deref_param! { Vec2   => Vec2   }
 deref_param! { Vec3   => Vec3   }
 deref_param! { Vec4   => Vec4   }
 deref_param! { Quat   => Quat   }
-deref_param! { Mat2   => Mat2   }
-deref_param! { Mat3   => Mat3   }
 deref_param! { Mat4   => Mat4   }
 impl FromParam for () {
     fn from_param(param: Param) -> Result<Self> {
@@ -568,10 +558,6 @@ impl FfiParam {
             DataType::ExtVec4 => Param::Vec4(deref!(ExtVec4(vec4))),
             DataType::RustQuat => Param::Quat(unbox!(quat)),
             DataType::ExtQuat => Param::Quat(deref!(ExtQuat(quat))),
-            DataType::RustMat2 => Param::Mat2(unbox!(mat2)),
-            DataType::ExtMat2 => Param::Mat2(deref!(ExtMat2(mat2))),
-            DataType::RustMat3 => Param::Mat3(unbox!(mat3)),
-            DataType::ExtMat3 => Param::Mat3(deref!(ExtMat3(mat3))),
             DataType::RustMat4 => Param::Mat4(unbox!(mat4)),
             DataType::ExtMat4 => Param::Mat4(deref!(ExtMat4(mat4))),
         })
@@ -620,10 +606,6 @@ impl FfiParam {
             DataType::ExtVec4 => Param::Vec4(deref!(vec4)),
             DataType::RustQuat => Param::Quat(unbox!(quat)),
             DataType::ExtQuat => Param::Quat(deref!(quat)),
-            DataType::RustMat2 => Param::Mat2(unbox!(mat2)),
-            DataType::ExtMat2 => Param::Mat2(deref!(mat2)),
-            DataType::RustMat3 => Param::Mat3(unbox!(mat3)),
-            DataType::ExtMat3 => Param::Mat3(deref!(mat3)),
             DataType::RustMat4 => Param::Mat4(unbox!(mat4)),
             DataType::ExtMat4 => Param::Mat4(deref!(mat4)),
         })
