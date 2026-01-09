@@ -25,14 +25,14 @@ harness = false
 [dependencies]
 anyhow = "1.0"
 serde_json = "1.0.149"
-glam = "0.30.9"
+glam = "0.30.10"
 
-wasmtime = { version = "40.0.0", optional = true }
-wasmtime-wasi = { version = "40.0.0", optional = true }
+wasmtime = { version = "40.0.1", optional = true }
+wasmtime-wasi = { version = "40.0.1", optional = true }
 mlua = { version = "0.11.5", features = ["lua54", "vendored"], optional = true }
 
 # todo: necessary?
-tokio = "1.48.0"
+tokio = "1.49.0"
 
 slotmap = "1"
 num_enum = "0.7.5"
@@ -44,8 +44,8 @@ serde = { version = "1.0.228", features = ["derive"] }
 
 [dev-dependencies]
 # for testing with wasmtime
-wat = { version = "1.243.0" }
-wasmprinter = {version = "0.243.0" }
+wat = { version = "1.244.0" }
+wasmprinter = {version = "0.244.0" }
 
 serial_test = "3.2.0"
 criterion = "0.8"
