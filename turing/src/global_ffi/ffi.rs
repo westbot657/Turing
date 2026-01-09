@@ -7,7 +7,7 @@ use anyhow::{anyhow, Result};
 use rustc_hash::FxHashMap;
 use crate::interop::params::{DataType, FfiParam, FreeableDataType, Param, Params};
 use crate::interop::types::Semver;
-use crate::Turing;
+use crate::{FnNameCacheKey, Turing};
 use crate::engine::types::{ScriptCallback, ScriptFnMetadata};
 use crate::global_ffi::wrappers::*;
 
@@ -15,6 +15,7 @@ pub type ScriptFnMap = FxHashMap<String, ScriptFnMetadata>;
 pub type TuringInstance = Turing<CsFns>;
 pub type TuringInit = Result<Turing<CsFns>>;
 pub type VersionTable = Vec<(String, Semver)>;
+pub type CacheKey = u64;
 
 trait VerTableImpl {
     fn contains_key(&self, key: &str) -> bool;
@@ -178,14 +179,12 @@ unsafe extern "C" fn turing_script_load(turing: *mut TuringInstance, source: *co
 #[unsafe(no_mangle)]
 /// # Safety
 /// `turing` must be a valid pointer to a `Turing`.
-/// `name` must be a valid `UTF-8` string.
+/// `name_key` must be a cache key, from calling `turing_script_cache_fn_name`.
 /// `params` must be a valid pointer to a `Params`.
 /// If `params` is null, an empty `Params` will be used for the function call instead.
 /// `params` will not be freed.
-unsafe extern "C" fn turing_script_call_fn(turing: *mut TuringInstance, name: *const c_char, params: *mut Params, expected_return_type: DataType) -> FfiParam {
+unsafe extern "C" fn turing_script_call_fn(turing: *mut TuringInstance, name_key: CacheKey, params: *mut Params, expected_return_type: DataType) -> FfiParam {
     let turing = unsafe { &mut *turing };
-
-    let name = unsafe { CStr::from_ptr(name).to_string_lossy() };
 
     let params = if params.is_null() {
         Params::new()
@@ -193,8 +192,20 @@ unsafe extern "C" fn turing_script_call_fn(turing: *mut TuringInstance, name: *c
         unsafe { &*params }.clone()
     };
 
-    turing.call_fn(name, params, expected_return_type).to_rs_param()
+    turing.call_fn(name_key, params, expected_return_type).to_rs_param()
 
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `turing` must be a valid pointer to a `Turing`.
+/// `name` must be a valid pointer to a UTF-8 C-String.
+unsafe extern "C" fn turing_script_cache_fn_name(turing: *mut TuringInstance, name: *const c_char) -> CacheKey {
+    let turing = unsafe { &mut *turing };
+    
+    let name = unsafe { CStr::from_ptr(name).to_string_lossy() };
+    
+    turing.cache_fn_name(name)
 }
 
 #[unsafe(no_mangle)]

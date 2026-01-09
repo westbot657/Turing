@@ -2,10 +2,7 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
-use crate::{
-    EngineDataState, ExternalFunctions,
-    interop::params::{DataType, Param, Params},
-};
+use crate::{EngineDataState, ExternalFunctions, interop::params::{DataType, Param, Params}, FnNameCacheKey};
 use crate::interop::types::Semver;
 
 #[cfg(feature = "lua")]
@@ -33,7 +30,7 @@ where
 {
     pub fn call_fn(
         &mut self,
-        name: &str,
+        cache_key: FnNameCacheKey,
         params: Params,
         ret_type: DataType,
         data: Arc<RwLock<EngineDataState>>,
@@ -41,9 +38,9 @@ where
         #[allow(unreachable_patterns)]
         match self {
             #[cfg(feature = "wasm")]
-            Engine::Wasm(engine) => engine.call_fn(name, params, ret_type, data),
+            Engine::Wasm(engine) => engine.call_fn(cache_key, params, ret_type, data),
             #[cfg(feature = "lua")]
-            Engine::Lua(engine) => engine.call_fn(name, params, ret_type, data),
+            Engine::Lua(engine) => engine.call_fn(cache_key, params, ret_type, data),
             _ => Param::Error("No code engine is active".to_string()),
         }
     }

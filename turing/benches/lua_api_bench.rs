@@ -59,6 +59,7 @@ fn bench_turing_lua_math(c: &mut Criterion) {
     // load the test Lua module used by the repo
     let lua_path = "../tests/wasm/lua_test.lua";
     turing.load_script(lua_path, &["test"]).unwrap();
+    let math_ops_test = turing.cache_fn_name("math_ops_test");
 
     c.bench_function("turing_lua_math_ops", |b| {
         b.iter(|| {
@@ -66,7 +67,7 @@ fn bench_turing_lua_math(c: &mut Criterion) {
             params.push(Param::F32(3.5));
             params.push(Param::F32(5.0));
 
-            let res = turing.call_fn("math_ops_test", params, DataType::F32);
+            let res = turing.call_fn(math_ops_test, params, DataType::F32);
             let _ = black_box(res.to_result::<f32>().unwrap());
         })
     });
@@ -76,13 +77,14 @@ fn bench_turing_lua_string_roundtrip(c: &mut Criterion) {
     let mut turing = setup_turing_for_lua();
     let lua_path = "../tests/wasm/lua_test.lua";
     turing.load_script(lua_path, &["test"]).unwrap();
+    let string_test = turing.cache_fn_name("string_test");
 
     c.bench_function("turing_lua_string_roundtrip", |b| {
         b.iter(|| {
             let mut params = Params::of_size(1);
             params.push(Param::String("Message from host".to_string()));
 
-            let res = turing.call_fn("string_test", params, DataType::ExtString);
+            let res = turing.call_fn(string_test, params, DataType::ExtString);
             let _ = black_box(res.to_result::<String>().unwrap());
         })
     });

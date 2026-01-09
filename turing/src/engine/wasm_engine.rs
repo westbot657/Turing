@@ -17,7 +17,7 @@ use wasmtime_wasi::WasiCtxBuilder;
 use wasmtime_wasi::cli::{IsTerminal, StdoutStream};
 use wasmtime_wasi::p1::WasiP1Ctx;
 use crate::engine::types::{ScriptCallback, ScriptFnMetadata};
-use crate::{ExternalFunctions, EngineDataState, OpaquePointerKey};
+use crate::{ExternalFunctions, EngineDataState, OpaquePointerKey, FnNameCacheKey};
 use crate::interop::params::{DataType, Param, Params};
 use crate::interop::types::{ExtPointer, Semver};
 
@@ -269,8 +269,8 @@ pub struct WasmInterpreter<Ext: ExternalFunctions> {
     linker: Linker<WasiP1Ctx>,
     script_instance: Option<Instance>,
     memory: Option<Memory>,
-    func_cache: FxHashMap<String, Func>,
-    typed_cache: FxHashMap<String, TypedFuncEntry>,
+    func_cache: FxHashMap<FnNameCacheKey, Func>,
+    typed_cache: FxHashMap<FnNameCacheKey, TypedFuncEntry>,
     fast_calls: FastCalls,
     pub api_versions: FxHashMap<String, Semver>,
     _ext: PhantomData<Ext>,
@@ -610,7 +610,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         Ok(())
     }
 
-    pub fn load_script(&mut self, path: &Path) -> Result<()> {
+    pub fn load_script(&mut self, path: &Path, data: &Arc<RwLock<EngineDataState>>) -> Result<()> {
         let wasm = fs::read(path)?;
 
         let module = Module::new(&self.engine, wasm)?;
@@ -633,9 +633,14 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         for export in module.exports() {
             let name = export.name();
             let Some(func) = instance.get_func(&mut self.store, name) else { continue };
-
+            
+            let mut d = data.write();
+            let key = d.fn_name_dedup
+                .get(name).map(|k| *k)
+                .unwrap_or_else(|| { d.fn_name_cache.insert(name.to_string()) });
+            
             if let Some(entry) = TypedFuncEntry::from_func(&mut self.store, func) {
-                self.typed_cache.insert(name.to_string(), entry);
+                self.typed_cache.insert(key, entry);
             }
 
             if name == "on_update" {
@@ -664,7 +669,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
     /// Calls a function in the loaded wasm script with the given parameters and return type.
     pub fn call_fn(
         &mut self,
-        name: &str,
+        cache_key: FnNameCacheKey,
         params: Params,
         ret_type: DataType,
         data: Arc<RwLock<EngineDataState>>,
@@ -674,14 +679,16 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         };
 
         // Fast-path: typed cache (common signatures). Falls back to dynamic call below.
-        if let Some(entry) = self.typed_cache.get(name) {
+        if let Some(entry) = self.typed_cache.get(&cache_key) {
             return entry.invoke(&mut self.store, params).unwrap_or_else(Param::Error)
         }
 
         // Try cache first to avoid repeated name lookup and Val boxing/unboxing.
-        let Some(f) = self.func_cache.get(name).copied().or_else(|| {
+        let Some(f) = self.func_cache.get(&cache_key).copied().or_else(|| {
+            let d = data.read();
+            let name = d.fn_name_cache.get(cache_key)?;
             let found = instance.get_func(&mut self.store, name)?;
-            self.func_cache.insert(name.to_string(), found);
+            self.func_cache.insert(cache_key, found);
             Some(found)
         }) else {
             return Param::Error("Function does not exist".to_string());

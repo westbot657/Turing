@@ -91,7 +91,7 @@ pub fn test_file_access() -> Result<()> {
     let mut turing = common_setup_direct(WASM_SCRIPT)?;
 
     let res = turing
-        .call_fn("file_access_test", Params::new(), DataType::Void)
+        .call_fn_by_name("file_access_test", Params::new(), DataType::Void)
         .to_result::<()>();
 
     assert!(res.is_err());
@@ -104,7 +104,7 @@ fn test_math(mut turing: Turing<DirectExt>) -> Result<()> {
     params.push(Param::F32(5.0));
 
     let res = turing
-        .call_fn("math_ops_test", params, DataType::F32);
+        .call_fn_by_name("math_ops_test", params, DataType::F32);
 
     println!("[test/ext]: code multiplied 3.5 by 5.0 for {:#?}", res);
     assert!((res.to_result::<f32>()? - 17.5).abs() < f32::EPSILON);
@@ -129,7 +129,7 @@ pub fn test_stdin_fail() -> Result<()> {
     let mut turing = common_setup_direct(WASM_SCRIPT)?;
 
     turing
-        .call_fn("test_stdin_fail", Params::new(), DataType::Void)
+        .call_fn_by_name("test_stdin_fail", Params::new(), DataType::Void)
         .to_result::<()>()
 }
 
@@ -138,7 +138,7 @@ pub fn test_string_fetch() -> Result<()> {
     let mut turing = common_setup_direct(WASM_SCRIPT)?;
 
     turing
-        .call_fn("test_string_fetch", Params::new(), DataType::Void)
+        .call_fn_by_name("test_string_fetch", Params::new(), DataType::Void)
         .to_result::<()>()
 }
 
@@ -150,7 +150,7 @@ pub fn test_lua_string_fetch() -> Result<()> {
     s.push(Param::String("Message from host".to_string()));
 
     let res = turing
-        .call_fn("string_test", s, DataType::ExtString)
+        .call_fn_by_name("string_test", s, DataType::ExtString)
         .to_result::<String>()?;
 
     println!("Received message from lua: '{res}'");

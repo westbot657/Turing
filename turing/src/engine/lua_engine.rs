@@ -10,7 +10,7 @@ use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
 use slotmap::KeyData;
 use crate::engine::types::{ScriptCallback, ScriptFnMetadata};
-use crate::{ExternalFunctions, EngineDataState, OpaquePointerKey};
+use crate::{ExternalFunctions, EngineDataState, OpaquePointerKey, FnNameCacheKey};
 use crate::interop::params::{DataType, Param, Params};
 use crate::interop::types::{ExtPointer, Semver};
 
@@ -301,7 +301,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
         Ok(())
     }
 
-    pub fn load_script(&mut self, path: &Path) -> Result<()> {
+    pub fn load_script(&mut self, path: &Path, data: &Arc<RwLock<EngineDataState>>) -> Result<()> {
 
         let lua = fs::read_to_string(path)?;
 
@@ -367,7 +367,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
 
     pub fn call_fn(
         &mut self,
-        name: &str,
+        cache_key: FnNameCacheKey,
         params: Params,
         ret_type: DataType,
         data: Arc<RwLock<EngineDataState>>
@@ -375,6 +375,11 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
         let Some((lua, module)) = &mut self.engine else {
             return Param::Error("No script is loaded".to_string())
         };
+        
+        // ignore speedup optimization for lua unfortunately
+        let d = data.read();
+        let name = d.fn_name_cache.get(cache_key).unwrap().to_string();
+        let name = name.as_str();
 
         let func = module.get::<Value>(name);
         if let Err(e) = func {

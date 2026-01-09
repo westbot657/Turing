@@ -10,7 +10,7 @@ use crate::engine::types::ScriptFnMetadata;
 use anyhow::{anyhow, Result};
 use parking_lot::RwLock;
 use rustc_hash::{FxHashMap, FxHashSet};
-use slotmap::{new_key_type, SlotMap};
+use slotmap::{new_key_type, KeyData, SlotMap};
 use crate::interop::params::{DataType, FreeableDataType, Param, Params};
 use crate::interop::types::{ExtPointer, Semver};
 use crate::spec_gen::generator::generate_specs;
@@ -37,6 +37,7 @@ pub trait ExternalFunctions {
 
 new_key_type! {
     pub struct OpaquePointerKey;
+    pub struct FnNameCacheKey;
 }
 
 #[derive(Default)]
@@ -51,6 +52,9 @@ pub struct EngineDataState {
     pub active_capabilities: FxHashSet<String>,
     /// queue for algebraic type's data
     pub f32_queue: VecDeque<f32>,
+    /// Cache for name resolution speedup
+    pub fn_name_cache: SlotMap<FnNameCacheKey, String>,
+    pub fn_name_dedup: FxHashMap<String, FnNameCacheKey>,
 }
 
 impl EngineDataState {
@@ -158,7 +162,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
                     &self.script_fns,
                     Arc::clone(&self.data),
                 )?;
-                wasm_interpreter.load_script(source)?;
+                wasm_interpreter.load_script(source, &self.data)?;
                 self.engine = Some(Engine::Wasm(wasm_interpreter));
             }
             #[cfg(feature = "lua")]
@@ -167,7 +171,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
                     &self.script_fns,
                     Arc::clone(&self.data),
                 )?;
-                lua_interpreter.load_script(source)?;
+                lua_interpreter.load_script(source, &self.data)?;
                 self.engine = Some(Engine::Lua(lua_interpreter));
             }
             _ => {
@@ -183,14 +187,34 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
         Ok(())
     }
 
-    pub fn call_fn(&mut self, name: impl ToString, params: Params, expected_return_type: DataType) -> Param {
+    /// This caches a string for faster function calling.
+    pub fn cache_fn_name(&mut self, name: impl ToString) -> u64 {
         let name = name.to_string();
+        let mut d = self.data.write();
+        
+        // Check if string is already cached, required to ensure no string appears more than once
+        if let Some(existing) = d.fn_name_dedup.get(&name) {
+            return existing.0.as_ffi()
+        }
+        
+        let key = d.fn_name_cache.insert(name.to_string());
+        d.fn_name_dedup.insert(name.to_string(), key);
+        key.0.as_ffi()
+    }
+    
+    pub fn call_fn_by_name(&mut self, name: impl ToString, params: Params, expected_return_type: DataType) -> Param {
+        let key = self.cache_fn_name(name);
+        self.call_fn(key, params, expected_return_type)
+    }
+    
+    pub fn call_fn(&mut self, cache_key: u64, params: Params, expected_return_type: DataType) -> Param {
+        // let name = name.to_string();
         let Some(engine) = &mut self.engine else {
             return Param::Error("No code engine is active".to_string())
         };
 
         engine.call_fn(
-            &name,
+            FnNameCacheKey::from(KeyData::from_ffi(cache_key)),
             params,
             expected_return_type,
             Arc::clone(&self.data)
