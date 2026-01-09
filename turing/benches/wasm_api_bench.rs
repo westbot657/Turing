@@ -71,7 +71,7 @@ fn bench_call_wasm_add(c: &mut Criterion) {
     turing
         .load_script(path.to_str().unwrap(), &capabilities)
         .unwrap();
-    let add = turing.cache_fn_name("add");
+    let add = turing.get_fn_key("add").expect("fn add not available");
 
     c.bench_function("turing_call_wasm_add", |b| {
         b.iter(|| {
@@ -90,7 +90,7 @@ fn bench_call_tests_wasm_math(c: &mut Criterion) {
     turing
         .load_script("../tests/wasm/wasm_tests.wasm", &vec!["test"])
         .unwrap();
-    let math_ops_test = turing.cache_fn_name("math_ops_test");
+    let math_ops_test = turing.get_fn_key("math_ops_test").expect("fn key not found");
 
     c.bench_function("turing_call_tests_wasm_math", |b| {
         b.iter(|| {
@@ -109,7 +109,7 @@ fn bench_fetch_string_from_wasm(c: &mut Criterion) {
     turing
         .load_script("../tests/wasm/wasm_tests.wasm", &vec!["test"])
         .unwrap();
-    let test_string_fetch = turing.cache_fn_name("test_string_fetch");
+    let test_string_fetch = turing.get_fn_key("test_string_fetch").expect("fetch not found");
 
     c.bench_function("turing_fetch_string_from_wasm", |b| {
         b.iter(|| {

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
-use crate::{EngineDataState, ExternalFunctions, interop::params::{DataType, Param, Params}, FnNameCacheKey};
+use crate::{EngineDataState, ExternalFunctions, ScriptFnKey, interop::params::{DataType, Param, Params}};
 use crate::interop::types::Semver;
 
 #[cfg(feature = "lua")]
@@ -28,9 +28,23 @@ impl<Ext> Engine<Ext>
 where
     Ext: ExternalFunctions + Send + Sync + 'static,
 {
+    pub fn get_fn_key(
+        &self,
+        name: &str,
+    ) -> Option<ScriptFnKey> {
+        #[allow(unreachable_patterns)]
+        match self {
+            #[cfg(feature = "wasm")]
+            Engine::Wasm(engine) => engine.get_fn_key(name),
+            #[cfg(feature = "lua")]
+            Engine::Lua(engine) => engine.get_fn_key(name),
+            _ => panic!("No code engine is active"),
+        }
+    }
+
     pub fn call_fn(
         &mut self,
-        cache_key: FnNameCacheKey,
+        cache_key: ScriptFnKey,
         params: Params,
         ret_type: DataType,
         data: &Arc<RwLock<EngineDataState>>,

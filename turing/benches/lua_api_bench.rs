@@ -59,7 +59,7 @@ fn bench_turing_lua_math(c: &mut Criterion) {
     // load the test Lua module used by the repo
     let lua_path = "../tests/wasm/lua_test.lua";
     turing.load_script(lua_path, &["test"]).unwrap();
-    let math_ops_test = turing.cache_fn_name("math_ops_test");
+    let math_ops_test = turing.get_fn_key("math_ops_test").expect("fn key not found");
 
     c.bench_function("turing_lua_math_ops", |b| {
         b.iter(|| {
@@ -77,7 +77,7 @@ fn bench_turing_lua_string_roundtrip(c: &mut Criterion) {
     let mut turing = setup_turing_for_lua();
     let lua_path = "../tests/wasm/lua_test.lua";
     turing.load_script(lua_path, &["test"]).unwrap();
-    let string_test = turing.cache_fn_name("string_test");
+    let string_test = turing.get_fn_key("string_test").expect("fn key not found");
 
     c.bench_function("turing_lua_string_roundtrip", |b| {
         b.iter(|| {

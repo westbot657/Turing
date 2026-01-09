@@ -10,7 +10,8 @@ use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
 use slotmap::KeyData;
 use crate::engine::types::{ScriptCallback, ScriptFnMetadata};
-use crate::{ExternalFunctions, EngineDataState, OpaquePointerKey, FnNameCacheKey};
+use crate::key_vec::KeyVec;
+use crate::{EngineDataState, ExternalFunctions, OpaquePointerKey, ScriptFnKey};
 use crate::interop::params::{DataType, Param, Params};
 use crate::interop::types::{ExtPointer, Semver};
 
@@ -182,7 +183,7 @@ impl Params {
 }
 
 pub struct LuaInterpreter<Ext: ExternalFunctions> {
-    lua_fns: FxHashMap<String, ScriptFnMetadata>,
+    lua_fns: KeyVec<ScriptFnKey, (String, ScriptFnMetadata)>,
     data: Arc<RwLock<EngineDataState>>,
     engine: Option<(Lua, Table)>,
     fast_calls: FastCallLua,
@@ -200,7 +201,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
 
     pub fn new(lua_functions: &FxHashMap<String, ScriptFnMetadata>, data: Arc<RwLock<EngineDataState>>) -> Result<Self> {
         Ok(Self {
-            lua_fns: lua_functions.clone(),
+            lua_fns: lua_functions.clone().into_iter().collect(),
             data,
             engine: None,
             fast_calls: FastCallLua::default(),
@@ -270,7 +271,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
     }
 
     fn bind_lua(&self, api: &Table, engine: &Lua) -> Result<()> {
-        for (name, metadata) in &self.lua_fns {
+        for (name, metadata) in self.lua_fns.iter() {
             if name.contains(".") {
                 let parts: Vec<&str> = name.splitn(2, ".").collect();
                 let cname = parts[0].to_case(Case::Pascal);
@@ -367,7 +368,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
 
     pub fn call_fn(
         &mut self,
-        cache_key: FnNameCacheKey,
+        cache_key: ScriptFnKey,
         params: Params,
         ret_type: DataType,
         data: &Arc<RwLock<EngineDataState>>
@@ -376,10 +377,9 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
             return Param::Error("No script is loaded".to_string())
         };
         
-        // ignore speedup optimization for lua unfortunately
-        let name = {
-            let d = data.read();
-            d.fn_name_cache.get(cache_key).unwrap().to_string()
+        // we assume the function exists because we cached it earlier
+        let Some((name, _)) = &self.lua_fns.get(&cache_key) else {
+            return Param::Error(format!("Function with key '{cache_key:?}' not found"))
         };
         let name = name.as_str();
 
@@ -434,6 +434,14 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
         } else {
             Ok(())
         }
+    }
+    
+    pub fn get_fn_key(&self, name: &str) -> Option<crate::ScriptFnKey> {
+        println!("Looking for Lua function key for name: {}", name);
+        println!("Available Lua functions:");
+        println!("{:?}", self.lua_fns.iter().map(|(n, _)| n).collect::<Vec<&String>>());
+
+        self.lua_fns.key_of(|(n, _)| n == name)
     }
     
 }
