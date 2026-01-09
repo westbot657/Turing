@@ -7,7 +7,7 @@ use anyhow::{anyhow, Result};
 use rustc_hash::FxHashMap;
 use crate::interop::params::{DataType, FfiParam, FreeableDataType, Param, Params};
 use crate::interop::types::Semver;
-use crate::{FnNameCacheKey, Turing};
+use crate::Turing;
 use crate::engine::types::{ScriptCallback, ScriptFnMetadata};
 use crate::global_ffi::wrappers::*;
 
@@ -15,7 +15,7 @@ pub type ScriptFnMap = FxHashMap<String, ScriptFnMetadata>;
 pub type TuringInstance = Turing<CsFns>;
 pub type TuringInit = Result<Turing<CsFns>>;
 pub type VersionTable = Vec<(String, Semver)>;
-pub type CacheKey = u64;
+pub type CacheKey = u32;
 
 trait VerTableImpl {
     fn contains_key(&self, key: &str) -> bool;
@@ -192,7 +192,7 @@ unsafe extern "C" fn turing_script_call_fn(turing: *mut TuringInstance, name_key
         unsafe { &*params }.clone()
     };
 
-    turing.call_fn(name_key, params, expected_return_type).to_rs_param()
+    turing.call_fn((name_key - 1).into(), params, expected_return_type).to_rs_param()
 
 }
 
@@ -200,12 +200,12 @@ unsafe extern "C" fn turing_script_call_fn(turing: *mut TuringInstance, name_key
 /// # Safety
 /// `turing` must be a valid pointer to a `Turing`.
 /// `name` must be a valid pointer to a UTF-8 C-String.
-unsafe extern "C" fn turing_script_cache_fn_name(turing: *mut TuringInstance, name: *const c_char) -> CacheKey {
+unsafe extern "C" fn turing_script_get_fn_name(turing: *mut TuringInstance, name: *const c_char) -> CacheKey {
     let turing = unsafe { &mut *turing };
     
     let name = unsafe { CStr::from_ptr(name).to_string_lossy() };
     
-    turing.cache_fn_name(name)
+    turing.get_fn_key(&name.to_string()).map(|x| x.0 + 1).unwrap_or(0)
 }
 
 #[unsafe(no_mangle)]

@@ -3,7 +3,7 @@ use std::{ops::{Deref, Index, IndexMut}, slice::SliceIndex};
 /// A grow-only vector structure indexed by key types.
 pub struct KeyVec<K, V>
 where
-    K: From<usize> + Into<usize> + Clone,
+    K: From<u32> + Into<u32> + Clone,
 {
     values: Vec<V>,
     marker: std::marker::PhantomData<K>,
@@ -11,7 +11,7 @@ where
 
 impl<K, V> KeyVec<K, V>
 where
-    K: From<usize> + Into<usize> + Clone,
+    K: From<u32> + Into<u32> + Clone,
 {
     /// Creates a new empty KeyVec.
     pub fn new() -> Self {
@@ -30,7 +30,7 @@ where
 
     /// Pushes a new value to the KeyVec and returns its key.
     pub fn push(&mut self, value: V) -> K {
-        let key = K::from(self.values.len());
+        let key = K::from(self.values.len() as u32);
         self.values.push(value);
         key
     }
@@ -41,7 +41,7 @@ where
     {
         for (i, v) in self.values.iter().enumerate() {
             if f(v) {
-                return Some(K::from(i));
+                return Some(K::from(i as u32));
             }
         }
         None
@@ -49,12 +49,12 @@ where
 
     #[inline]
     pub fn get(&self, key: &K) -> Option<&V> {
-        self.values.get(key.clone().into())
+        self.values.get(key.clone().into() as usize)
     }
 
     #[inline]
     pub fn get_mut(&mut self, key: &K) -> Option<&mut V> {
-        self.values.get_mut(key.clone().into())
+        self.values.get_mut(key.clone().into() as usize)
     }
 
     /// Clears all values from the KeyVec.
@@ -66,27 +66,27 @@ where
 
 impl<K, V> Index<K> for KeyVec<K, V>
 where
-    K: From<usize> + Into<usize> + Clone,
+    K: From<u32> + Into<u32> + Clone,
 {
     type Output = V;
 
     fn index(&self, index: K) -> &Self::Output {
-        &self.values[index.into()]
+        &self.values[index.into() as usize]
     }
 }
 
 impl<K, V> IndexMut<K> for KeyVec<K, V>
 where
-    K: From<usize> + Into<usize> + Clone,
+    K: From<u32> + Into<u32> + Clone,
 {
     fn index_mut(&mut self, index: K) -> &mut Self::Output {
-        &mut self.values[index.into()]
+        &mut self.values[index.into() as usize]
     }
 }
 
 impl<K, V> Deref for KeyVec<K, V>
 where
-    K: From<usize> + Into<usize> + Clone,
+    K: From<u32> + Into<u32> + Clone,
 {
     type Target = Vec<V>;
 
@@ -97,7 +97,7 @@ where
 
 impl<K, V> Default for KeyVec<K, V>
 where
-    K: From<usize> + Into<usize> + Clone,
+    K: From<u32> + Into<u32> + Clone,
 {
     fn default() -> Self {
         Self::new()
@@ -106,8 +106,8 @@ where
 
 impl<K, V> FromIterator<V> for KeyVec<K, V>
 where
-    usize: std::convert::From<K>,
-    K: std::convert::From<usize> + std::clone::Clone,
+    u32: From<K>,
+    K: From<u32> + Clone,
 {
     fn from_iter<T: IntoIterator<Item = V>>(iter: T) -> Self {
         let mut kv = KeyVec::new();
@@ -120,7 +120,7 @@ where
 
 impl<K, V> IntoIterator for KeyVec<K, V>
 where
-    K: From<usize> + Into<usize> + Clone,
+    K: From<u32> + Into<u32> + Clone,
 {
     type Item = V;
     type IntoIter = std::vec::IntoIter<V>;
@@ -132,7 +132,7 @@ where
 
 impl<K, V> Clone for KeyVec<K, V>
 where
-    K: From<usize> + Into<usize> + Clone,
+    K: From<u32> + Into<u32> + Clone,
     V: Clone,
 {
     fn clone(&self) -> Self {

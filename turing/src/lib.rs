@@ -42,17 +42,23 @@ new_key_type! {
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
-pub struct ScriptFnKey(usize);
+pub struct ScriptFnKey(u32);
 
-impl From<usize> for ScriptFnKey {
-    fn from(value: usize) -> Self {
+impl From<u32> for ScriptFnKey {
+    fn from(value: u32) -> Self {
         ScriptFnKey(value)
+    }
+}
+
+impl From<ScriptFnKey> for u32 {
+    fn from(value: ScriptFnKey) -> Self {
+        value.0
     }
 }
 
 impl From<ScriptFnKey> for usize {
     fn from(value: ScriptFnKey) -> Self {
-        value.0
+        value.0 as usize
     }
 }
 
