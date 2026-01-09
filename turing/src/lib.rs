@@ -217,7 +217,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
     pub fn call_fn_by_name(&mut self, name: impl ToString, params: Params, expected_return_type: DataType) -> Param {
         let Some(engine) = &mut self.engine else {
             return Param::Error("No code engine is active".to_string())
-        };   
+        };
         let key = engine.get_fn_key(&name.to_string());
         
         let Some(key) = key else {

@@ -183,7 +183,8 @@ impl Params {
 }
 
 pub struct LuaInterpreter<Ext: ExternalFunctions> {
-    lua_fns: KeyVec<ScriptFnKey, (String, ScriptFnMetadata)>,
+    lua_fns: FxHashMap<String, ScriptFnMetadata>,
+    func_cache: KeyVec<ScriptFnKey, (String, Function)>,
     data: Arc<RwLock<EngineDataState>>,
     engine: Option<(Lua, Table)>,
     fast_calls: FastCallLua,
@@ -201,7 +202,8 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
 
     pub fn new(lua_functions: &FxHashMap<String, ScriptFnMetadata>, data: Arc<RwLock<EngineDataState>>) -> Result<Self> {
         Ok(Self {
-            lua_fns: lua_functions.clone().into_iter().collect(),
+            lua_fns: lua_functions.clone(),
+            func_cache: KeyVec::new(),
             data,
             engine: None,
             fast_calls: FastCallLua::default(),
@@ -350,6 +352,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
         for pair in module.pairs::<mlua::String, Function>() {
             let Ok((name, val)) = pair else { continue };
             let name = name.to_string_lossy();
+            self.func_cache.push((name.clone(), val.clone()));
             if name.starts_with("_") && name.ends_with("_semver") {
                 let Ok(version) = val.call::<Value>(MultiValue::new()) else { continue };
                 let version = match version {
@@ -378,7 +381,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
         };
         
         // we assume the function exists because we cached it earlier
-        let Some((name, _)) = &self.lua_fns.get(&cache_key) else {
+        let Some((name, _)) = &self.func_cache.get(&cache_key) else {
             return Param::Error(format!("Function with key '{cache_key:?}' not found"))
         };
         let name = name.as_str();
@@ -436,12 +439,12 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
         }
     }
     
-    pub fn get_fn_key(&self, name: &str) -> Option<crate::ScriptFnKey> {
+    pub fn get_fn_key(&self, name: &str) -> Option<ScriptFnKey> {
         println!("Looking for Lua function key for name: {}", name);
         println!("Available Lua functions:");
         println!("{:?}", self.lua_fns.iter().map(|(n, _)| n).collect::<Vec<&String>>());
 
-        self.lua_fns.key_of(|(n, _)| n == name)
+        self.func_cache.key_of(|(n, _)| n == name)
     }
     
 }
