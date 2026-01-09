@@ -7,6 +7,7 @@ use std::path::Path;
 use std::sync::Arc;
 use crate::engine::Engine;
 use crate::engine::types::ScriptFnMetadata;
+use crate::key_vec::KeyVec;
 use anyhow::{anyhow, Result};
 use parking_lot::RwLock;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -17,6 +18,7 @@ use crate::spec_gen::generator::generate_specs;
 
 pub mod engine;
 pub mod interop;
+pub mod key_vec;
 mod spec_gen;
 
 #[cfg(test)]
@@ -37,7 +39,21 @@ pub trait ExternalFunctions {
 
 new_key_type! {
     pub struct OpaquePointerKey;
-    pub struct FnNameCacheKey;
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+pub struct ScriptFnKey(usize);
+
+impl From<usize> for ScriptFnKey {
+    fn from(value: usize) -> Self {
+        ScriptFnKey(value)
+    }
+}
+
+impl From<ScriptFnKey> for usize {
+    fn from(value: ScriptFnKey) -> Self {
+        value.0
+    }
 }
 
 #[derive(Default)]
@@ -52,9 +68,6 @@ pub struct EngineDataState {
     pub active_capabilities: FxHashSet<String>,
     /// queue for algebraic type's data
     pub f32_queue: VecDeque<f32>,
-    /// Cache for name resolution speedup
-    pub fn_name_cache: SlotMap<FnNameCacheKey, String>,
-    pub fn_name_dedup: FxHashMap<String, FnNameCacheKey>,
 }
 
 impl EngineDataState {
@@ -187,34 +200,34 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
         Ok(())
     }
 
-    /// This caches a string for faster function calling.
-    pub fn cache_fn_name(&mut self, name: impl ToString) -> u64 {
-        let name = name.to_string();
-        let mut d = self.data.write();
+    pub fn get_fn_key(&self, arg: &str) -> Option<ScriptFnKey> {
+        let Some(engine) = &self.engine else {
+            panic!("Engine not initialized");
+        };
         
-        // Check if string is already cached, required to ensure no string appears more than once
-        if let Some(existing) = d.fn_name_dedup.get(&name) {
-            return existing.0.as_ffi()
-        }
-        
-        let key = d.fn_name_cache.insert(name.to_string());
-        d.fn_name_dedup.insert(name.to_string(), key);
-        key.0.as_ffi()
+        engine.get_fn_key(arg)
     }
     
     pub fn call_fn_by_name(&mut self, name: impl ToString, params: Params, expected_return_type: DataType) -> Param {
-        let key = self.cache_fn_name(name);
+        let Some(engine) = &mut self.engine else {
+            return Param::Error("No code engine is active".to_string())
+        };   
+        let key = engine.get_fn_key(&name.to_string());
+        
+        let Some(key) = key else {
+            return Param::Error(format!("Function '{}' not found", name.to_string()));
+        };
         self.call_fn(key, params, expected_return_type)
     }
     
-    pub fn call_fn(&mut self, cache_key: u64, params: Params, expected_return_type: DataType) -> Param {
+    pub fn call_fn(&mut self, cache_key: ScriptFnKey, params: Params, expected_return_type: DataType) -> Param {
         // let name = name.to_string();
         let Some(engine) = &mut self.engine else {
             return Param::Error("No code engine is active".to_string())
         };
 
         engine.call_fn(
-            FnNameCacheKey::from(KeyData::from_ffi(cache_key)),
+            cache_key,
             params,
             expected_return_type,
             &self.data
@@ -244,5 +257,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
         
         engine.get_api_versions()
     }
+    
+
 
 }
