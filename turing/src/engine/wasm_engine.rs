@@ -672,7 +672,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         cache_key: FnNameCacheKey,
         params: Params,
         ret_type: DataType,
-        data: Arc<RwLock<EngineDataState>>,
+        data: &Arc<RwLock<EngineDataState>>,
     ) -> Param {
         let Some(instance) = &mut self.script_instance else {
             return Param::Error("No script is loaded or reentry was attempted".to_string());
@@ -694,7 +694,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             return Param::Error("Function does not exist".to_string());
         };
 
-        let args = params.to_wasm_args(&data);
+        let args = params.to_wasm_args(data);
         if let Err(e) = args {
             return Param::Error(format!("{e}"))
         }
@@ -725,7 +725,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         };
 
         // convert Val to Param
-        Param::from_wasm_type_val(ret_type, rt, &data, memory, &self.store)
+        Param::from_wasm_type_val(ret_type, rt, data, memory, &self.store)
     }
 
     pub fn fast_call_update(&mut self, delta_time: f32) -> std::result::Result<(), String> {

@@ -33,7 +33,7 @@ where
         cache_key: FnNameCacheKey,
         params: Params,
         ret_type: DataType,
-        data: Arc<RwLock<EngineDataState>>,
+        data: &Arc<RwLock<EngineDataState>>,
     ) -> Param {
         #[allow(unreachable_patterns)]
         match self {

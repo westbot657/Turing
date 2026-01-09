@@ -217,7 +217,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
             FnNameCacheKey::from(KeyData::from_ffi(cache_key)),
             params,
             expected_return_type,
-            Arc::clone(&self.data)
+            &self.data
         )
     }
 

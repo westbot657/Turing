@@ -370,7 +370,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
         cache_key: FnNameCacheKey,
         params: Params,
         ret_type: DataType,
-        data: Arc<RwLock<EngineDataState>>
+        data: &Arc<RwLock<EngineDataState>>
     ) -> Param {
         let Some((lua, module)) = &mut self.engine else {
             return Param::Error("No script is loaded".to_string())
@@ -388,7 +388,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
             return Param::Error(format!("Failed to find function '{name}': {e}"));
         }
         let func = func.unwrap();
-        let args = params.to_lua_args(lua, &data);
+        let args = params.to_lua_args(lua, data);
         if let Err(e) = args {
             return Param::Error(format!("{e}"))
         }
@@ -409,7 +409,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
             return Param::Void;
         }
         
-        Param::from_lua_type_val(ret_type, res, &data, lua)
+        Param::from_lua_type_val(ret_type, res, data, lua)
     }
     
     pub fn fast_call_update(&mut self, delta_time: f32) -> std::result::Result<(), String> {
