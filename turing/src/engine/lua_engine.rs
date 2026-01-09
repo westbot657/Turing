@@ -440,10 +440,6 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
     }
     
     pub fn get_fn_key(&self, name: &str) -> Option<ScriptFnKey> {
-        println!("Looking for Lua function key for name: {}", name);
-        println!("Available Lua functions:");
-        println!("{:?}", self.lua_fns.iter().map(|(n, _)| n).collect::<Vec<&String>>());
-
         self.func_cache.key_of(|(n, _)| n == name)
     }
     
