@@ -377,8 +377,10 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
         };
         
         // ignore speedup optimization for lua unfortunately
-        let d = data.read();
-        let name = d.fn_name_cache.get(cache_key).unwrap().to_string();
+        let name = {
+            let d = data.read();
+            d.fn_name_cache.get(cache_key).unwrap().to_string()
+        };
         let name = name.as_str();
 
         let func = module.get::<Value>(name);
