@@ -192,7 +192,7 @@ unsafe extern "C" fn turing_script_call_fn(turing: *mut TuringInstance, name_key
         unsafe { &*params }.clone()
     };
 
-    turing.call_fn((name_key - 1).into(), params, expected_return_type).to_rs_param()
+    turing.call_fn((name_key).into(), params, expected_return_type).to_rs_param()
 
 }
 
@@ -205,7 +205,7 @@ unsafe extern "C" fn turing_script_get_fn_name(turing: *mut TuringInstance, name
     
     let name = unsafe { CStr::from_ptr(name).to_string_lossy() };
     
-    turing.get_fn_key(&name.to_string()).map(|x| x.0 + 1).unwrap_or(0)
+    turing.get_fn_key(&name.to_string()).map(|x| x.0).unwrap_or(u32::MAX)
 }
 
 #[unsafe(no_mangle)]
