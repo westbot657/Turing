@@ -13,6 +13,8 @@ pub mod wasm_engine;
 
 pub mod types;
 
+mod runtime_modules;
+
 #[allow(clippy::large_enum_variant)]
 pub enum Engine<Ext>
 where

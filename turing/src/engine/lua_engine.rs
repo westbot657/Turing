@@ -12,6 +12,7 @@ use slotmap::KeyData;
 use crate::engine::types::{ScriptCallback, ScriptFnMetadata};
 use crate::key_vec::KeyVec;
 use crate::{EngineDataState, ExternalFunctions, OpaquePointerKey, ScriptFnKey};
+use crate::engine::runtime_modules::lua_glam;
 use crate::interop::params::{DataType, Param, Params};
 use crate::interop::types::{ExtPointer, Semver};
 
@@ -57,10 +58,6 @@ impl Param {
         _lua: &Lua
     ) -> Self {
 
-        macro_rules! unpack_table {
-            () => {};
-        }
-
         match typ {
             DataType::I8 => Param::I8(val.as_integer().unwrap() as i8),
             DataType::I16 => Param::I16(val.as_integer().unwrap() as i16),
@@ -89,18 +86,18 @@ impl Param {
             }
             DataType::RustError | DataType::ExtError => Param::Error(val.as_error().unwrap().to_string()),
             DataType::Void => Param::Void,
-            DataType::Vec2 => todo!(),
-            DataType::Vec3 => todo!(),
-            DataType::RustVec4 | DataType::ExtVec4 => todo!(),
-            DataType::RustQuat | DataType::ExtQuat => todo!(),
-            DataType::RustMat4 | DataType::ExtMat4 => todo!(),
+            DataType::Vec2 => lua_glam::unpack_vec2(val),
+            DataType::Vec3 => lua_glam::unpack_vec3(val),
+            DataType::RustVec4 | DataType::ExtVec4 => lua_glam::unpack_vec4(val),
+            DataType::RustQuat | DataType::ExtQuat => lua_glam::unpack_quat(val),
+            DataType::RustMat4 | DataType::ExtMat4 => lua_glam::unpack_mat4(val),
         }
     }
 
     pub fn into_lua_val(
         self,
         data: &Arc<RwLock<EngineDataState>>,
-        lua: &Lua
+        lua: &Lua,
     ) -> mlua::Result<Value> {
         let mut s = data.write();
 
@@ -126,18 +123,18 @@ impl Param {
                 return Err(mlua::Error::RuntimeError(format!("Error executing C# function: {er}")))
             }
             Param::Void => Value::Nil,
-            Param::Vec2(v) => todo!(),
-            Param::Vec3(v) => todo!(),
-            Param::Vec4(v) => todo!(),
-            Param::Quat(q) => todo!(),
-            Param::Mat4(m) => todo!(),
+            Param::Vec2(v) => lua_glam::create_vec2(v, lua).map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))?,
+            Param::Vec3(v) => lua_glam::create_vec3(v, lua).map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))?,
+            Param::Vec4(v) => lua_glam::create_vec4(v, lua).map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))?,
+            Param::Quat(q) => lua_glam::create_quat(q, lua).map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))?,
+            Param::Mat4(m) => lua_glam::create_mat4(m, lua).map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))?,
         })
     }
 
 }
 
 impl Params {
-    pub fn to_lua_args(self, lua: &Lua, data: &Arc<RwLock<EngineDataState>>) -> Result<MultiValue> {
+    pub fn to_lua_args(self, lua: &Lua, data: &Arc<RwLock<EngineDataState>>, api: &Table) -> Result<MultiValue> {
         if self.is_empty() {
             return Ok(MultiValue::new())
         }
@@ -170,11 +167,11 @@ impl Params {
                     Err(anyhow!("{st}"))
                 }
                 Param::Void => unreachable!("Void shouldn't ever be added as an arg"),
-                Param::Vec2(v) => todo!(),
-                Param::Vec3(v) => todo!(),
-                Param::Vec4(v) => todo!(),
-                Param::Quat(q) => todo!(),
-                Param::Mat4(m) => todo!(),
+                Param::Vec2(v) => lua_glam::create_vec2(v, lua).map_err(|e| anyhow!("{e}")),
+                Param::Vec3(v) => lua_glam::create_vec3(v, lua).map_err(|e| anyhow!("{e}")),
+                Param::Vec4(v) => lua_glam::create_vec4(v, lua).map_err(|e| anyhow!("{e}")),
+                Param::Quat(q) => lua_glam::create_quat(q, lua).map_err(|e| anyhow!("{e}")),
+                Param::Mat4(m) => lua_glam::create_mat4(m, lua).map_err(|e| anyhow!("{e}")),
             }
         ).collect::<Result<Vec<Value>>>()?;
 
@@ -186,7 +183,7 @@ pub struct LuaInterpreter<Ext: ExternalFunctions> {
     lua_fns: FxHashMap<String, ScriptFnMetadata>,
     func_cache: KeyVec<ScriptFnKey, (String, Function)>,
     data: Arc<RwLock<EngineDataState>>,
-    engine: Option<(Lua, Table)>,
+    engine: Option<(Lua, Table, Table)>,
     fast_calls: FastCallLua,
     pub api_versions: FxHashMap<String, Semver>,
     _ext: PhantomData<Ext>
@@ -218,6 +215,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
         let pts = metadata.param_types.clone();
         let data = Arc::clone(&self.data);
 
+
         let func = lua.create_function(move |lua, args: LuaVariadic<Value>| -> mlua::Result<Value> {
             lua_bind_env::<Ext>(
                 &data, lua, &cap, &args, pts.as_slice(), &callback
@@ -229,9 +227,9 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
         Ok(())
     }
 
-    fn create_class_table_if_missing(api: &Table, cname: &str, engine: &Lua) -> Result<()> {
+    fn create_class_table_if_missing(api: &Table, cname: &str, lua: &Lua) -> Result<()> {
         if api.raw_get::<Table>(cname).is_err() {
-            let cls_table = engine.create_table().map_err(|e| anyhow!("Failed to create table: {e}"))?;
+            let cls_table = lua.create_table().map_err(|e| anyhow!("Failed to create table: {e}"))?;
             cls_table.raw_set("__index", cls_table.clone()).map_err(|e| anyhow!("Failed to set table as self's __index member: {e}"))?;
             api.raw_set(
                 cname,
@@ -272,60 +270,62 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
         Ok(())
     }
 
-    fn bind_lua(&self, api: &Table, engine: &Lua) -> Result<()> {
+    fn bind_lua(&self, api: &Table, lua: &Lua) -> Result<()> {
         for (name, metadata) in self.lua_fns.iter() {
             if name.contains(".") {
                 let parts: Vec<&str> = name.splitn(2, ".").collect();
                 let cname = parts[0].to_case(Case::Pascal);
                 let fname = parts[1].to_case(Case::Snake);
 
-                Self::create_class_table_if_missing(api, cname.as_str(), engine)?;
+                Self::create_class_table_if_missing(api, cname.as_str(), lua)?;
 
                 let Ok(table) = api.raw_get::<Table>(cname.as_str()) else { return Err(anyhow!("table['{cname}'] is not a table")) };
-                self.generate_function(engine, &table, fname.as_str(), metadata)?;
+                self.generate_function(lua, &table, fname.as_str(), metadata)?;
             } else if name.contains(":") {
                 let parts: Vec<&str> = name.splitn(2, ":").collect();
                 let cname = parts[0].to_case(Case::Pascal);
                 let fname = parts[1].to_case(Case::Snake);
 
-                Self::create_class_table_if_missing(api, cname.as_str(), engine)?;
+                Self::create_class_table_if_missing(api, cname.as_str(), lua)?;
 
                 let Ok(table) = api.raw_get::<Table>(cname.as_str()) else { return Err(anyhow!("table['{cname}'] is not a table")) };
 
-                Self::generate_new_method(engine, &table)?;
+                Self::generate_new_method(lua, &table)?;
 
-                self.generate_function(engine, &table, fname.as_str(), metadata)?;
+                self.generate_function(lua, &table, fname.as_str(), metadata)?;
             } else {
                 let name = name.to_case(Case::Snake);
-                self.generate_function(engine, api, name.as_str(), metadata)?;
+                self.generate_function(lua, api, name.as_str(), metadata)?;
             };
         }
+        
+        lua_glam::create_class_tables(lua, api)?;
 
         Ok(())
     }
 
     pub fn load_script(&mut self, path: &Path, data: &Arc<RwLock<EngineDataState>>) -> Result<()> {
 
-        let lua = fs::read_to_string(path)?;
+        let lua_src = fs::read_to_string(path)?;
 
-        let engine = Lua::new();
-        let api = engine.create_table().map_err(|e| anyhow!("Failed to create lua table: {e}"))?;
+        let lua = Lua::new();
+        let api = lua.create_table().map_err(|e| anyhow!("Failed to create lua table: {e}"))?;
 
-        self.bind_lua(&api, &engine)?;
+        self.bind_lua(&api, &lua)?;
 
-        let env = engine.create_table().map_err(|e| anyhow!("Failed to create lua table: {e}"))?;
+        let env = lua.create_table().map_err(|e| anyhow!("Failed to create lua table: {e}"))?;
 
-        env.set("turing_api", api).map_err(|e| anyhow!("Failed to set turing_api table: {e}"))?;
+        env.set("turing_api", api.clone()).map_err(|e| anyhow!("Failed to set turing_api table: {e}"))?;
 
         env.set(
             "math",
-            engine.globals()
+            lua.globals()
                 .get::<Table>("math").map_err(|e| anyhow!("Couldn't get math module: {e}"))?
         ).map_err(|e| anyhow!("Failed to add math module to environment: {e}"))?;
 
 
         let env2 = env.clone();
-        let require = engine.create_function(move |_, name: String| -> mlua::Result<Value> {
+        let require = lua.create_function(move |_, name: String| -> mlua::Result<Value> {
             if name == "turing_api" {
                 env2.get::<Value>("turing_api")
             } else {
@@ -336,7 +336,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
         env.raw_set("require", require).map_err(|e| anyhow!("Failed to add 'require' to env: {e}"))?;
 
 
-        let module: Table = engine.load(lua)
+        let module: Table = lua.load(lua_src)
             .set_environment(env)
             .eval().map_err(|e| anyhow!("Failed to evaluate module: {e}"))?;
         
@@ -364,7 +364,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
             }
         }
         
-        self.engine = Some((engine, module));
+        self.engine = Some((lua, module, api));
 
         Ok(())
     }
@@ -376,7 +376,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
         ret_type: DataType,
         data: &Arc<RwLock<EngineDataState>>
     ) -> Param {
-        let Some((lua, module)) = &mut self.engine else {
+        let Some((lua, module, api)) = &mut self.engine else {
             return Param::Error("No script is loaded".to_string())
         };
         
@@ -391,7 +391,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
             return Param::Error(format!("Failed to find function '{name}': {e}"));
         }
         let func = func.unwrap();
-        let args = params.to_lua_args(lua, data);
+        let args = params.to_lua_args(lua, data, api);
         if let Err(e) = args {
             return Param::Error(format!("{e}"))
         }
@@ -451,7 +451,7 @@ fn lua_bind_env<Ext: ExternalFunctions>(
     cap: &str,
     ps: &LuaVariadic<Value>,
     p: &[DataType],
-    func: &ScriptCallback
+    func: &ScriptCallback,
 ) -> mlua::Result<Value> {
 
     if !data.read().active_capabilities.contains(cap) {
