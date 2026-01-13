@@ -236,6 +236,24 @@ unsafe extern "C" fn turing_script_fast_call_fixed_update(turing: *mut TuringIns
     }
 }
 
+/// Dumps the currently loaded script definitions to the specified output directory.
+/// # Safety
+/// `turing` must be a valid pointer to a `Turing`.
+/// `out_dir` must be a valid pointer to a UTF-8 C-String.
+/// 
+/// The caller is responsible for freeing the returned error string if not null
+#[unsafe(no_mangle)]
+unsafe extern "C" fn turing_script_dump_sec(turing: *mut TuringInstance, out_dir: *const c_char) -> *const c_char {
+    let turing = unsafe { &mut *turing };
+    let out = unsafe { CStr::from_ptr(out_dir).to_string_lossy().into_owned() };
+    let out = std::path::Path::new(&out);
+
+    match turing.generate_specs(out) {
+        Ok(_) => ptr::null(),
+        Err(e) => CString::new(format!("{}", e)).unwrap().into_raw(),
+    }
+}
+
 #[unsafe(no_mangle)]
 /// # Safety
 /// `wasm_fns_ptr` must be a valid pointer to a `HashMap<String, ScriptFnMetadata>`.
