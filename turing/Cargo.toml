@@ -7,7 +7,7 @@ edition = "2024"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [features]
-default = ["wasm", "lua"]
+default = ["wasm", "lua", "global_ffi"]
 wasm = ["dep:wasmtime", "dep:wasmtime-wasi"]
 lua = ["dep:mlua"]
 # Enables registration of global-based FFI functions for all engines
