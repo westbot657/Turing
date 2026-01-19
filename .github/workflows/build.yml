@@ -27,6 +27,9 @@ jobs:
 
             - name: Show Rust version
               run: rustc --version
+              
+            - name: Install wasm32-wasip1 target
+              run: rustup target add wasm32-wasip1
 
             - name: Run xtask tests
               run: cargo x t
