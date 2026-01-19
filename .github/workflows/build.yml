@@ -11,23 +11,8 @@ on:
 
 jobs:
     build:
-        name: Build and test (${{ matrix.os_name }} - ${{ matrix.arch }})
-        runs-on: ${{ matrix.os }}
-        strategy:
-            matrix:
-                include:
-                    - os: ubuntu-latest
-                      os_name: linux
-                      arch: x86_64
-                      target: x86_64-unknown-linux-gnu
-                      artifact: libturing.so
-                    - os: windows-latest
-                      os_name: windows
-                      arch: x86_64
-                      target: x86_64-pc-windows-msvc
-                      artifact: turing.dll
-
-                
+        name: Test and build (Windows)
+        runs-on: windows-latest
 
         steps:
             - name: Checkout
@@ -43,21 +28,17 @@ jobs:
             - name: Show Rust version
               run: rustc --version
 
-            - name: Run tests
-              run: cargo test --all --verbose
+            - name: Run xtask tests
+              run: cargo x t
 
-            - name: Build release
-              run: cargo build --release --verbose
+            - name: Run xtask Windows release build
+              run: cargo x w
 
-
-
-            - name: Upload artifacts
+            - name: Upload artifact
               uses: actions/upload-artifact@v4
               with:
-                  name: turing-${{ matrix.os_name }}-${{ matrix.arch }}
-                  path: |
-                    target/release/${{ matrix.artifact }}
-
+                  name: turing-windows
+                  path: dist/*
     publish:
         name: Publish release
         needs: build
@@ -65,21 +46,13 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
 
         steps:
-            - name: Download Linux build artifact
+            - name: Download Windows artifact
               uses: actions/download-artifact@v4
               with:
-                  name: turing-linux-x86_64
-                  path: downloaded/linux-x86_64
-
-            - name: Download Windows build artifact
-              uses: actions/download-artifact@v4
-              with:
-                  name: turing-windows-x86_64
-                  path: downloaded/windows-x86_64
+                  name: turing-windows
+                  path: dist
 
             - name: Create GitHub Release and upload binaries
               uses: softprops/action-gh-release@v1
               with:
-                  files: |
-                    downloaded/linux/*
-                    downloaded/windows-x86_64/*
+                  files: dist/*
