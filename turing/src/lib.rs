@@ -3,7 +3,7 @@ extern crate core;
 use std::collections::{HashMap, VecDeque};
 use std::ffi::{c_char, c_void};
 use std::marker::PhantomData;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use crate::engine::Engine;
 use crate::engine::types::ScriptFnMetadata;
@@ -266,4 +266,41 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
     
 
 
+}
+
+/// Panic hook that logs panic information using the provided external functions.
+pub fn panic_hook<Ext>(file_out: Option<PathBuf>, info: &std::panic::PanicHookInfo)
+where
+    Ext: ExternalFunctions + Send + Sync + 'static,
+{
+    let msg = if let Some(s) = info.payload().downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = info.payload().downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "Unknown panic payload".to_string()
+    };
+
+    let location = if let Some(location) = info.location() {
+        format!("file '{}' at line {}", location.file(), location.line())
+    } else {
+        "unknown location".to_string()
+    };
+
+    let full_msg = format!("Panic occurred at {}: {}", location, msg);
+
+    if let Some(file_path) = file_out
+        && let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .open(file_path)
+    {
+        use std::io::Write;
+        let _ = writeln!(file, "{}", full_msg);
+        let _ = file.flush();
+    }
+    eprintln!("{}", full_msg);
+
+    // Log as critical error
+    Ext::log_critical(full_msg);
 }

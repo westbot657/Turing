@@ -2,12 +2,13 @@
 
 use core::slice;
 use std::ffi::{c_char, c_void, CStr, CString};
+use std::path::PathBuf;
 use std::ptr;
 use anyhow::{anyhow, Result};
 use rustc_hash::FxHashMap;
 use crate::interop::params::{DataType, FfiParam, FreeableDataType, Param, Params};
 use crate::interop::types::Semver;
-use crate::Turing;
+use crate::{Turing, panic_hook};
 use crate::engine::types::{ScriptCallback, ScriptFnMetadata};
 use crate::global_ffi::wrappers::*;
 
@@ -29,6 +30,26 @@ impl VerTableImpl for VersionTable {
     fn get_ver(&self, key: &str) -> Option<&Semver> {
         self.iter().find_map(|(k, v)| if k == key { Some(v) } else { None })
     }
+}
+
+/// Installs a panic hook that will log panic information to stderr and optionally to a specified file.
+/// Will also log via the CsFns logging functions.
+/// # Safety
+/// `crash_dmp_out` must be either null or a valid pointer to a UTF-8 C-String.
+/// If non-null, the panic hook will attempt to write panic information to the specified file path.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn turing_install_panic_hook(crash_dmp_out: *const c_char) {
+    let file_out = if crash_dmp_out.is_null() {
+        None
+    } else {
+        Some(unsafe { CStr::from_ptr(crash_dmp_out).to_string_lossy().into_owned() })
+    };
+
+    let file_path = file_out.map(PathBuf::from);
+
+    std::panic::set_hook(Box::new(move |info| {
+        panic_hook::<CsFns>(file_path.clone(), info);
+    }));
 }
 
 
