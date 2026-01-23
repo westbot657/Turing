@@ -113,13 +113,27 @@ unsafe extern "C" fn turing_delete_fn_map(map: *mut ScriptFnMap) {
 
 #[unsafe(no_mangle)]
 /// # Safety
-/// `capability` must be a valid C string pointer of valid `UTF-8`.
+/// `capability` must be a valid C string pointer of valid `UTF-8` or null.
 /// `callback` must be a valid pointer to a function: `extern "C" fn(FfiParamsArray) -> FfiParam`.
 /// `signature` must be a valid pointer to a string.
 /// `doc_comment` must be either null or a valid pointer to a string. When null, the function is considered to not have a doc comment.
-unsafe extern "C" fn turing_create_script_data(capability: *const c_char, callback: ScriptCallback, signature: *const c_char, doc_comment: *const c_char) -> *mut ScriptFnMetadata {
-    let cap = unsafe { CStr::from_ptr(capability).to_string_lossy() };
-    let signature = unsafe { CStr::from_ptr(signature).to_string_lossy() };
+unsafe extern "C" fn turing_create_script_data(
+    capability: *const c_char,
+    callback: ScriptCallback,
+    signature: *const c_char,
+    doc_comment: *const c_char,
+) -> *mut ScriptFnMetadata {
+    let cap = unsafe {
+        capability
+            .as_ref()
+            .map(|s| CStr::from_ptr(s))
+            .map(|s| s.to_string_lossy())
+            .map(|s| s.to_string())
+    };
+
+    let signature = unsafe {
+        CStr::from_ptr(signature).to_string_lossy().into_owned()
+    };
     let doc = if doc_comment.is_null() {
         None
     } else {

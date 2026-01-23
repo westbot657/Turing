@@ -6,7 +6,7 @@ pub type ScriptCallback = extern "C" fn(FfiParamArray) -> FfiParam;
 
 #[derive(Clone)]
 pub struct ScriptFnMetadata {
-    pub capability: String,
+    pub capability: Option<String>,
     pub callback: ScriptCallback,
     pub param_types: Vec<DataType>,
     pub return_type: Vec<DataType>,
@@ -15,13 +15,13 @@ pub struct ScriptFnMetadata {
 }
 
 impl ScriptFnMetadata {
-    pub fn new(capability: impl ToString, callback: ScriptCallback, signature: impl ToString, doc_comment: Option<String>) -> Self {
+    pub fn new(capability: Option<String>, callback: ScriptCallback, signature: String, doc_comment: Option<String>) -> Self {
         Self {
-            capability: capability.to_string(),
+            capability,
             callback,
             param_types: Vec::new(),
             return_type: Vec::new(),
-            signature: signature.to_string(),
+            signature,
             doc_comment,
         }
     }
