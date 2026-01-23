@@ -1,9 +1,8 @@
-use std::ffi::{c_char, c_void, CString};
-use anyhow::Result;
 use crate::engine::types::ScriptFnMetadata;
-use crate::{ExternalFunctions, Turing};
 use crate::interop::params::{DataType, FfiParam, FfiParamArray, FreeableDataType, Param, Params};
-
+use crate::{ExternalFunctions, Turing};
+use anyhow::Result;
+use std::ffi::{CString, c_char, c_void};
 
 struct DirectExt {}
 impl ExternalFunctions for DirectExt {
@@ -31,10 +30,9 @@ impl ExternalFunctions for DirectExt {
         let _ = unsafe { CString::from_raw(ptr as *mut c_char) };
     }
 
-    fn free_of_type(ptr: *mut c_void, typ: FreeableDataType)  {
+    fn free_of_type(ptr: *mut c_void, typ: FreeableDataType) {
         unsafe { typ.free_ptr(ptr) }
     }
-    
 }
 
 extern "C" fn log_info_wasm(params: FfiParamArray) -> FfiParam {
@@ -50,8 +48,12 @@ extern "C" fn log_info_wasm(params: FfiParamArray) -> FfiParam {
         Param::String(s) => {
             println!("[wasm/info]: {}", s);
             Param::Void.to_ext_param()
-        },
-        _ => Param::Error(format!("Invalid argument type, expected String, got {:?}", msg)).to_ext_param()
+        }
+        _ => Param::Error(format!(
+            "Invalid argument type, expected String, got {:?}",
+            msg
+        ))
+        .to_ext_param(),
     }
 }
 
@@ -62,11 +64,21 @@ extern "C" fn fetch_string(_params: FfiParamArray) -> FfiParam {
 fn common_setup_direct(source: &str) -> Result<Turing<DirectExt>> {
     let mut turing = Turing::new();
 
-    let mut metadata = ScriptFnMetadata::new("test", log_info_wasm, "::info(msg: &str) -> void : _log_info".to_string(), None);
+    let mut metadata = ScriptFnMetadata::new(
+        Some("test".to_owned()),
+        log_info_wasm,
+        "::info(msg: &str) -> void : _log_info".to_owned(),
+        None,
+    );
     metadata.add_param_type(DataType::RustString)?;
     turing.add_function("log.info", metadata)?;
 
-    let mut metadata = ScriptFnMetadata::new("test", fetch_string, "fetch_string() -> String : _fetch_string".to_string(), None);
+    let mut metadata = ScriptFnMetadata::new(
+        Some("test".to_owned()),
+        fetch_string,
+        "fetch_string() -> String : _fetch_string".to_string(),
+        None,
+    );
     metadata.add_return_type(DataType::ExtString)?;
     turing.add_function("fetch_string", metadata)?;
 
@@ -79,7 +91,10 @@ fn common_setup_direct(source: &str) -> Result<Turing<DirectExt>> {
 const WASM_SCRIPT: &str = "../tests/wasm/wasm_tests.wasm";
 const LUA_SCRIPT: &str = "../tests/wasm/lua_test.lua";
 
-fn setup_test_script<Ext: ExternalFunctions + Send + Sync + 'static>(turing: &mut Turing<Ext>, source: &str) -> Result<()> {
+fn setup_test_script<Ext: ExternalFunctions + Send + Sync + 'static>(
+    turing: &mut Turing<Ext>,
+    source: &str,
+) -> Result<()> {
     let capabilities = vec!["test"];
 
     turing.load_script(source, &capabilities)?;
@@ -103,8 +118,7 @@ fn test_math(mut turing: Turing<DirectExt>) -> Result<()> {
     params.push(Param::F32(3.5));
     params.push(Param::F32(5.0));
 
-    let res = turing
-        .call_fn_by_name("math_ops_test", params, DataType::F32);
+    let res = turing.call_fn_by_name("math_ops_test", params, DataType::F32);
 
     println!("[test/ext]: code multiplied 3.5 by 5.0 for {:#?}", res);
     assert!((res.to_result::<f32>()? - 17.5).abs() < f32::EPSILON);
@@ -156,4 +170,3 @@ pub fn test_lua_string_fetch() -> Result<()> {
     println!("Received message from lua: '{res}'");
     Ok(())
 }
-

@@ -52,7 +52,7 @@ fn generate_spec(api: &str, ver: Semver, metadata: &FxHashMap<String, ScriptFnMe
     let mut classes = HashMap::new();
 
     for (name, data) in metadata {
-        if data.capability != api { continue };
+        if let Some(cap) = &data.capability && cap != api { continue };
         if name.contains(".") {
             let class_name = name.splitn(2, "::").collect::<Vec<&str>>()[0];
             if !classes.contains_key(class_name) {
