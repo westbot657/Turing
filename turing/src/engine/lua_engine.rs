@@ -1,3 +1,4 @@
+use std::ffi::CString;
 use std::fs;
 use std::marker::PhantomData;
 use std::path::Path;
@@ -31,7 +32,7 @@ impl DataType {
             (DataType::F32, Value::Number(f)) => Ok(Param::F32(*f as f32)),
             (DataType::F64, Value::Number(f)) => Ok(Param::F64(*f)),
             (DataType::Bool, Value::Boolean(b)) => Ok(Param::Bool(*b)),
-            (DataType::RustString | DataType::ExtString, Value::String(s)) => Ok(Param::String(s.to_string_lossy())),
+            (DataType::RustString | DataType::ExtString, Value::String(s)) => Ok(Param::String(CString::new(s.to_string_lossy().to_string()).unwrap())),
             (DataType::Object, Value::Table(t)) => {
                 let key = t.raw_get::<Value>("opaqu")?;
                 let key = match key {
@@ -71,7 +72,7 @@ impl Param {
             DataType::F64 => Param::F64(val.as_number().unwrap()),
             DataType::Bool => Param::Bool(val.as_boolean().unwrap()),
             // allocated externally, we copy the string
-            DataType::RustString | DataType::ExtString => Param::String(val.as_string().unwrap().to_string_lossy()),
+            DataType::RustString | DataType::ExtString => Param::String(CString::new(val.as_string().unwrap().to_string_lossy()).unwrap()),
             DataType::Object => {
                 let table = val.as_table().unwrap();
                 let op = table.get("opaqu").unwrap();
@@ -113,7 +114,7 @@ impl Param {
             Param::F32(f) => Value::Number(f as f64),
             Param::F64(f) => Value::Number(f),
             Param::Bool(b) => Value::Boolean(b),
-            Param::String(s) => Value::String(lua.create_string(&s)?),
+            Param::String(s) => Value::String(lua.create_string(&s.as_bytes())?),
             Param::Object(pointer) => {
                 let pointer = ExtPointer::from(pointer);
                 let opaque = s.get_opaque_pointer(pointer);
@@ -152,7 +153,7 @@ impl Params {
                 Param::F32(f) => Ok(Value::Number(f as f64)),
                 Param::F64(f) => Ok(Value::Number(f)),
                 Param::Bool(b) => Ok(Value::Boolean(b)),
-                Param::String(s) => Ok(Value::String(lua.create_string(&s).unwrap())),
+                Param::String(s) => Ok(Value::String(lua.create_string(&s.as_bytes()).unwrap())),
                 Param::Object(rp) => {
                     let pointer = rp.into();
                     Ok(if let Some(op) = s.pointer_backlink.get(&pointer) {

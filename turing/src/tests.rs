@@ -2,7 +2,7 @@ use crate::engine::types::ScriptFnMetadata;
 use crate::interop::params::{DataType, FfiParam, FfiParamArray, FreeableDataType, Param, Params};
 use crate::{ExternalFunctions, Turing};
 use anyhow::Result;
-use std::ffi::{CString, c_char, c_void};
+use std::ffi::{CStr, CString, c_char, c_void};
 
 struct DirectExt {}
 impl ExternalFunctions for DirectExt {
@@ -46,7 +46,7 @@ extern "C" fn log_info_wasm(params: FfiParamArray) -> FfiParam {
 
     match msg {
         Param::String(s) => {
-            println!("[wasm/info]: {}", s);
+            println!("[wasm/info]: {}", s.to_string_lossy());
             Param::Void.to_ext_param()
         }
         _ => Param::Error(format!(
@@ -58,7 +58,7 @@ extern "C" fn log_info_wasm(params: FfiParamArray) -> FfiParam {
 }
 
 extern "C" fn fetch_string(_params: FfiParamArray) -> FfiParam {
-    Param::String("this is a host provided string!".to_string()).to_ext_param()
+    Param::String(CString::new("this is a host provided string!").unwrap()).to_ext_param()
 }
 
 fn common_setup_direct(source: &str) -> Result<Turing<DirectExt>> {
@@ -161,7 +161,7 @@ pub fn test_lua_string_fetch() -> Result<()> {
     let mut turing = common_setup_direct(LUA_SCRIPT)?;
 
     let mut s = Params::of_size(1);
-    s.push(Param::String("Message from host".to_string()));
+    s.push(Param::String(CString::new("Message from host").unwrap()));
 
     let res = turing
         .call_fn_by_name("string_test", s, DataType::ExtString)

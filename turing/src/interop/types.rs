@@ -1,5 +1,6 @@
+use std::borrow::Borrow;
 use std::cmp::Ordering;
-use std::ffi::{c_char, c_void, CStr};
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::fmt::{Display, Formatter};
 use std::hash::Hash;
 use std::marker::PhantomData;
@@ -63,6 +64,8 @@ impl Display for Semver {
 
 
 /// A string allocated externally, to be managed by the external environment.
+/// 
+/// This takes ownership of the string pointer and will free it when dropped.
 pub struct ExtString<Ext: ExternalFunctions> {
     pub ptr: *const c_char,
     _ext: PhantomData<Ext>

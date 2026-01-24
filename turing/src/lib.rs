@@ -1,7 +1,7 @@
 extern crate core;
 
 use std::collections::{HashMap, VecDeque};
-use std::ffi::{c_char, c_void};
+use std::ffi::{CString, c_char, c_void};
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -69,7 +69,7 @@ pub struct EngineDataState {
     /// maps real pointers back to their opaque pointer ids
     pub pointer_backlink: FxHashMap<ExtPointer, OpaquePointerKey>,
     /// queue of strings for wasm to fetch (needed due to reentrancy limitations)
-    pub str_cache: VecDeque<String>,
+    pub str_cache: VecDeque<CString>,
     /// which mods are currently active
     pub active_capabilities: FxHashSet<String>,
     /// queue for algebraic type's data

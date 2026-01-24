@@ -47,7 +47,7 @@ impl DataType {
                     return Err(anyhow!("wasm does not export memory"))
                 };
                 let st = get_wasm_string(ptr, memory.data(&caller));
-                Ok(Param::String(st))
+                Ok(Param::String(st.to_owned()))
             }
             (DataType::Object, Val::I64(pointer_id)) => {
                 let pointer_key =
@@ -125,7 +125,7 @@ impl Param {
 
                 let ptr = val.unwrap_i32() as u32;
                 let st = get_wasm_string(ptr, memory.data(caller));
-                Param::String(st)
+                Param::String(st.to_owned())
             }
             DataType::Object => {
                 let op = val.unwrap_i64() as u64;
@@ -141,7 +141,7 @@ impl Param {
             DataType::RustError | DataType::ExtError => {
                 let ptr = val.unwrap_i32() as u32;
                 let st = get_wasm_string(ptr, memory.data(caller));
-                Param::Error(st)
+                Param::Error(st.to_string_lossy().to_string())
             }
             DataType::Void => Param::Void,
 
@@ -180,7 +180,7 @@ impl Param {
             Param::F64(f) => Val::F64(f.to_bits()),
             Param::Bool(b) => Val::I32(if b { 1 } else { 0 }),
             Param::String(st) => {
-                let l = st.len() + 1;
+                let l = st.as_bytes().len() + 1;
                 s.str_cache.push_back(st);
                 Val::I32(l as i32)
             }
@@ -239,7 +239,7 @@ impl Params {
                     Param::F64(f) => Ok(Val::F64(f.to_bits())),
                     Param::Bool(b) => Ok(Val::I32(if b { 1 } else { 0 })),
                     Param::String(st) => {
-                        let l = st.len() + 1;
+                        let l = st.as_bytes().len() + 1;
                         s.str_cache.push_back(st);
                         Ok(Val::I32(l as i32))
                     }
@@ -481,23 +481,19 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> StdoutStream for WriterInit
 }
 
 /// gets a string out of wasm memory into rust memory.
-pub fn get_wasm_string(message: u32, data: &[u8]) -> String {
-    let c = CStr::from_bytes_until_nul(&data[message as usize..]).expect("Not a valid CStr");
-    match c.to_str() {
-        Ok(s) => s.to_owned(),
-        Err(_) => c.to_string_lossy().into_owned(),
-    }
+pub fn get_wasm_string(message: u32, data: &[u8]) -> &CStr {
+    CStr::from_bytes_until_nul(&data[message as usize..]).expect("Not a valid CStr")
+
 }
 
 /// writes a string from rust memory to wasm memory.
 pub fn write_wasm_string(
     pointer: u32,
-    string: &str,
+    string: &CStr,
     memory: &Memory,
     caller: Caller<'_, WasiP1Ctx>,
 ) -> Result<(), MemoryAccessError> {
-    let c = CString::new(string).unwrap();
-    let bytes = c.into_bytes_with_nul();
+    let bytes = string.to_bytes_with_nul();
     memory.write(caller, pointer as usize, &bytes)
 }
 
@@ -811,7 +807,7 @@ pub fn wasm_host_strcpy(
     let size = ps[1].i32().unwrap();
 
     if let Some(next_str) = data.write().str_cache.pop_front()
-        && next_str.len() + 1 == size as usize
+        && next_str.as_bytes().len() + 1 == size as usize
     {
         if let Some(memory) = caller.get_export("memory").and_then(|m| m.into_memory()) {
             write_wasm_string(ptr as u32, &next_str, &memory, caller)?;

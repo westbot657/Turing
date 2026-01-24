@@ -38,7 +38,7 @@ extern "C" fn log_info_wasm(params: FfiParamArray) -> FfiParam {
 
 // called from wasm
 extern "C" fn fetch_string(_params: FfiParamArray) -> FfiParam {
-    Param::String("this is a host provided string!".to_string()).to_ext_param()
+    Param::String(CString::new("this is a host provided string!").unwrap()).to_ext_param()
 }
 
 fn setup_turing_with_callbacks() -> Turing<DirectExt> {
