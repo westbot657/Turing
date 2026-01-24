@@ -158,3 +158,8 @@ pub struct FfiParam {
 ```
 
 
+### Compiling for Windows from Linux
+Download the `mingw-64` package and compile using:
+```
+cargo x w
+```

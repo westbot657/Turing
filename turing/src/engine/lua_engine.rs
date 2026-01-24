@@ -381,9 +381,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
         };
         
         // we assume the function exists because we cached it earlier
-        let Some((name, _)) = &self.func_cache.get(&cache_key) else {
-            return Param::Error(format!("Function with key '{cache_key:?}' not found"))
-        };
+        let (name, _)  = &self.func_cache.get(&cache_key);
         let name = name.as_str();
 
         let func = module.get::<Value>(name);

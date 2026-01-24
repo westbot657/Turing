@@ -1,9 +1,9 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::ffi::{c_void, CString};
 use std::hint::black_box;
-use turing::engine::types::ScriptFnMetadata;
-use turing::interop::params::{DataType, FreeableDataType, Param, Params};
-use turing::{ExternalFunctions, Turing};
+use turing_rs::engine::types::ScriptFnMetadata;
+use turing_rs::interop::params::{DataType, FreeableDataType, Param, Params};
+use turing_rs::{ExternalFunctions, Turing};
 
 struct DirectExt {}
 impl ExternalFunctions for DirectExt {
@@ -28,14 +28,14 @@ impl ExternalFunctions for DirectExt {
 }
 
 extern "C" fn log_info_wasm(
-    _params: turing::interop::params::FfiParamArray,
-) -> turing::interop::params::FfiParam {
+    _params: turing_rs::interop::params::FfiParamArray,
+) -> turing_rs::interop::params::FfiParam {
     Param::Void.to_ext_param()
 }
 
 extern "C" fn fetch_string(
-    _params: turing::interop::params::FfiParamArray,
-) -> turing::interop::params::FfiParam {
+    _params: turing_rs::interop::params::FfiParamArray,
+) -> turing_rs::interop::params::FfiParam {
     Param::String("this is a host provided string!".to_string()).to_ext_param()
 }
 

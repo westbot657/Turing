@@ -82,8 +82,9 @@ impl DataType {
 
             DataType::F32 => Ok(ValType::F32),
             DataType::F64 => Ok(ValType::F64),
+            DataType::Void => Err(anyhow!("Void is only allowed as a singular return type for WASM.")), // voids are represented as i32 0
 
-            _ => Err(anyhow!("Invalid wasm value type: {}", self))
+            _ => Err(anyhow!("Invalid wasm value type: {}", self)),
         }
     }
 
@@ -591,8 +592,13 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             name.insert(0, '_');
 
             let p_types = metadata.param_types.iter().map(|d| d.to_val_type()).collect::<Result<Vec<ValType>>>()?;
-            let r_types = metadata.return_type.iter().map(|d| d.to_val_type()).collect::<Result<Vec<ValType>>>()?;
 
+            // if the only return type is void, we treat it as no return types
+            let r_types = if metadata.return_type.len() == 1 && metadata.return_type.first().cloned() == Some(DataType::Void) {
+                Vec::new()
+            } else {
+                metadata.return_type.iter().map(|d| d.to_val_type()).collect::<Result<Vec<ValType>>>()?
+            };
             let ft = FuncType::new(engine, p_types, r_types);
             let cap = metadata.capability.clone();
             let callback = metadata.callback;
@@ -689,18 +695,9 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         }
 
         // Try cache first to avoid repeated name lookup and Val boxing/unboxing.
-        let Some((_, f)) = self.func_cache.get(&cache_key)
         // This shouldn't be necessary as all exported functions are indexed on load
+        let (_, f) = self.func_cache.get(&cache_key);
 
-        // .or_else(|| {
-        //     let name = d.fn_name_cache.get(cache_key)?;
-        //     let found = instance.get_func(&mut self.store, name)?;
-        //     self.func_cache.insert(cache_key, found);
-        //     Some(found)
-        // }) 
-        else {
-            return Param::Error("Function does not exist".to_string());
-        };
 
         let args = params.to_wasm_args(data);
         if let Err(e) = args {

@@ -7,11 +7,6 @@ members = [
 resolver = "3"
 
 
-[turing.profile.release]
-strip = true
-lto = true
-opt-level = 3
-
 [tests.profile.release]
 opt-level = "z"
 # 0 = no optimization
