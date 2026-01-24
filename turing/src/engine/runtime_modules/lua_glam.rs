@@ -698,10 +698,10 @@ pub fn unpack_vec2(v: Value) -> Param {
         Value::UserData(d) => {
             match d.borrow::<LuaVec2>() {
                 Ok(v) => Param::Vec2(v.0),
-                Err(e) => Param::Error(format!("Expected LuaVec2 userdata, got different UserData: {e}").into()),
+                Err(e) => Param::Error(format!("Expected LuaVec2 userdata, got different UserData: {e}")),
             }
         }
-        other => Param::Error(format!("Expected Vec2 userdata, got {}", other.type_name()).into()),
+        other => Param::Error(format!("Expected Vec2 userdata, got {}", other.type_name())),
     }
 }
 
@@ -710,10 +710,10 @@ pub fn unpack_vec3(v: Value) -> Param {
         Value::UserData(d) => {
             match d.borrow::<LuaVec3>() {
                 Ok(v) => Param::Vec3(v.0),
-                Err(e) => Param::Error(format!("Expected LuaVec3 userdata, got different UserData: {e}").into()),
+                Err(e) => Param::Error(format!("Expected LuaVec3 userdata, got different UserData: {e}")),
             }
         }
-        other => Param::Error(format!("Expected Vec3 userdata, got {}", other.type_name()).into()),
+        other => Param::Error(format!("Expected Vec3 userdata, got {}", other.type_name())),
     }
 }
 
@@ -722,10 +722,10 @@ pub fn unpack_vec4(v: Value) -> Param {
         Value::UserData(d) => {
             match d.borrow::<LuaVec4>() {
                 Ok(v) => Param::Vec4(v.0),
-                Err(e) => Param::Error(format!("Expected LuaVec4 userdata, got different UserData: {e}").into()),
+                Err(e) => Param::Error(format!("Expected LuaVec4 userdata, got different UserData: {e}")),
             }
         }
-        other => Param::Error(format!("Expected Vec4 userdata, got {}", other.type_name()).into()),
+        other => Param::Error(format!("Expected Vec4 userdata, got {}", other.type_name())),
     }
 }
 
@@ -734,10 +734,10 @@ pub fn unpack_quat(v: Value) -> Param {
         Value::UserData(d) => {
             match d.borrow::<LuaQuat>() {
                 Ok(v) => Param::Quat(v.0),
-                Err(e) => Param::Error(format!("Expected LuaQuat userdata, got different UserData: {e}").into()),
+                Err(e) => Param::Error(format!("Expected LuaQuat userdata, got different UserData: {e}")),
             }
         }
-        other => Param::Error(format!("Expected Quat userdata, got {}", other.type_name()).into()),
+        other => Param::Error(format!("Expected Quat userdata, got {}", other.type_name())),
     }
 }
 
@@ -746,9 +746,9 @@ pub fn unpack_mat4(v: Value) -> Param {
         Value::UserData(d) => {
             match d.borrow::<LuaMat4>() {
                 Ok(v) => Param::Mat4(v.0),
-                Err(e) => Param::Error(format!("Expected LuaMat4 userdata, got different UserData: {e}").into()),
+                Err(e) => Param::Error(format!("Expected LuaMat4 userdata, got different UserData: {e}")),
             }
         }
-        other => Param::Error(format!("Expected Mat4 userdata, got {}", other.type_name()).into()),
+        other => Param::Error(format!("Expected Mat4 userdata, got {}", other.type_name())),
     }
 }

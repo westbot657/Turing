@@ -9,7 +9,6 @@ use glam::{Mat2, Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
 use num_enum::TryFromPrimitive;
 use serde::{Deserialize, Serialize};
 use crate::ExternalFunctions;
-use crate::interop::string::RustString;
 use crate::interop::types::ExtString;
 
 
@@ -165,7 +164,7 @@ pub enum Param {
     Bool(bool),
     String(CString),
     Object(*const c_void),
-    Error(RustString),
+    Error(String),
     Void,
     Vec2(Vec2),
     Vec3(Vec3),
@@ -201,7 +200,7 @@ impl Param {
             // allocated via CString, must be freed via CString::from_raw
             Param::String(x) => FfiParam { type_id: T::STRING, value: RawParam { string: CString::new(x).unwrap().into_raw() } },
             Param::Object(x) => FfiParam { type_id: DataType::Object, value: RawParam { object: x } },
-            Param::Error(x) => FfiParam { type_id: T::ERROR, value: RawParam { error: x.into_cstring().into_raw() } },
+            Param::Error(x) => FfiParam { type_id: T::ERROR, value: RawParam { error: CString::new(x).unwrap().into_raw() } },
             Param::Void => FfiParam { type_id: DataType::Void, value: RawParam { void: () } },
             Param::Vec2(v) => FfiParam { type_id: DataType::Vec2, value: RawParam { vec2: v } },
             Param::Vec3(v) => FfiParam { type_id: DataType::Vec3, value: RawParam { vec3: v } },
@@ -554,10 +553,11 @@ impl FfiParam {
             DataType::Object => Param::Object(unsafe { self.value.object }),
             DataType::RustError => Param::Error(unsafe {
                 CString::from_raw(self.value.error as *mut c_char)
-                    .into()
+                    .to_string_lossy()
+                    .into_owned()
             }),
             DataType::ExtError => {
-                Param::Error(unsafe { ExtString::<Ext>::from(self.value.error).into_string().into() })
+                Param::Error(unsafe { ExtString::<Ext>::from(self.value.error).to_string() })
             }
             DataType::Void => Param::Void,
             DataType::Vec2 => Param::Vec2(unsafe { self.value.vec2 }),
@@ -600,10 +600,11 @@ impl FfiParam {
             DataType::Object => Param::Object(unsafe { self.value.object }),
             DataType::RustError => Param::Error(unsafe {
                 CStr::from_ptr(self.value.error)
-                    .into()
+                    .to_string_lossy()
+                    .into_owned()
             }),
             DataType::ExtError => {
-                Param::Error(unsafe { ExtString::<Ext>::from(self.value.error).into_cstring().into() })
+                Param::Error(unsafe { ExtString::<Ext>::from(self.value.error).to_string() })
             }
             DataType::Void => Param::Void,
             DataType::Vec2 => Param::Vec2(unsafe { self.value.vec2 }),

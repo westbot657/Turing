@@ -37,11 +37,11 @@ impl ExternalFunctions for DirectExt {
 
 extern "C" fn log_info_wasm(params: FfiParamArray) -> FfiParam {
     let Ok(local) = params.as_params::<DirectExt>() else {
-        return Param::Error("Failed to unpack params".into()).to_ext_param();
+        return Param::Error("Failed to unpack params".to_string()).to_ext_param();
     };
 
     let Some(msg) = local.get(0) else {
-        return Param::Error("Missing argument: msg".into()).to_ext_param();
+        return Param::Error("Missing argument: msg".to_string()).to_ext_param();
     };
 
     match msg {
@@ -52,7 +52,7 @@ extern "C" fn log_info_wasm(params: FfiParamArray) -> FfiParam {
         _ => Param::Error(format!(
             "Invalid argument type, expected String, got {:?}",
             msg
-        ).into())
+        ))
         .to_ext_param(),
     }
 }

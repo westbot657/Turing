@@ -200,11 +200,11 @@ unsafe extern "C" fn turing_script_load(turing: *mut TuringInstance, source: *co
 
     let capabilities = match res {
         Ok(ls) => ls,
-        Err(e) => return Param::Error(format!("{}", e).into()).to_rs_param()
+        Err(e) => return Param::Error(format!("{}", e)).to_rs_param()
     };
 
     if let Err(e) = turing.load_script(source, &capabilities) {
-        Param::Error(format!("{}\n{}", e, e.backtrace()).into())
+        Param::Error(format!("{}\n{}", e, e.backtrace()))
     } else {
         Param::Void
     }.to_rs_param()
@@ -377,7 +377,7 @@ unsafe extern "C" fn turing_params_get_param(params: *mut Params, index: u32) ->
     if let Some(p) = params.get(index as usize) {
         p.clone().to_rs_param()
     } else {
-        Param::Error("index out of bounds".into()).to_rs_param()
+        Param::Error("index out of bounds".to_string()).to_rs_param()
     }
 }
 

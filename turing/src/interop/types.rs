@@ -75,14 +75,6 @@ impl<Ext: ExternalFunctions> ExtString<Ext> {
     pub fn new(ptr: *const c_char) -> Self {
         ExtString { ptr, _ext: PhantomData }
     }
-    
-    pub fn into_string(self) -> String {
-        unsafe { CStr::from_ptr(self.ptr).to_string_lossy().into_owned() }
-    }
-
-    pub fn into_cstring(self) -> CString {
-        unsafe { CStr::from_ptr(self.ptr).to_owned() }
-    }
 }
 
 impl<Ext: ExternalFunctions> Drop for ExtString<Ext> {

@@ -141,7 +141,7 @@ impl Param {
             DataType::RustError | DataType::ExtError => {
                 let ptr = val.unwrap_i32() as u32;
                 let st = get_wasm_string(ptr, memory.data(caller));
-                Param::Error(st.into())
+                Param::Error(st.to_string_lossy().to_string())
             }
             DataType::Void => Param::Void,
 
@@ -686,12 +686,12 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         data: &Arc<RwLock<EngineDataState>>,
     ) -> Param {
         let Some(instance) = &mut self.script_instance else {
-            return Param::Error("No script is loaded or reentry was attempted".into());
+            return Param::Error("No script is loaded or reentry was attempted".to_string());
         };
 
         // Fast-path: typed cache (common signatures). Falls back to dynamic call below.
         if let Some(entry) = self.typed_cache.get(&cache_key) {
-            return entry.invoke(&mut self.store, params).unwrap_or_else(|s| Param::Error(s.into()))
+            return entry.invoke(&mut self.store, params).unwrap_or_else(Param::Error)
         }
 
         // Try cache first to avoid repeated name lookup and Val boxing/unboxing.
@@ -701,7 +701,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
 
         let args = params.to_wasm_args(data);
         if let Err(e) = args {
-            return Param::Error(format!("{e}").into())
+            return Param::Error(format!("{e}"))
         }
         let args = args.unwrap();
 
@@ -716,7 +716,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         };
 
         if let Err(e) = f.call(&mut self.store, &args, &mut res) {
-            return Param::Error(e.to_string().into());
+            return Param::Error(e.to_string());
         }
         // Return void quickly
         if res.is_empty() {
@@ -726,7 +726,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
 
         let memory = match &self.memory {
             Some(m) => m,
-            None => return Param::Error("WASM memory not initialized".into()),
+            None => return Param::Error("WASM memory not initialized".to_string()),
         };
 
         // convert Val to Param
