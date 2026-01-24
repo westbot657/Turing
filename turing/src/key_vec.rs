@@ -48,13 +48,13 @@ where
     }
 
     #[inline]
-    pub fn get(&self, key: &K) -> Option<&V> {
-        self.values.get(key.clone().into() as usize)
+    pub fn get(&self, key: &K) -> &V {
+        unsafe { self.values.get_unchecked(key.clone().into() as usize) }
     }
 
     #[inline]
-    pub fn get_mut(&mut self, key: &K) -> Option<&mut V> {
-        self.values.get_mut(key.clone().into() as usize)
+    pub fn get_mut(&mut self, key: &K) -> &mut V {
+        unsafe { self.values.get_unchecked_mut(key.clone().into() as usize) }
     }
 
     /// Clears all values from the KeyVec.

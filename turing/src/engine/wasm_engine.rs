@@ -695,18 +695,9 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         }
 
         // Try cache first to avoid repeated name lookup and Val boxing/unboxing.
-        let Some((_, f)) = self.func_cache.get(&cache_key)
         // This shouldn't be necessary as all exported functions are indexed on load
+        let (_, f) = self.func_cache.get(&cache_key);
 
-        // .or_else(|| {
-        //     let name = d.fn_name_cache.get(cache_key)?;
-        //     let found = instance.get_func(&mut self.store, name)?;
-        //     self.func_cache.insert(cache_key, found);
-        //     Some(found)
-        // }) 
-        else {
-            return Param::Error("Function does not exist".to_string());
-        };
 
         let args = params.to_wasm_args(data);
         if let Err(e) = args {
