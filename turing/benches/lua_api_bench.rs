@@ -36,7 +36,7 @@ extern "C" fn log_info_wasm(
 extern "C" fn fetch_string(
     _params: turing_rs::interop::params::FfiParamArray,
 ) -> turing_rs::interop::params::FfiParam {
-    Param::String(CString::new("this is a host provided string!").unwrap()).to_ext_param()
+    Param::String("this is a host provided string!".to_string()).to_ext_param()
 }
 
 fn setup_turing_for_lua() -> Turing<DirectExt> {
@@ -82,7 +82,7 @@ fn bench_turing_lua_string_roundtrip(c: &mut Criterion) {
     c.bench_function("turing_lua_string_roundtrip", |b| {
         b.iter(|| {
             let mut params = Params::of_size(1);
-            params.push(Param::String(CString::new("Message from host").unwrap()));
+            params.push(Param::String("Message from host".to_string()));
 
             let res = turing.call_fn(string_test, params, DataType::ExtString);
             let _ = black_box(res.to_result::<String>().unwrap());
