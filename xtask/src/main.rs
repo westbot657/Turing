@@ -5,12 +5,18 @@ use serde::Deserialize;
 
 #[derive(Deserialize)]
 struct CargoToml {
-    package: Package
+    package: Package,
+    lib: Lib,
 }
 
 #[derive(Deserialize)]
 struct Package {
     version: String,
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct Lib {
     name: String,
 }
 
@@ -70,14 +76,14 @@ fn build_windows() {
         .expect("Failed to parse Cargo.toml");
 
     let version = cargo.package.version;
-    let lib_name = cargo.package.name;
+    let lib_name = cargo.lib.name;
 
     let built = format!("target/{}/release/{}.dll", target, lib_name);
     let output = Path::new("dist").join(format!("{}-{}.dll", lib_name, version));
 
     fs::create_dir_all("dist").expect("Failed to create dist directory");
     fs::copy(&built, &output)
-        .unwrap_or_else(|e| panic!("Failed to copy DLL: {}", e));
+        .unwrap_or_else(|e| panic!("Failed to copy DLL: {}.dll {}", lib_name, e));
 
     println!("Windows dll generated in dist");
 

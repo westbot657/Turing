@@ -204,7 +204,7 @@ unsafe extern "C" fn turing_script_load(turing: *mut TuringInstance, source: *co
     };
 
     if let Err(e) = turing.load_script(source, &capabilities) {
-        Param::Error(format!("{}", e))
+        Param::Error(format!("{}\n{}", e, e.backtrace()))
     } else {
         Param::Void
     }.to_rs_param()

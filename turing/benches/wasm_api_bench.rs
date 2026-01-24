@@ -1,12 +1,12 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use turing::engine::types::ScriptFnMetadata;
+use turing_rs::engine::types::ScriptFnMetadata;
 use std::env;
 use std::ffi::{c_void, CString};
 use std::fs::File;
 use std::hint::black_box;
 use std::io::Write;
-use turing::interop::params::{DataType, FfiParam, FfiParamArray, FreeableDataType, Param, Params};
-use turing::{ExternalFunctions, Turing};
+use turing_rs::interop::params::{DataType, FfiParam, FfiParamArray, FreeableDataType, Param, Params};
+use turing_rs::{ExternalFunctions, Turing};
 
 struct DirectExt {}
 impl ExternalFunctions for DirectExt {

@@ -5,6 +5,17 @@ edition = "2024"
 
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]
+name = "turing_rs"
+
+[profile.release]
+strip = true
+lto = true
+opt-level = 3
+
+split-debuginfo = "packed"
+debug = "line-tables-only"
+panic = "abort"
+codegen-units = 1
 
 [features]
 default = ["wasm", "lua", "global_ffi"]
@@ -23,7 +34,7 @@ harness = false
 
 
 [dependencies]
-anyhow = "1.0"
+anyhow = {version = "1.0", features = ["backtrace"] }
 serde_json = "1.0.149"
 glam = "0.30.10"
 
