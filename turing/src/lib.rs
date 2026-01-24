@@ -216,12 +216,12 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
     
     pub fn call_fn_by_name(&mut self, name: impl ToString, params: Params, expected_return_type: DataType) -> Param {
         let Some(engine) = &mut self.engine else {
-            return Param::Error("No code engine is active".to_string())
+            return Param::Error("No code engine is active".into())
         };
         let key = engine.get_fn_key(&name.to_string());
         
         let Some(key) = key else {
-            return Param::Error(format!("Function '{}' not found", name.to_string()));
+            return Param::Error(format!("Function '{}' not found", name.to_string()).into());
         };
         self.call_fn(key, params, expected_return_type)
     }
@@ -229,7 +229,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
     pub fn call_fn(&mut self, cache_key: ScriptFnKey, params: Params, expected_return_type: DataType) -> Param {
         // let name = name.to_string();
         let Some(engine) = &mut self.engine else {
-            return Param::Error("No code engine is active".to_string())
+            return Param::Error("No code engine is active".into())
         };
 
         engine.call_fn(

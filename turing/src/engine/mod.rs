@@ -57,7 +57,7 @@ where
             Engine::Wasm(engine) => engine.call_fn(cache_key, params, ret_type, data),
             #[cfg(feature = "lua")]
             Engine::Lua(engine) => engine.call_fn(cache_key, params, ret_type, data),
-            _ => Param::Error("No code engine is active".to_string()),
+            _ => Param::Error("No code engine is active".into()),
         }
     }
 

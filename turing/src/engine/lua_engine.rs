@@ -85,7 +85,7 @@ impl Param {
                     .unwrap_or_default();
                 Param::Object(real.ptr)
             }
-            DataType::RustError | DataType::ExtError => Param::Error(val.as_error().unwrap().to_string()),
+            DataType::RustError | DataType::ExtError => Param::Error(val.as_error().unwrap().to_string().into()),
             DataType::Void => Param::Void,
             DataType::Vec2 => lua_glam::unpack_vec2(val),
             DataType::Vec3 => lua_glam::unpack_vec3(val),
@@ -378,7 +378,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
         data: &Arc<RwLock<EngineDataState>>
     ) -> Param {
         let Some((lua, module, api)) = &mut self.engine else {
-            return Param::Error("No script is loaded".to_string())
+            return Param::Error("No script is loaded".into())
         };
         
         // we assume the function exists because we cached it earlier
@@ -387,12 +387,12 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
 
         let func = module.get::<Value>(name);
         if let Err(e) = func {
-            return Param::Error(format!("Failed to find function '{name}': {e}"));
+            return Param::Error(format!("Failed to find function '{name}': {e}").into());
         }
         let func = func.unwrap();
         let args = params.to_lua_args(lua, data, api);
         if let Err(e) = args {
-            return Param::Error(format!("{e}"))
+            return Param::Error(format!("{e}").into())
         }
         let args = args.unwrap();
 
@@ -400,11 +400,11 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
             Value::Function(f) => {
                 f.call::<Value>(args)
             }
-            _ => return Param::Error(format!("'{name}' is not a function"))
+            _ => return Param::Error(format!("'{name}' is not a function").into())
         };
         
         if let Err(e) = res {
-            return Param::Error(e.to_string());
+            return Param::Error(e.to_string().into());
         }
         let res = res.unwrap();
         if res.is_null() || res.is_nil() {
