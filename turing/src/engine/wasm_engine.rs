@@ -101,10 +101,8 @@ impl Param {
         macro_rules! dequeue {
             ($typ:tt :: $init:tt; $x:tt ) => {{
                 let mut s = data.write();
-                // ensure contiguous slice for easier conversion
-                s.f32_queue.make_contiguous();
                 Param::$typ(glam::$typ::$init(
-                    s.f32_queue.as_slices().0.try_into().unwrap(),
+                    s.f32_queue.make_contiguous(),
                 ))
             }};
         }
