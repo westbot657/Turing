@@ -82,8 +82,9 @@ impl DataType {
 
             DataType::F32 => Ok(ValType::F32),
             DataType::F64 => Ok(ValType::F64),
+            DataType::Void => Err(anyhow!("Void is only allowed as a singular return type for WASM.")), // voids are represented as i32 0
 
-            _ => Err(anyhow!("Invalid wasm value type: {}", self))
+            _ => Err(anyhow!("Invalid wasm value type: {}", self)),
         }
     }
 
@@ -591,8 +592,13 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             name.insert(0, '_');
 
             let p_types = metadata.param_types.iter().map(|d| d.to_val_type()).collect::<Result<Vec<ValType>>>()?;
-            let r_types = metadata.return_type.iter().map(|d| d.to_val_type()).collect::<Result<Vec<ValType>>>()?;
 
+            // if the only return type is void, we treat it as no return types
+            let r_types = if metadata.return_type.len() == 1 && metadata.return_type.first().cloned() == Some(DataType::Void) {
+                Vec::new()
+            } else {
+                metadata.return_type.iter().map(|d| d.to_val_type()).collect::<Result<Vec<ValType>>>()?
+            };
             let ft = FuncType::new(engine, p_types, r_types);
             let cap = metadata.capability.clone();
             let callback = metadata.callback;
