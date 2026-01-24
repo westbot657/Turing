@@ -98,13 +98,15 @@ impl Param {
         memory: &Memory,
         caller: &Store<WasiP1Ctx>,
     ) -> Self {
-
         macro_rules! dequeue {
-            ($typ:tt :: $init:tt; $x:tt ) => {
-                { let mut s = data.write();
-                let arr = s.f32_queue.drain(..$x).collect::<Vec<f32>>();
-                Param::$typ(glam::$typ::$init(arr.as_slice().try_into().unwrap())) }
-            };
+            ($typ:tt :: $init:tt; $x:tt ) => {{
+                let mut s = data.write();
+                // ensure contiguous slice for easier conversion
+                s.f32_queue.make_contiguous();
+                Param::$typ(glam::$typ::$init(
+                    s.f32_queue.as_slices().0.try_into().unwrap(),
+                ))
+            }};
         }
 
         match typ {
@@ -142,26 +144,28 @@ impl Param {
                 Param::Error(st)
             }
             DataType::Void => Param::Void,
-            DataType::Vec2 => dequeue!(Vec2::from_array; 2),
-            DataType::Vec3 => dequeue!(Vec3::from_array; 3),
-            DataType::RustVec4 | DataType::ExtVec4 => dequeue!(Vec4::from_array; 4),
-            DataType::RustQuat | DataType::ExtQuat => dequeue!(Quat::from_array; 4),
-            DataType::RustMat4 | DataType::ExtMat4 => dequeue!(Mat4::from_cols_array; 16),
-            _ => unreachable!("Cannot convert to {} from wasm value", typ)
+
+
+            DataType::Vec2 => dequeue!(Vec2::from_slice; 2),
+            DataType::Vec3 => dequeue!(Vec3::from_slice; 3),
+            DataType::RustVec4 | DataType::ExtVec4 => dequeue!(Vec4::from_slice; 4),
+            DataType::RustQuat | DataType::ExtQuat => dequeue!(Quat::from_slice; 4),
+            DataType::RustMat4 | DataType::ExtMat4 => dequeue!(Mat4::from_cols_slice; 16),
+            _ => unreachable!("Cannot convert to {} from wasm value", typ),
         }
     }
 
     pub fn into_wasm_val(self, data: &Arc<RwLock<EngineDataState>>) -> Result<Option<Val>> {
         let mut s = data.write();
         macro_rules! enqueue {
-            ( $v:tt ; $sz:tt ) => {
-                { s.f32_queue.append(&mut $v.to_array().into());
-                Val::I32($sz) }
-            };
-            ($m:tt # $sz:tt) => {
-                { s.f32_queue.append(&mut $m.to_cols_array().into());
-                Val::I32($sz) }
-            }
+            ( $v:tt ; $sz:tt ) => {{
+                s.f32_queue.append(&mut $v.to_array().into());
+                Val::I32($sz)
+            }};
+            ($m:tt # $sz:tt) => {{
+                s.f32_queue.append(&mut $m.to_cols_array().into());
+                Val::I32($sz)
+            }};
         }
         Ok(Some(match self {
             Param::I8(i) => Val::I32(i as i32),
@@ -210,14 +214,14 @@ impl Params {
 
         let mut s = data.write();
         macro_rules! enqueue {
-            ( $v:tt ; $sz:tt ) => {
-                { s.f32_queue.append(&mut $v.to_array().into());
-                Ok(Val::I32($sz)) }
-            };
-            ($m:tt # $sz:tt) => {
-                { s.f32_queue.append(&mut $m.to_cols_array().into());
-                Ok(Val::I32($sz)) }
-            }
+            ( $v:tt ; $sz:tt ) => {{
+                s.f32_queue.append(&mut $v.to_array().into());
+                Ok(Val::I32($sz))
+            }};
+            ($m:tt # $sz:tt) => {{
+                s.f32_queue.append(&mut $m.to_cols_array().into());
+                Ok(Val::I32($sz))
+            }};
         }
 
         self.params.into_iter().map(|p|
