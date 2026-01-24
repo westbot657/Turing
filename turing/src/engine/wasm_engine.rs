@@ -7,6 +7,7 @@ use std::task::Poll;
 
 use anyhow::{anyhow, Result};
 use convert_case::{Case, Casing};
+use glam::Vec2;
 use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
 use slotmap::KeyData;
@@ -26,6 +27,14 @@ impl DataType {
     pub fn to_wasm_val_param(&self, val: &Val, caller: &mut Caller<'_, WasiP1Ctx>, data: &Arc<RwLock<EngineDataState>>) -> Result<Param> {
         use wasmtime::Val;
         use crate::engine::wasm_engine::get_wasm_string;
+
+        macro_rules! dequeue {
+            ($typ:tt :: $init:tt; $x:tt ) => {
+                { let mut s = data.write();
+                let arr = s.f32_queue.drain(..$x).collect::<Vec<f32>>();
+                Ok(Param::$typ(glam::$typ::$init(arr.as_slice().try_into()?))) }
+            };
+        }
 
         match (self, val) {
             (DataType::I8, Val::I32(i)) => Ok(Param::I8(*i as i8)),
@@ -60,6 +69,11 @@ impl DataType {
                 }
 
             }
+            (DataType::Vec2, Val::I32(2)) => dequeue!(Vec2::from_array; 2),
+            (DataType::Vec3, Val::I32(3)) => dequeue!(Vec3::from_array; 3),
+            (DataType::RustVec4 | DataType::ExtVec4, Val::I32(4)) => dequeue!(Vec4::from_array; 4),
+            (DataType::RustQuat | DataType::ExtQuat, Val::I32(4)) => dequeue!(Quat::from_array; 4),
+            (DataType::RustMat4 | DataType::ExtMat4, Val::I32(16)) => dequeue!(Mat4::from_cols_array; 16),
             _ => Err(anyhow!("Mismatched parameter type"))
         }
     }
@@ -76,6 +90,14 @@ impl DataType {
             | DataType::Bool
             | DataType::RustString
             | DataType::ExtString
+            | DataType::Vec2
+            | DataType::Vec3
+            | DataType::RustVec4
+            | DataType::ExtVec4
+            | DataType::RustQuat
+            | DataType::ExtQuat
+            | DataType::RustMat4
+            | DataType::ExtMat4
             | DataType::Object => Ok(ValType::I32),
 
             DataType::I64 | DataType::U64 => Ok(ValType::I64),
