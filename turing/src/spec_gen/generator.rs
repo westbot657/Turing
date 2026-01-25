@@ -6,7 +6,6 @@ use crate::engine::types::ScriptFnMetadata;
 
 use anyhow::{Result, anyhow};
 use convert_case::{Case, Casing};
-use crate::interop::params::DataType;
 use crate::interop::types::Semver;
 
 /// This places txt files in the `output_folder` titled as `<capability>.txt`
@@ -15,6 +14,7 @@ pub fn generate_specs(
     api_versions: &HashMap<String, Semver>,
     output_directory: &Path,
 ) -> Result<()> {
+
     if !output_directory.exists() {
         return Err(anyhow!("output directory must exist"))
     }
@@ -53,23 +53,27 @@ fn generate_spec(api: &str, ver: Semver, metadata: &FxHashMap<String, ScriptFnMe
 
     for (name, data) in metadata {
         if let Some(cap) = &data.capability && cap != api { continue };
-        if name.contains(".") {
-            let class_name = name.splitn(2, "::").collect::<Vec<&str>>()[0];
-            if !classes.contains_key(class_name) {
+        if name.contains(".") { // methods
+            let names = name.splitn(2, ".").collect::<Vec<&str>>();
+            let class_name = names[0].to_case(Case::Pascal);
+            let func_name = names[1].to_case(Case::Snake);
+            if !classes.contains_key(&class_name) {
                 classes.insert(class_name.to_string(), (true, Vec::new()));
             }
-            let (is_opaque, map) = classes.get_mut(class_name).unwrap();
+            let (is_opaque, map) = classes.get_mut(&class_name).unwrap();
             *is_opaque = true;
-            map.push(data.signature.clone())
-        } else if name.contains("::") {
-            let class_name = name.splitn(2, "::").collect::<Vec<&str>>()[0].to_case(Case::Pascal);
+            map.push(data.generate_signature(Some(&class_name), &func_name, FnType::Method))
+        } else if name.contains("::") { // functions
+            let names = name.splitn(2, "::").collect::<Vec<&str>>();
+            let class_name = names[0].to_case(Case::Pascal);
+            let func_name = names[1].to_case(Case::Snake);
             if !classes.contains_key(&class_name) {
                 classes.insert(class_name.to_string(), (false, Vec::new()));
             }
             let (_, map) = classes.get_mut(&class_name).unwrap();
-            map.push(data.signature.clone())
-        } else {
-            globals.push(data.signature.clone())
+            map.push(data.generate_signature(Some(&class_name), &func_name, FnType::Function))
+        } else { // globals
+            globals.push(data.generate_signature(None, name, FnType::Global))
         }
     }
 
@@ -97,64 +101,45 @@ fn generate_spec(api: &str, ver: Semver, metadata: &FxHashMap<String, ScriptFnMe
     Ok(spec)
 }
 
+enum FnType {
+    Method,
+    Function,
+    Global,
+}
+
 impl ScriptFnMetadata {
-    fn spec_signature(&self, class_name: &str, func_name: &str) -> String {
-        let mut s = "(".to_string();
-        s += &self.param_types.iter().map(|d| d.as_rust_param_type(class_name)).collect::<Vec<&str>>().join(", ");
-        s += ")";
+    fn generate_signature(&self, class_name: Option<&str>, func_name: &str, ty: FnType) -> String {
+        let mut out = String::new();
 
-        if let Some(r) = self.return_type.get(0) {
-            s += " -> ";
-            s += r.as_rust_param_type(class_name);
+        let binding = "_".to_string()
+            + &if let Some(cn) = class_name { cn.to_case(Case::Snake) + "_" } else { String::new() }
+            + &func_name.to_case(Case::Snake);
+
+        if matches!(ty, FnType::Function) {
+            out += "::";
         }
 
-        s += " : _";
-        if class_name != "" {
-            s += &class_name.to_case(Case::Snake);
-            s += "_";
-        }
-        s += &func_name.to_case(Case::Snake);
+        out += func_name;
 
-        if let Some(doc) = &self.doc_comment {
-            s += "\n-- ";
-            s += &doc.replace("\\n", "\n").replace("\n", "\n-- ")
+        out += "(";
+
+        out += &self.param_type_names.iter().map(|(n, tn)| n.to_string() + ": " + tn).collect::<Vec<String>>().join(", ");
+
+        out += ") -> ";
+
+        if let Some(rtn) = self.return_type_names.get(0) {
+            out += rtn;
+        } else {
+            out += "void";
         }
 
-        s
+        out += " : ";
+        out += &binding;
+
+        out
     }
 }
 
-impl DataType {
-    fn as_rust_param_type<'a>(&self, class_name: &'a str) -> &'a str {
-        match self {
-            DataType::I8 => "i8",
-            DataType::I16 => "i16",
-            DataType::I32 => "i32",
-            DataType::I64 => "i64",
-            DataType::U8 => "u8",
-            DataType::U16 => "u16",
-            DataType::U32 => "u32",
-            DataType::U64 => "u64",
-            DataType::F32 => "f32",
-            DataType::F64 => "f64",
-            DataType::Bool => "bool",
-            DataType::RustString => "&str",
-            DataType::ExtString => "&str",
-            DataType::Object => class_name,
-            DataType::RustError => unreachable!("RustError"),
-            DataType::ExtError => unreachable!("ExtError"),
-            DataType::Void => "()",
-            DataType::Vec2 => "Vec2",
-            DataType::Vec3 => "Vec3",
-            DataType::RustVec4 => "Vec4",
-            DataType::ExtVec4 => "Vec4",
-            DataType::RustQuat => "Quat",
-            DataType::ExtQuat => "Quat",
-            DataType::RustMat4 => "Mat4",
-            DataType::ExtMat4 => "Mat4",
-        }
-    }
-}
 
 #[cfg(test)]
 mod generator_tests {
@@ -163,7 +148,7 @@ mod generator_tests {
     #[test]
     fn test_generator_turing() -> Result<()> {
 
-        
+
 
         Ok(())
     }
