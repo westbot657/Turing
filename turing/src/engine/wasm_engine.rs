@@ -709,10 +709,6 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         ret_type: DataType,
         data: &Arc<RwLock<EngineDataState>>,
     ) -> Param {
-        let Some(instance) = &mut self.script_instance else {
-            return Param::Error("No script is loaded or reentry was attempted".to_string());
-        };
-
         // Fast-path: typed cache (common signatures). Falls back to dynamic call below.
         if let Some(entry) = self.typed_cache.get(&cache_key) {
             return entry.invoke(&mut self.store, params).unwrap_or_else(Param::Error)
