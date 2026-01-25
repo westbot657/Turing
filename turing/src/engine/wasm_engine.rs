@@ -7,7 +7,6 @@ use std::task::Poll;
 
 use anyhow::{anyhow, Result};
 use convert_case::{Case, Casing};
-use glam::Vec2;
 use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
 use slotmap::KeyData;
@@ -171,7 +170,6 @@ impl Param {
             DataType::RustVec4 | DataType::ExtVec4 => dequeue!(Vec4::from_slice; 4),
             DataType::RustQuat | DataType::ExtQuat => dequeue!(Quat::from_slice; 4),
             DataType::RustMat4 | DataType::ExtMat4 => dequeue!(Mat4::from_cols_slice; 16),
-            _ => unreachable!("Cannot convert to {} from wasm value", typ),
         }
     }
 
@@ -595,7 +593,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             "env",
             "_host_f32_enqueue",
             FuncType::new(engine, vec![ValType::F32], Vec::new()),
-            move |caller, p, r| {
+            move |_, p, _| {
                 wasm_host_f32_enqueue(&data_enqueue, p)
             }
         )?;
@@ -603,7 +601,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             "env",
             "_host_f32_dequeue",
             FuncType::new(engine, Vec::new(), vec![ValType::F32]),
-            move |caller, p, r| {
+            move |_, _, r| {
                 wasm_host_f32_dequeue(&data_dequeue, r)
             }
         )?;
@@ -643,7 +641,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         Ok(())
     }
 
-    pub fn load_script(&mut self, path: &Path, data: &Arc<RwLock<EngineDataState>>) -> Result<()> {
+    pub fn load_script(&mut self, path: &Path) -> Result<()> {
         let wasm = fs::read(path)?;
 
         let module = Module::new(&self.engine, wasm)?;
@@ -856,7 +854,7 @@ pub fn wasm_host_f32_enqueue(
     ps: &[Val],
 ) -> Result<(), anyhow::Error> {
 
-    let new = ps.get(0).ok_or_else(|| anyhow!("no first parameter provided"))?
+    let new = ps.first().ok_or_else(|| anyhow!("no first parameter provided"))?
         .f32().ok_or_else(|| anyhow!("parameter is not f32"))?;
 
     let mut d = data.write();

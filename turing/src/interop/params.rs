@@ -7,7 +7,6 @@ use std::ops::{Deref, DerefMut};
 use anyhow::{anyhow, Result};
 use glam::{Mat2, Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
 use num_enum::TryFromPrimitive;
-use serde::{Deserialize, Serialize};
 use crate::ExternalFunctions;
 use crate::interop::types::ExtString;
 
@@ -51,6 +50,8 @@ pub enum FreeableDataType {
 }
 
 impl FreeableDataType {
+    /// # Safety
+    /// ptr must be a valid pointer to a Vec4, Quat, or Mat4
     pub unsafe fn free_ptr(&self, ptr: *mut c_void) {
         unsafe {
             match self {

@@ -12,7 +12,6 @@ struct CargoToml {
 #[derive(Deserialize)]
 struct Package {
     version: String,
-    name: String,
 }
 
 #[derive(Deserialize)]

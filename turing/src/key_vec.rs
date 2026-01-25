@@ -1,4 +1,4 @@
-use std::{ops::{Deref, Index, IndexMut}, slice::SliceIndex};
+use std::ops::{Deref, Index, IndexMut};
 
 /// A grow-only vector structure indexed by key types.
 pub struct KeyVec<K, V>

@@ -190,7 +190,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
                     &self.script_fns,
                     Arc::clone(&self.data),
                 )?;
-                wasm_interpreter.load_script(source, &self.data)?;
+                wasm_interpreter.load_script(source)?;
                 self.engine = Some(Engine::Wasm(wasm_interpreter));
             }
             #[cfg(feature = "lua")]
@@ -199,7 +199,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
                     &self.script_fns,
                     Arc::clone(&self.data),
                 )?;
-                lua_interpreter.load_script(source, &self.data)?;
+                lua_interpreter.load_script(source)?;
                 self.engine = Some(Engine::Lua(lua_interpreter));
             }
             _ => {

@@ -254,7 +254,7 @@ unsafe extern "C" fn turing_script_get_fn_name(turing: *mut TuringInstance, name
     
     let name = unsafe { CStr::from_ptr(name).to_string_lossy() };
     
-    turing.get_fn_key(&name.to_string()).map(|x| x.0).unwrap_or(u32::MAX)
+    turing.get_fn_key(name.as_ref()).map(|x| x.0).unwrap_or(u32::MAX)
 }
 
 #[unsafe(no_mangle)]
@@ -408,11 +408,25 @@ extern "C" fn turing_delete_param(param: FfiParam) {
 unsafe extern "C" fn turing_versions_get(turing: *mut TuringInstance) -> *mut VersionTable {
     let turing = unsafe { &*turing };
     if let Some(versions) = turing.get_api_versions() {
-        let versions: VersionTable = versions.iter().map(|(n, v)| (n.clone(), v.clone())).collect();
+        let versions: VersionTable = versions.iter().map(|(n, v)| (n.clone(), *v)).collect();
         let versions = Box::new(versions.clone());
         Box::into_raw(versions)
     } else {
         ptr::null::<VersionTable>() as *mut _
+    }
+
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `turing` must be a valid pointer to a `Turing`.
+/// `versions` must be a valid pointer to a VersionTable. Note: the versions table is not freed and can continue to be modified independently of what this turing instance has.
+unsafe extern "C" fn turing_versions_set(turing: *mut TuringInstance, versions: *mut VersionTable) {
+    let turing = unsafe { &mut *turing };
+    let versions = unsafe { &*versions };
+
+    for (name, version) in versions {
+        turing.register_api_version(name, *version);
     }
 
 }

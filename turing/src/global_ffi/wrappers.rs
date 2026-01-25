@@ -49,12 +49,12 @@ impl CsFns {
         }
         unsafe {
             match fn_name {
-                "abort" => self.abort = mem::transmute(ptr),
-                "log_info" => self.log_info = mem::transmute(ptr),
-                "log_warn" => self.log_warn = mem::transmute(ptr),
-                "log_critical" => self.log_critical = mem::transmute(ptr),
-                "log_debug" => self.log_debug = mem::transmute(ptr),
-                "free_cs_string" => self.free_cs_string = mem::transmute(ptr),
+                "abort" => self.abort = mem::transmute::<*const c_void, CsAbort>(ptr),
+                "log_info" => self.log_info = mem::transmute::<*const c_void, CsLog>(ptr),
+                "log_warn" => self.log_warn = mem::transmute::<*const c_void, CsLog>(ptr),
+                "log_critical" => self.log_critical = mem::transmute::<*const c_void, CsLog>(ptr),
+                "log_debug" => self.log_debug = mem::transmute::<*const c_void, CsLog>(ptr),
+                "free_cs_string" => self.free_cs_string = mem::transmute::<*const c_void, CsFree>(ptr),
                 _ => {
                     eprintln!("Invalid function name: '{}', process will abort.", fn_name);
                     std::process::abort()
@@ -111,7 +111,7 @@ impl ExternalFunctions for CsFns {
     }
 
     fn free_of_type(ptr: *mut c_void, typ: FreeableDataType) {
-        todo!()
+        unsafe { typ.free_ptr(ptr) }
     }
 
 }

@@ -134,7 +134,7 @@ impl Param {
 }
 
 impl Params {
-    pub fn to_lua_args(self, lua: &Lua, data: &Arc<RwLock<EngineDataState>>, api: &Table) -> Result<MultiValue> {
+    pub fn to_lua_args(self, lua: &Lua, data: &Arc<RwLock<EngineDataState>>) -> Result<MultiValue> {
         if self.is_empty() {
             return Ok(MultiValue::new())
         }
@@ -304,7 +304,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
         Ok(())
     }
 
-    pub fn load_script(&mut self, path: &Path, data: &Arc<RwLock<EngineDataState>>) -> Result<()> {
+    pub fn load_script(&mut self, path: &Path) -> Result<()> {
 
         let lua_src = fs::read_to_string(path)?;
 
@@ -376,7 +376,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
         ret_type: DataType,
         data: &Arc<RwLock<EngineDataState>>
     ) -> Param {
-        let Some((lua, module, api)) = &mut self.engine else {
+        let Some((lua, module, _)) = &mut self.engine else {
             return Param::Error("No script is loaded".to_string())
         };
         
@@ -389,7 +389,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
             return Param::Error(format!("Failed to find function '{name}': {e}"));
         }
         let func = func.unwrap();
-        let args = params.to_lua_args(lua, data, api);
+        let args = params.to_lua_args(lua, data);
         if let Err(e) = args {
             return Param::Error(format!("{e}"))
         }
