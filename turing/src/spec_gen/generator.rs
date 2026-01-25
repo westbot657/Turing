@@ -126,7 +126,23 @@ impl ScriptFnMetadata {
 
         out += "(";
 
-        out += &self.param_types.iter().map(|info | format!("{}: {}", info.name, info.data_type_name)).collect::<Vec<String>>().join(", ");
+        let invalid_patterns = ["`", "'", "\"", "<", ">", ":", ".", ",", "/", "?", "!", "%", "$", "#", "-", "+", "=", "|", "[", "]", "{", "}"];
+
+        out += &self.param_type_names
+            .iter()
+            .map(|info| {
+                let mut tn = info.data_type_name.clone();
+                if invalid_patterns.iter().any(|p| tn.contains(p)) {
+                    let tn_old = tn.clone();
+                    for p in invalid_patterns {
+                        tn = tn.replace(p, "");
+                    }
+                    eprintln!("[API Generator Warning]: type name \"{tn_old}\" contains invalid characters and should be manually sanitized to avoid potential naming conflicts, using name \"{tn}\" instead");
+                }
+                format!("{}: {}", info.name, tn)
+            })
+            .collect::<Vec<String>>()
+            .join(", ");
 
         out += ") -> ";
 
