@@ -615,18 +615,18 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             let mut name = name.replace(":", "_").replace(".", "_").to_case(Case::Snake);
             name.insert(0, '_');
 
-            let p_types = metadata.param_types.iter().map(|d| d.to_val_type()).collect::<Result<Vec<ValType>>>()?;
+            let p_types = metadata.param_types.iter().map(|d| d.data_type.to_val_type()).collect::<Result<Vec<ValType>>>()?;
 
             // if the only return type is void, we treat it as no return types
-            let r_types = if metadata.return_type.len() == 1 && metadata.return_type.first().cloned() == Some(DataType::Void) {
+            let r_types = if metadata.return_type.len() == 1 && metadata.return_type.first().cloned().map(|r| r.0) == Some(DataType::Void) {
                 Vec::new()
             } else {
-                metadata.return_type.iter().map(|d| d.to_val_type()).collect::<Result<Vec<ValType>>>()?
+                metadata.return_type.iter().map(|d| d.0.to_val_type()).collect::<Result<Vec<ValType>>>()?
             };
             let ft = FuncType::new(engine, p_types, r_types);
             let cap = metadata.capability.clone();
             let callback = metadata.callback;
-            let pts = metadata.param_types.clone();
+            let pts = metadata.param_types.iter().map(|d| d.data_type).collect::<Vec<DataType>>();
 
             let data2 = Arc::clone(&data);
             linker.func_new(
@@ -634,7 +634,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
                 name.as_str(),
                 ft,
                 move |caller, ps, rs| {
-                    wasm_bind_env::<Ext>(&data2, caller, cap.as_deref(), ps, rs, pts.as_slice(), &callback)
+                    wasm_bind_env::<Ext>(&data2, caller, &cap, ps, rs, pts.as_slice(), &callback)
                 }
             )?;
 
@@ -709,10 +709,6 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         ret_type: DataType,
         data: &Arc<RwLock<EngineDataState>>,
     ) -> Param {
-        let Some(instance) = &mut self.script_instance else {
-            return Param::Error("No script is loaded or reentry was attempted".to_string());
-        };
-
         // Fast-path: typed cache (common signatures). Falls back to dynamic call below.
         if let Some(entry) = self.typed_cache.get(&cache_key) {
             return entry.invoke(&mut self.store, params).unwrap_or_else(Param::Error)
@@ -787,14 +783,14 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
 fn wasm_bind_env<Ext: ExternalFunctions>(
     data: &Arc<RwLock<EngineDataState>>,
     mut caller: Caller<'_, WasiP1Ctx>,
-    cap: Option<&str>,
+    cap: &str,
     ps: &[Val],
     rs: &mut [Val],
     p: &[DataType],
     func: &ScriptCallback,
 ) -> Result<()> {
 
-    if let Some(cap) = cap && !data.read().active_capabilities.contains(cap) {
+    if !data.read().active_capabilities.contains(cap) {
         return Err(anyhow!("Mod capability '{}' is not currently loaded", cap))
     }
 

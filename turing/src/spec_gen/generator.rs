@@ -24,9 +24,11 @@ pub fn generate_specs(
 
     let mut output = Vec::new();
 
+    // always generate core spec
     for (api, ver) in api_versions {
         output.push((api.clone(), generate_spec(api, *ver, metadata)?))
     }
+    
 
     for (name, contents) in output {
         let path = output_directory.join(format!("{}.txt", name));
@@ -52,7 +54,8 @@ fn generate_spec(api: &str, ver: Semver, metadata: &FxHashMap<String, ScriptFnMe
     let mut classes = HashMap::new();
 
     for (name, data) in metadata {
-        if let Some(cap) = &data.capability && cap != api { continue };
+        if data.capability != api { continue };
+        
         if name.contains(".") { // methods
             let names = name.splitn(2, ".").collect::<Vec<&str>>();
             let class_name = names[0].to_case(Case::Pascal);
@@ -125,10 +128,10 @@ impl ScriptFnMetadata {
 
         let invalid_patterns = ["`", "'", "\"", "<", ">", ":", ".", ",", "/", "?", "!", "%", "$", "#", "-", "+", "=", "|", "[", "]", "{", "}"];
 
-        out += &self.param_type_names
+        out += &self.param_types
             .iter()
-            .map(|(n, tn)| {
-                let mut tn = tn.clone();
+            .map(|info| {
+                let mut tn = info.data_type_name.clone();
                 if invalid_patterns.iter().any(|p| tn.contains(p)) {
                     let tn_old = tn.clone();
                     for p in invalid_patterns {
@@ -136,18 +139,14 @@ impl ScriptFnMetadata {
                     }
                     eprintln!("[API Generator Warning]: type name \"{tn_old}\" contains invalid characters and should be manually sanitized to avoid potential naming conflicts, using name \"{tn}\" instead");
                 }
-                n.to_string() + ": " + &tn
+                format!("{}: {}", info.name, tn)
             })
             .collect::<Vec<String>>()
             .join(", ");
 
         out += ") -> ";
 
-        if let Some(rtn) = self.return_type_names.get(0) {
-            out += rtn;
-        } else {
-            out += "void";
-        }
+        out += self.return_type.first().map_or("void", |v| &v.1);
 
         out += " : ";
         out += &binding;

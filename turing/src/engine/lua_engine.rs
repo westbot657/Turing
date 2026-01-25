@@ -212,13 +212,13 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
     fn generate_function(&self, lua: &Lua, table: &Table, name: &str, metadata: &ScriptFnMetadata) -> Result<()> {
         let cap = metadata.capability.clone();
         let callback = metadata.callback;
-        let pts = metadata.param_types.clone();
+        let pts = metadata.param_types.iter().map(|d| d.data_type).collect::<Vec<_>>();
         let data = Arc::clone(&self.data);
 
 
         let func = lua.create_function(move |lua, args: LuaVariadic<Value>| -> mlua::Result<Value> {
             lua_bind_env::<Ext>(
-                &data, lua, cap.as_deref(), &args, pts.as_slice(), &callback
+                &data, lua, &cap, &args, &pts, &callback
             )
         }).map_err(|e| anyhow!("Failed to create function: {e}"))?;
 
@@ -446,13 +446,13 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
 fn lua_bind_env<Ext: ExternalFunctions>(
     data: &Arc<RwLock<EngineDataState>>,
     lua: &Lua,
-    cap: Option<&str>,
+    cap: &str,
     ps: &LuaVariadic<Value>,
     p: &[DataType],
     func: &ScriptCallback,
 ) -> mlua::Result<Value> {
 
-    if let Some(cap) = cap && !data.read().active_capabilities.contains(cap) {
+    if !data.read().active_capabilities.contains(cap) {
         return Err(mlua::Error::RuntimeError(format!("Mod capability '{cap}' is not currently loaded")))
     }
 

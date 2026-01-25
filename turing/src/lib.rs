@@ -43,6 +43,16 @@ new_key_type! {
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub struct ScriptFnKey(u32);
 
+impl ScriptFnKey {
+    pub fn new(id: u32) -> Self {
+        Self(id)
+    }
+
+    pub fn is_valid(&self) -> bool {
+        self.0 != u32::MAX
+    }
+}
+
 impl From<u32> for ScriptFnKey {
     fn from(value: u32) -> Self {
         ScriptFnKey(value)
@@ -230,6 +240,10 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
         let Some(engine) = &mut self.engine else {
             return Param::Error("No code engine is active".to_string())
         };
+
+        if !cache_key.is_valid() {
+            return Param::Error("Invalid function key".to_string());
+        }
 
         engine.call_fn(
             cache_key,
