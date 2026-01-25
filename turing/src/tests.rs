@@ -67,16 +67,14 @@ fn common_setup_direct(source: &str) -> Result<Turing<DirectExt>> {
     let mut metadata = ScriptFnMetadata::new(
         Some("test".to_owned()),
         log_info_wasm,
-        "::info(msg: &str) -> void : _log_info".to_owned(),
         None,
     );
-    metadata.add_param_type(DataType::RustString)?;
+    metadata.add_param_type(DataType::RustString, "msg")?;
     turing.add_function("log.info", metadata)?;
 
     let mut metadata = ScriptFnMetadata::new(
         Some("test".to_owned()),
         fetch_string,
-        "fetch_string() -> String : _fetch_string".to_string(),
         None,
     );
     metadata.add_return_type(DataType::ExtString)?;

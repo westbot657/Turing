@@ -115,12 +115,10 @@ unsafe extern "C" fn turing_delete_fn_map(map: *mut ScriptFnMap) {
 /// # Safety
 /// `capability` must be a valid C string pointer of valid `UTF-8` or null.
 /// `callback` must be a valid pointer to a function: `extern "C" fn(FfiParamsArray) -> FfiParam`.
-/// `signature` must be a valid pointer to a string.
 /// `doc_comment` must be either null or a valid pointer to a string. When null, the function is considered to not have a doc comment.
 unsafe extern "C" fn turing_create_script_data(
     capability: *const c_char,
     callback: ScriptCallback,
-    signature: *const c_char,
     doc_comment: *const c_char,
 ) -> *mut ScriptFnMetadata {
     let cap = unsafe {
@@ -131,15 +129,12 @@ unsafe extern "C" fn turing_create_script_data(
             .map(|s| s.to_string())
     };
 
-    let signature = unsafe {
-        CStr::from_ptr(signature).to_string_lossy().into_owned()
-    };
     let doc = if doc_comment.is_null() {
         None
     } else {
         Some(unsafe { CStr::from_ptr(doc_comment).to_string_lossy().to_string() })
     };
-    let data = ScriptFnMetadata::new(cap, callback, signature, doc);
+    let data = ScriptFnMetadata::new(cap, callback, doc);
     Box::into_raw(Box::new(data))
 }
 
@@ -147,16 +142,36 @@ unsafe extern "C" fn turing_create_script_data(
 /// # Safety
 /// `data` must be a valid pointer to a `ScriptFnMetadata`.
 /// `params` must point to the first element of `DataType` array.
-/// `params_count` must be the accurate size of the `params` array.
+/// `param_names` must point to the fist element of a valid-c-string array.
+/// `param_type_names` must point to the first element of an optional c-string array.
+/// `params_count` must be the accurate size of the `params`, `param_names`, and `param_type_names` array.
 /// Returns a pointer to an error message, if the pointer is null then no error occurred. Caller is responsible for freeing this string.
 /// none of the passed data is freed.
-unsafe extern "C" fn turing_script_data_add_param_type(data: *mut ScriptFnMetadata, params: *mut DataType, params_count: u32) -> *const c_char {
+unsafe extern "C" fn turing_script_data_add_param_type(data: *mut ScriptFnMetadata, params: *mut DataType, param_names: *mut *const c_char, param_type_names: *mut *const c_char, params_count: u32) -> *const c_char {
     let data = unsafe { &mut *data };
     let array = unsafe { slice::from_raw_parts(params, params_count as usize) };
+    let param_names = unsafe { slice::from_raw_parts(param_names, params_count as usize) }
+        .iter()
+        .map(
+            |ptr| unsafe { CStr::from_ptr(*ptr) }.to_string_lossy().into_owned()
+        )
+        .collect::<Vec<String>>();
+    let param_type_names = unsafe { slice::from_raw_parts(param_type_names, params_count as usize) }
+        .iter()
+        .map(
+            |ptr| if ptr.is_null() { None } else { Some(unsafe { CStr::from_ptr(*ptr) }.to_string_lossy().into_owned()) }
+        )
+        .collect::<Vec<Option<String>>>();
 
-    for ty in array {
-        if let Err(e) = data.add_param_type(*ty) {
-            return CString::new(format!("{}", e)).unwrap().into_raw()
+    for ((ty, name), ty_name) in array.iter().zip(param_names).zip(param_type_names) {
+        if let Some(ty_name) = ty_name {
+            if let Err(e) = data.add_param_type_named(*ty, name, ty_name) {
+                return CString::new(format!("{}", e)).unwrap().into_raw()
+            }
+        } else {
+            if let Err(e) = data.add_param_type(*ty, name) {
+                return CString::new(format!("{}", e)).unwrap().into_raw()
+            }
         }
     }
     ptr::null()
