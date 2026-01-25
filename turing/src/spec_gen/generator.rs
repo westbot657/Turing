@@ -128,7 +128,7 @@ impl ScriptFnMetadata {
 
         let invalid_patterns = ["`", "'", "\"", "<", ">", ":", ".", ",", "/", "?", "!", "%", "$", "#", "-", "+", "=", "|", "[", "]", "{", "}"];
 
-        out += &self.param_type_names
+        out += &self.param_types
             .iter()
             .map(|info| {
                 let mut tn = info.data_type_name.clone();
