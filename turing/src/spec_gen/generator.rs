@@ -112,7 +112,7 @@ impl ScriptFnMetadata {
         let mut out = String::new();
 
         let binding = "_".to_string()
-            + &if let Some(cn) = class_name { cn.to_case(Case::Snake) + "_" } else { String::new() }
+            + &if let Some(cn) = class_name { cn.to_case(Case::Snake) + "__" } else { String::new() }
             + &func_name.to_case(Case::Snake);
 
         if matches!(ty, FnType::Function) {
