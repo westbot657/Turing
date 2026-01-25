@@ -129,15 +129,11 @@ impl ScriptFnMetadata {
 
         out += "(";
 
-        out += &self.param_type_names.iter().map(|(n, tn)| n.to_string() + ": " + tn).collect::<Vec<String>>().join(", ");
+        out += &self.param_types.iter().map(|info | format!("{}: {}", info.name, info.data_type_name)).collect::<Vec<String>>().join(", ");
 
         out += ") -> ";
 
-        if let Some(rtn) = self.return_type_names.get(0) {
-            out += rtn;
-        } else {
-            out += "void";
-        }
+        out += self.return_type.first().map_or("void", |v| &v.1);
 
         out += " : ";
         out += &binding;

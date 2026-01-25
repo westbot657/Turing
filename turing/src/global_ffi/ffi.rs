@@ -150,30 +150,29 @@ unsafe extern "C" fn turing_create_script_data(
 unsafe extern "C" fn turing_script_data_add_param_type(data: *mut ScriptFnMetadata, params: *mut DataType, param_names: *mut *const c_char, param_type_names: *mut *const c_char, params_count: u32) -> *const c_char {
     let data = unsafe { &mut *data };
     let array = unsafe { slice::from_raw_parts(params, params_count as usize) };
-    let param_names = unsafe { slice::from_raw_parts(param_names, params_count as usize) }
-        .iter()
-        .map(
-            |ptr| unsafe { CStr::from_ptr(*ptr) }.to_string_lossy().into_owned()
-        )
-        .collect::<Vec<String>>();
-    let param_type_names = unsafe { slice::from_raw_parts(param_type_names, params_count as usize) }
-        .iter()
-        .map(
-            |ptr| if ptr.is_null() { None } else { Some(unsafe { CStr::from_ptr(*ptr) }.to_string_lossy().into_owned()) }
-        )
-        .collect::<Vec<Option<String>>>();
+    let names = unsafe { slice::from_raw_parts(param_names, params_count as usize) };
+    let type_names = unsafe { slice::from_raw_parts(param_type_names, params_count as usize) };
 
-    for ((ty, name), ty_name) in array.iter().zip(param_names).zip(param_type_names) {
-        if let Some(ty_name) = ty_name {
-            if let Err(e) = data.add_param_type_named(*ty, name, ty_name) {
-                return CString::new(format!("{}", e)).unwrap().into_raw()
-            }
-        } else {
-            if let Err(e) = data.add_param_type(*ty, name) {
-                return CString::new(format!("{}", e)).unwrap().into_raw()
-            }
-        }
+    for i in 0..(params_count as usize) {
+        let ty = array[i];
+        let name = unsafe { CStr::from_ptr(names[i]) }.to_string_lossy().into_owned();
+
+        let ty_ptr = type_names[i];
+        match ty_ptr.is_null() {
+            true => {
+                if let Err(e) = data.add_param_type(ty, name) {
+                    return CString::new(format!("{}", e)).unwrap().into_raw()
+                }
+            },
+            false => {
+                let ty_name = unsafe { CStr::from_ptr(ty_ptr) }.to_string_lossy().into_owned();
+                if let Err(e) = data.add_param_type_named(ty, name, ty_name) {
+                    return CString::new(format!("{}", e)).unwrap().into_raw()
+                }
+            },
+        };
     }
+
     ptr::null()
 }
 

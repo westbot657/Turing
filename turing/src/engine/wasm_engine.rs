@@ -615,18 +615,18 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             let mut name = name.replace(":", "_").replace(".", "_").to_case(Case::Snake);
             name.insert(0, '_');
 
-            let p_types = metadata.param_types.iter().map(|d| d.to_val_type()).collect::<Result<Vec<ValType>>>()?;
+            let p_types = metadata.param_types.iter().map(|d| d.data_type.to_val_type()).collect::<Result<Vec<ValType>>>()?;
 
             // if the only return type is void, we treat it as no return types
-            let r_types = if metadata.return_type.len() == 1 && metadata.return_type.first().cloned() == Some(DataType::Void) {
+            let r_types = if metadata.return_type.len() == 1 && metadata.return_type.first().cloned().map(|r| r.0) == Some(DataType::Void) {
                 Vec::new()
             } else {
-                metadata.return_type.iter().map(|d| d.to_val_type()).collect::<Result<Vec<ValType>>>()?
+                metadata.return_type.iter().map(|d| d.0.to_val_type()).collect::<Result<Vec<ValType>>>()?
             };
             let ft = FuncType::new(engine, p_types, r_types);
             let cap = metadata.capability.clone();
             let callback = metadata.callback;
-            let pts = metadata.param_types.clone();
+            let pts = metadata.param_types.iter().map(|d| d.data_type).collect::<Vec<DataType>>();
 
             let data2 = Arc::clone(&data);
             linker.func_new(
