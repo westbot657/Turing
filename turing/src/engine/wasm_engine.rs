@@ -634,7 +634,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
                 name.as_str(),
                 ft,
                 move |caller, ps, rs| {
-                    wasm_bind_env::<Ext>(&data2, caller, cap.as_deref(), ps, rs, pts.as_slice(), &callback)
+                    wasm_bind_env::<Ext>(&data2, caller, &cap, ps, rs, pts.as_slice(), &callback)
                 }
             )?;
 
@@ -783,14 +783,14 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
 fn wasm_bind_env<Ext: ExternalFunctions>(
     data: &Arc<RwLock<EngineDataState>>,
     mut caller: Caller<'_, WasiP1Ctx>,
-    cap: Option<&str>,
+    cap: &str,
     ps: &[Val],
     rs: &mut [Val],
     p: &[DataType],
     func: &ScriptCallback,
 ) -> Result<()> {
 
-    if let Some(cap) = cap && !data.read().active_capabilities.contains(cap) {
+    if !data.read().active_capabilities.contains(cap) {
         return Err(anyhow!("Mod capability '{}' is not currently loaded", cap))
     }
 

@@ -12,7 +12,7 @@ pub struct ScriptFnParameter {
 
 #[derive(Clone)]
 pub struct ScriptFnMetadata {
-    pub capability: Option<String>,
+    pub capability: String,
     pub callback: ScriptCallback,
     pub param_types: Vec<ScriptFnParameter>,
     pub return_type: Vec<(DataType, String)>,
@@ -21,7 +21,7 @@ pub struct ScriptFnMetadata {
 
 impl ScriptFnMetadata {
     pub fn new(
-        capability: Option<String>,
+        capability: String,
         callback: ScriptCallback,
         doc_comment: Option<String>,
     ) -> Self {

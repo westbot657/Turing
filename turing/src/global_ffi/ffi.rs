@@ -121,12 +121,12 @@ unsafe extern "C" fn turing_create_script_data(
     callback: ScriptCallback,
     doc_comment: *const c_char,
 ) -> *mut ScriptFnMetadata {
+    if capability.is_null() {
+        panic!("turing_create_script_data(): capability must be a valid string pointer, null is not allowed");
+    }
+
     let cap = unsafe {
-        capability
-            .as_ref()
-            .map(|s| CStr::from_ptr(s))
-            .map(|s| s.to_string_lossy())
-            .map(|s| s.to_string())
+        CStr::from_ptr(capability).to_string_lossy().to_string()
     };
 
     let doc = if doc_comment.is_null() {

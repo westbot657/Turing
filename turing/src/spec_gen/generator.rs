@@ -25,11 +25,8 @@ pub fn generate_specs(
     let mut output = Vec::new();
 
     // always generate core spec
-    // TODO: core? version? configurable?
-    output.push((String::from("core"), generate_spec(None, Semver::new(1, 0, 0), metadata)?));
-
     for (api, ver) in api_versions {
-        output.push((api.clone(), generate_spec(Some(api), *ver, metadata)?))
+        output.push((api.clone(), generate_spec(api, *ver, metadata)?))
     }
     
 
@@ -41,10 +38,10 @@ pub fn generate_specs(
     Ok(())
 }
 
-fn generate_spec(api: Option<&str>, ver: Semver, metadata: &FxHashMap<String, ScriptFnMetadata>) -> Result<String> {
+fn generate_spec(api: &str, ver: Semver, metadata: &FxHashMap<String, ScriptFnMetadata>) -> Result<String> {
     let mut spec = String::new();
 
-    spec += &format!("#api {}\n", api.unwrap_or("core"));
+    spec += &format!("#api {}\n", api);
     spec += &format!("#version {}\n\n", ver);
 
     spec += r#"
@@ -57,7 +54,7 @@ fn generate_spec(api: Option<&str>, ver: Semver, metadata: &FxHashMap<String, Sc
     let mut classes = HashMap::new();
 
     for (name, data) in metadata {
-        if data.capability.as_deref() != api { continue };
+        if data.capability != api { continue };
         
         if name.contains(".") { // methods
             let names = name.splitn(2, ".").collect::<Vec<&str>>();

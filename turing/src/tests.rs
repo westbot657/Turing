@@ -65,7 +65,7 @@ fn common_setup_direct(source: &str) -> Result<Turing<DirectExt>> {
     let mut turing = Turing::new();
 
     let mut metadata = ScriptFnMetadata::new(
-        Some("test".to_owned()),
+        "test".to_owned(),
         log_info_wasm,
         None,
     );
@@ -73,7 +73,7 @@ fn common_setup_direct(source: &str) -> Result<Turing<DirectExt>> {
     turing.add_function("log.info", metadata)?;
 
     let mut metadata = ScriptFnMetadata::new(
-        Some("test".to_owned()),
+        "test".to_owned(),
         fetch_string,
         None,
     );

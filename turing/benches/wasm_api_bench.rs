@@ -44,11 +44,11 @@ extern "C" fn fetch_string(_params: FfiParamArray) -> FfiParam {
 fn setup_turing_with_callbacks() -> Turing<DirectExt> {
     let mut turing = Turing::new();
 
-    let mut meta = ScriptFnMetadata::new(Some("test".to_owned()), log_info_wasm, None);
+    let mut meta = ScriptFnMetadata::new("test".to_owned(), log_info_wasm, None);
     let _ = meta.add_param_type(DataType::RustString, "msg");
     turing.add_function("log_info", meta).unwrap();
 
-    let mut meta = ScriptFnMetadata::new(Some("test".to_owned()), fetch_string, None);
+    let mut meta = ScriptFnMetadata::new("test".to_owned(), fetch_string, None);
     let _ = meta.add_return_type(DataType::ExtString);
     turing.add_function("fetch_string", meta).unwrap();
 
