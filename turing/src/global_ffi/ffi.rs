@@ -420,7 +420,7 @@ unsafe extern "C" fn turing_versions_get(turing: *mut TuringInstance) -> *mut Ve
 #[unsafe(no_mangle)]
 /// # Safety
 /// `turing` must be a valid pointer to a `Turing`.
-/// `versions` must be a valid pointer to a VersionTable. Note: the versions table is not freed and can continue to be modified independently of what this turing instance has.
+/// `versions` must be a valid pointer to a `VersionTable`. Note: the versions table is not freed and can continue to be modified independently of what this turing instance has.
 unsafe extern "C" fn turing_versions_set(turing: *mut TuringInstance, versions: *mut VersionTable) {
     let turing = unsafe { &mut *turing };
     let versions = unsafe { &*versions };
@@ -429,6 +429,17 @@ unsafe extern "C" fn turing_versions_set(turing: *mut TuringInstance, versions: 
         turing.register_api_version(name, *version);
     }
 
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `versions` must be a valid pointer to a `VersionTable`.
+/// `name` must be a valid pointer to a UTF-8 C string
+/// `packed_version` is packed as major:u32 << 32 | minor:u16 << 16 | patch:u16
+unsafe extern "C" fn turing_versions_set_api_version(versions: *mut VersionTable, name: *const c_char, packed_version: u64) {
+    let versions = unsafe { &mut *versions };
+    let name = unsafe { CStr::from_ptr(name) }.to_string_lossy();
+    versions.push((name.to_string(), Semver::from_u64(packed_version)))
 }
 
 #[unsafe(no_mangle)]
