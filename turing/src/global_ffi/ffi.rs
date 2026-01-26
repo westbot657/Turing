@@ -416,6 +416,14 @@ unsafe extern "C" fn turing_versions_get(turing: *mut TuringInstance) -> *mut Ve
     }
 
 }
+#[unsafe(no_mangle)]
+/// # Safety
+/// The returned table may be null if no engine is active or no script is loaded.
+unsafe extern "C" fn turing_versions_create() -> *mut VersionTable {
+    let versions: VersionTable = Vec::new();
+    let versions = Box::new(versions.clone());
+    Box::into_raw(versions)
+}
 
 #[unsafe(no_mangle)]
 /// # Safety
