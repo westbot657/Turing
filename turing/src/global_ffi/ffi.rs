@@ -181,9 +181,14 @@ unsafe extern "C" fn turing_script_data_add_param_type(data: *mut ScriptFnMetada
 /// `data` must be a valid pointer to a `ScriptFnMetadata`.
 /// Returns a pointer to an error message, if the pointer is null then no error occurred. Caller is responsible for freeing this string.
 /// none of the passed data is freed.
-unsafe extern "C" fn turing_script_data_set_return_type(data: *mut ScriptFnMetadata, return_type: DataType) -> *const c_char {
+unsafe extern "C" fn turing_script_data_set_return_type(data: *mut ScriptFnMetadata, return_type: DataType, type_names: *const c_char) -> *const c_char {
     let data = unsafe { &mut *data };
-    if let Err(e) = data.add_return_type(return_type) {
+    let return_type_name = unsafe { type_names.as_ref().map(|ptr|  CStr::from_ptr(ptr).to_string_lossy().into_owned() ) };
+
+    if let Err(e) = match return_type_name {
+        Some(name) => data.add_return_type_named(return_type, name),
+        None => data.add_return_type(return_type),
+    } {
         return CString::new(format!("{}", e)).unwrap().into_raw()
     }
     ptr::null()
