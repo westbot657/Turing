@@ -374,6 +374,18 @@ extern "C" fn turing_create_params(size: u32) -> *mut Params {
 }
 
 #[unsafe(no_mangle)]
+extern "C" fn turing_params_get_size(params: *mut Params) -> u32 {
+    let params = unsafe { &*params };
+    params.len()
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn turing_params_clear(params: *mut Params) {
+    let params = unsafe { &mut *params };
+    params.clear();
+}
+
+#[unsafe(no_mangle)]
 /// # Safety
 /// `params` must be a valid pointer to a `Params`.
 /// This function silently fails if params is null.
