@@ -103,7 +103,6 @@ pub struct Turing<Ext: ExternalFunctions + Send + Sync + 'static> {
     pub engine: Option<Engine<Ext>>,
     pub data: Arc<RwLock<EngineDataState>>,
     pub script_fns: FxHashMap<String, ScriptFnMetadata>,
-    pub available_capabilities: HashMap<String, Semver>,
     _ext: PhantomData<Ext>
 }
 
@@ -146,20 +145,21 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
             engine: None,
             script_fns,
             data,
-            available_capabilities: HashMap::new(),
             _ext: PhantomData,
         }
     }
     
-    /// Calling this is only required for the spec generator to work correctly.
-    pub fn register_api_version(&mut self, name: impl ToString, version: Semver) {
-        self.available_capabilities.insert(name.to_string(), version);
+    /// Enables a capability for the currently loaded script
+    pub fn register_capability(&mut self, name: impl ToString) {
+        self.data.write().active_capabilities.insert(name.to_string());
+    }
+
+    /// Disables a capability for the currently loaded script
+    pub fn unregister_capability(&mut self, name: impl AsRef<str>) {
+        self.data.write().active_capabilities.remove(name.as_ref());
     }
     
-    /// This is a dev function for generating the spec files used to generate binding files, not meant to be called in production.
-    pub fn generate_specs(&self, output_directory: &Path) -> Result<()> {
-        generate_specs(&self.script_fns, &self.available_capabilities, output_directory)
-    }
+
     
     pub fn load_script(
         &mut self,

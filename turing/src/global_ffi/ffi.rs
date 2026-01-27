@@ -8,13 +8,13 @@ use anyhow::{anyhow, Result};
 use rustc_hash::FxHashMap;
 use crate::interop::params::{DataType, FfiParam, FreeableDataType, Param, Params};
 use crate::interop::types::Semver;
-use crate::{Turing, panic_hook};
+use crate::{Turing, panic_hook, spec_gen};
 use crate::engine::types::{ScriptCallback, ScriptFnMetadata};
 use crate::global_ffi::wrappers::*;
 
 pub type ScriptFnMap = FxHashMap<String, ScriptFnMetadata>;
 pub type TuringInstance = Turing<CsFns>;
-pub type TuringInit = Result<Turing<CsFns>>;
+pub type TuringInitResult = Result<Turing<CsFns>>;
 pub type VersionTable = Vec<(String, Semver)>;
 pub type CacheKey = u32;
 
@@ -292,12 +292,16 @@ unsafe extern "C" fn turing_script_fast_call_fixed_update(turing: *mut TuringIns
 /// 
 /// The caller is responsible for freeing the returned error string if not null
 #[unsafe(no_mangle)]
-unsafe extern "C" fn turing_script_dump_sec(turing: *mut TuringInstance, out_dir: *const c_char) -> *const c_char {
-    let turing = unsafe { &mut *turing };
+unsafe extern "C" fn turing_script_dump_sec(out_dir: *const c_char, wasm_fns_ptr: *mut ScriptFnMap, versions: *mut VersionTable) -> *const c_char {
+    let map = unsafe { &*wasm_fns_ptr };
+    let versions = unsafe { &*versions };
+
+    let versions_map = versions.clone().into_iter().collect();
+
     let out = unsafe { CStr::from_ptr(out_dir).to_string_lossy().into_owned() };
     let out = std::path::Path::new(&out);
 
-    match turing.generate_specs(out) {
+    match spec_gen::generator::generate_specs(map, &versions_map, out) {
         Ok(_) => ptr::null(),
         Err(e) => CString::new(format!("{}", e)).unwrap().into_raw(),
     }
@@ -307,7 +311,7 @@ unsafe extern "C" fn turing_script_dump_sec(turing: *mut TuringInstance, out_dir
 /// # Safety
 /// `wasm_fns_ptr` must be a valid pointer to a `HashMap<String, ScriptFnMetadata>`.
 /// `wasm_fns_ptr` will be freed during this function and must no longer be used.
-unsafe extern "C" fn turing_create_instance(wasm_fns_ptr: *mut ScriptFnMap) -> *mut TuringInit {
+unsafe extern "C" fn turing_create_instance(wasm_fns_ptr: *mut ScriptFnMap) -> *mut TuringInitResult {
     let map = unsafe { Box::from_raw(wasm_fns_ptr) };
     let mut turing = Turing::new();
     turing.script_fns = *map;
@@ -320,7 +324,7 @@ unsafe extern "C" fn turing_create_instance(wasm_fns_ptr: *mut ScriptFnMap) -> *
 /// # Safety
 /// `res_ptr` must be a valid pointer to a `Result<Turing>`.
 /// the caller is responsible for freeing the returned string if not null.
-unsafe extern "C" fn turing_instance_check_error(res_ptr: *mut TuringInit) -> *const c_char {
+unsafe extern "C" fn turing_instance_check_error(res_ptr: *mut TuringInitResult) -> *const c_char {
     let res = unsafe { &*res_ptr };
 
     if let Err(e) = res {
@@ -336,7 +340,7 @@ unsafe extern "C" fn turing_instance_check_error(res_ptr: *mut TuringInit) -> *c
 /// `res_ptr` must have been checked with `check_error` and handled if an error was returned.
 /// If `res_ptr` points to an `Err` value, this function will abort the process.
 /// `res_ptr` will be freed during this function and must no longer be used.
-unsafe extern "C" fn turing_instance_unwrap(res_ptr: *mut TuringInit) -> *mut TuringInstance {
+unsafe extern "C" fn turing_instance_unwrap(res_ptr: *mut TuringInitResult) -> *mut TuringInstance {
     let res = unsafe { *Box::from_raw(res_ptr) };
 
     let Ok(turing) = res else {
@@ -407,35 +411,21 @@ extern "C" fn turing_delete_param(param: FfiParam) {
 /// The returned table may be null if no engine is active or no script is loaded.
 unsafe extern "C" fn turing_versions_get(turing: *mut TuringInstance) -> *mut VersionTable {
     let turing = unsafe { &*turing };
-    if let Some(versions) = turing.get_api_versions() {
-        let versions: VersionTable = versions.iter().map(|(n, v)| (n.clone(), *v)).collect();
-        let versions = Box::new(versions.clone());
-        Box::into_raw(versions)
-    } else {
-        ptr::null::<VersionTable>() as *mut _
-    }
-
-}
-#[unsafe(no_mangle)]
-/// Creates a new VersionTable and returns a pointer to it. You must free this with `turing_delete_versions`
-extern "C" fn turing_versions_create() -> *mut VersionTable {
-    let versions: VersionTable = Vec::new();
+    let Some(versions) = turing.get_api_versions() else {
+        return ptr::null::<VersionTable>() as *mut _;
+    };
+    
+    let versions: VersionTable = versions.iter().map(|(n, v)| (n.clone(), *v)).collect();
     let versions = Box::new(versions.clone());
     Box::into_raw(versions)
 }
 
 #[unsafe(no_mangle)]
-/// # Safety
-/// `turing` must be a valid pointer to a `Turing`.
-/// `versions` must be a valid pointer to a `VersionTable`. Note: the versions table is not freed and can continue to be modified independently of what this turing instance has.
-unsafe extern "C" fn turing_versions_set(turing: *mut TuringInstance, versions: *mut VersionTable) {
-    let turing = unsafe { &mut *turing };
-    let versions = unsafe { &*versions };
-
-    for (name, version) in versions {
-        turing.register_api_version(name, *version);
-    }
-
+/// Creates a new VersionTable and returns a pointer to it. You must free this with `turing_delete_versions`
+extern "C" fn turing_versions_create() -> *mut VersionTable {
+    let versions: VersionTable = Default::default();
+    let versions = Box::new(versions);
+    Box::into_raw(versions)
 }
 
 #[unsafe(no_mangle)]

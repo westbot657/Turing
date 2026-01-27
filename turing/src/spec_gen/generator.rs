@@ -11,7 +11,7 @@ use crate::interop::types::Semver;
 /// This places txt files in the `output_folder` titled as `<capability>.txt`
 pub fn generate_specs(
     metadata: &FxHashMap<String, ScriptFnMetadata>,
-    api_versions: &HashMap<String, Semver>,
+    api_versions: &FxHashMap<String, Semver>,
     output_directory: &Path,
 ) -> Result<()> {
 
