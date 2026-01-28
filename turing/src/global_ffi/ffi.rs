@@ -87,13 +87,19 @@ extern "C" fn turing_create_fn_map() -> *mut ScriptFnMap {
 /// `map` must be a valid pointer to a `HashMap<String, ScriptFnMetadata>`.
 /// `name` must be a non-null `UTF-8` string.
 /// `data` must be a valid pointer to a `ScriptFnMetadata`.
-unsafe extern "C" fn turing_fn_map_add_data(map: *mut ScriptFnMap, name: *const c_char, data: *mut ScriptFnMetadata) {
+/// Returns null or a string pointer on error. You must check this and free if not null.
+unsafe extern "C" fn turing_fn_map_add_data(map: *mut ScriptFnMap, name: *const c_char, data: *mut ScriptFnMetadata) -> *const c_char {
     let data = unsafe { *Box::from_raw(data) };
 
     let name = unsafe { CStr::from_ptr(name).to_string_lossy().into_owned() };
     let map = unsafe { &mut *map };
 
+    if map.contains_key(&name) {
+        return CString::new(format!("FnMap already has a function named '{name}'")).unwrap().into_raw()
+    }
+
     map.insert(name, data);
+    ptr::null()
 }
 
 #[unsafe(no_mangle)]
