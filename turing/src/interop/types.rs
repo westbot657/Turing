@@ -4,7 +4,7 @@ use std::fmt::{Display, Formatter};
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ops::Deref;
-use std::ptr;
+use std::{ptr, slice};
 use crate::ExternalFunctions;
 
 #[derive(Default, Eq, Clone, Copy)]
@@ -170,5 +170,44 @@ impl Default for ExtPointer {
     fn default() -> Self {
         ExtPointer { ptr: ptr::null() }
     }
+}
+
+
+
+#[repr(C)]
+#[derive(Copy)]
+pub struct U32Buffer {
+    pub size: u32,
+    pub array: *mut u32,
+}
+
+impl Clone for U32Buffer {
+    fn clone(&self) -> Self {
+        Self {
+            size: self.size,
+            array: self.array,
+        }
+    }
+}
+
+impl U32Buffer {
+    pub fn from_rust(self) -> Vec<u32> {
+        let slice = unsafe { Box::from_raw(slice::from_raw_parts_mut(self.array, self.size as usize)) };
+        slice.into_vec()
+
+    }
+
+    pub fn from_ext<Ext: ExternalFunctions>(self) -> Vec<u32> {
+        let slice = unsafe { slice::from_raw_parts(self.array, self.size as usize) };
+        let v = slice.to_vec();
+        Ext::free_u32_buffer(self);
+        v
+    }
+
+    pub fn borrow(&self) -> Vec<u32> {
+        let slice = unsafe { slice::from_raw_parts(self.array, self.size as usize) };
+        slice.to_vec()
+    }
+
 }
 

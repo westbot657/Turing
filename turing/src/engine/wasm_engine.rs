@@ -170,6 +170,9 @@ impl Param {
             DataType::RustVec4 | DataType::ExtVec4 => dequeue!(Vec4::from_slice; 4),
             DataType::RustQuat | DataType::ExtQuat => dequeue!(Quat::from_slice; 4),
             DataType::RustMat4 | DataType::ExtMat4 => dequeue!(Mat4::from_cols_slice; 16),
+            DataType::RustU32Buffer | DataType::ExtU32Buffer => {
+                let ptr = val.unwrap_i32() as usize;
+            }
         }
     }
 
@@ -216,6 +219,11 @@ impl Param {
             Param::Vec4(v) => enqueue!(v; 4),
             Param::Quat(q) => enqueue!(q; 4),
             Param::Mat4(m) => enqueue!(m # 16),
+            Param::U32Buffer(v) => {
+                let l = v.len();
+                s.u32_buffer_queue.push_back(v);
+                Val::I32(l as i32)
+            }
         }))
     }
 
@@ -280,6 +288,11 @@ impl Params {
                     Param::Vec4(v) => enqueue!(v; 4),
                     Param::Quat(q) => enqueue!(q; 4),
                     Param::Mat4(m) => enqueue!(m # 16),
+                    Param::U32Buffer(v) => {
+                        let l = v.len();
+                        s.u32_buffer_queue.push_back(v);
+                        Ok(Val::I32(l as i32))
+                    }
                 }
             }
         ).collect()
