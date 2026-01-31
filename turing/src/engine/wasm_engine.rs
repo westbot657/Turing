@@ -627,6 +627,9 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             let pts = metadata.param_types.iter().map(|d| d.data_type).collect::<Vec<DataType>>();
 
             let data2 = Arc::clone(&data);
+
+            Ext::log_debug(format!("Registered wasm function: env::{name}"));
+
             linker.func_new(
                 "env",
                 name.as_str(),
