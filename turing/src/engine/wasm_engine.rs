@@ -610,7 +610,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         for (name, metadata) in wasm_fns.iter() {
 
             // Convert from `ClassName::functionName` to `_class_name_function_name`
-            let mut name = name.replace(":", "_").replace(".", "_").to_case(Case::Snake);
+            let mut name = name.replace("::", "_").replace(".", "_").to_case(Case::Snake);
             name.insert(0, '_');
 
             let p_types = metadata.param_types.iter().map(|d| d.data_type.to_val_type()).collect::<Result<Vec<ValType>>>()?;
