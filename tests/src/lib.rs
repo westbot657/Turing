@@ -4,7 +4,7 @@ use std::{fs, io};
 
 
 unsafe extern "C" {
-    fn _log_info(msg: *const c_char);
+    fn _log__info(msg: *const c_char);
     fn _fetch_string() -> u32;
     fn _host_strcpy(location: u32, size: u32) -> u32;
 }
@@ -13,7 +13,7 @@ macro_rules! println {
     ( $( $tok:expr ),* ) => {
         {
             let s = CString::new(format!($($tok),*)).unwrap();
-            unsafe { _log_info(s.as_ptr()) }
+            unsafe { _log__info(s.as_ptr()) }
         }
     };
 }
@@ -24,7 +24,7 @@ extern "C" fn on_load() {
         let s = CString::new("log info from wasm!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!").unwrap();
         let ptr = s.into_raw();
 
-        _log_info(ptr);
+        _log__info(ptr);
     }
 }
 
@@ -33,7 +33,7 @@ extern "C" fn file_access_test() {
 
     let current_path = Path::new(env!("CARGO_MANIFEST_DIR"));
     let readme = current_path.parent().unwrap().join("README.md");
-    let bytes = fs::read(readme).unwrap();
+    let bytes = fs::read(readme).expect("Failed to read README.md");
 
     let content = String::from_utf8(bytes);
 

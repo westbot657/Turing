@@ -46,7 +46,7 @@ fn setup_turing_with_callbacks() -> Turing<DirectExt> {
 
     let mut meta = ScriptFnMetadata::new("test".to_owned(), log_info_wasm, None);
     let _ = meta.add_param_type(DataType::RustString, "msg");
-    turing.add_function("log_info", meta).unwrap();
+    turing.add_function("log::info", meta).unwrap();
 
     let mut meta = ScriptFnMetadata::new("test".to_owned(), fetch_string, None);
     let _ = meta.add_return_type(DataType::ExtString);
