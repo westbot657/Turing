@@ -4,11 +4,14 @@ use convert_case::{Case, Casing};
 
 pub type ScriptCallback = extern "C" fn(FfiParamArray) -> FfiParam;
 
+// Represents the name of a type used in parameter or return type lists
+pub type DataTypeName = String;
+
 #[derive(Clone)]
 pub struct ScriptFnParameter {
     pub name: String,
     pub data_type: DataType,
-    pub data_type_name: String,
+    pub data_type_name: DataTypeName,
 }
 
 #[derive(Clone)]
@@ -16,7 +19,7 @@ pub struct ScriptFnMetadata {
     pub capability: String,
     pub callback: ScriptCallback,
     pub param_types: Vec<ScriptFnParameter>,
-    pub return_type: Vec<(DataType, String)>,
+    pub return_type: Vec<(DataType, DataTypeName)>,
     pub doc_comment: Option<String>,
 }
 
@@ -101,7 +104,7 @@ impl ScriptFnMetadata {
 
     /// Determines if function is a static method
     pub fn is_static_method(fn_name: &str) -> bool {
-        fn_name.contains("::")
+        !Self::is_instance_method(fn_name) && fn_name.contains("::")
     }
 
     /// Converts function name to internal representation

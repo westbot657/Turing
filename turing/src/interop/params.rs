@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::fmt::Display;
@@ -12,7 +13,7 @@ use crate::interop::types::ExtString;
 
 
 #[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFromPrimitive)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFromPrimitive, Serialize, Deserialize)]
 pub enum DataType {
     I8 = 1,
     I16 = 2,

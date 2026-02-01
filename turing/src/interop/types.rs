@@ -5,9 +5,11 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::ptr;
+use serde::{Deserialize, Serialize};
+
 use crate::ExternalFunctions;
 
-#[derive(Default, Eq, Clone, Copy)]
+#[derive(Debug, Default, Eq, Clone, Copy, Serialize, Deserialize)]
 pub struct Semver {
     pub major: u32,
     pub minor: u16,

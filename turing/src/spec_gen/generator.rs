@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use rustc_hash::FxHashMap;
-use crate::engine::types::ScriptFnMetadata;
+use crate::{engine::types::ScriptFnMetadata, spec_gen::json_generator};
 
 use anyhow::{Result, anyhow};
 use convert_case::{Case, Casing};
@@ -34,6 +34,12 @@ pub fn generate_specs(
         let path = output_directory.join(format!("{}.txt", name));
         fs::write(path, contents)?;
     }
+
+    let json = json_generator::generate_specs_json(metadata, api_versions)?;
+
+    let json_path = output_directory.join("specs.json");
+    let json_contents = serde_json::to_string_pretty(&json)?;
+    fs::write(json_path, json_contents)?;
 
     Ok(())
 }
