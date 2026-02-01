@@ -9,7 +9,6 @@ use anyhow::Result;
 pub struct SpecClass {
     pub is_opaque: bool,
     pub capability: String,
-    pub api_version: Option<Semver>,
     
     pub functions: Vec<SpecMethod>,
 }
@@ -38,6 +37,7 @@ pub struct SpecParam {
 #[derive(Debug, Serialize)]
 pub struct SpecMap {
     pub specs: FxHashMap<String, SpecClass>,
+    pub api_versions: FxHashMap<String, Semver>,
 }
 
 pub fn generate_specs_json(
@@ -69,7 +69,6 @@ pub fn generate_specs_json(
             is_opaque: false,
             functions: Vec::new(),
             capability: data.capability.clone(),
-            api_version: api_versions.get(&data.capability).cloned(),
         });
 
         if name.contains(".") {
@@ -96,5 +95,5 @@ pub fn generate_specs_json(
         });
     }
 
-    Ok(SpecMap { specs })
+    Ok(SpecMap { specs, api_versions: api_versions.clone() })
 }
