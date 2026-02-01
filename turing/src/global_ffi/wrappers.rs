@@ -4,6 +4,7 @@ use std::ffi::{c_char, c_void, CString};
 use std::mem;
 use crate::ExternalFunctions;
 use crate::interop::params::FreeableDataType;
+use crate::interop::types::U32Buffer;
 
 pub type CsAbort = extern "C" fn(*const c_char, *const c_char);
 pub type CsLog = extern "C" fn(*const c_char);
@@ -112,6 +113,10 @@ impl ExternalFunctions for CsFns {
 
     fn free_of_type(ptr: *mut c_void, typ: FreeableDataType) {
         unsafe { typ.free_ptr(ptr) }
+    }
+
+    fn free_u32_buffer(buf: U32Buffer) {
+
     }
 
 }

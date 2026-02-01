@@ -520,6 +520,20 @@ pub fn get_wasm_string(message: u32, data: &[u8]) -> String {
     }
 }
 
+fn get_u32_vec(ptr: u32, len: u32, data: &[u8]) -> Option<Vec<u32>> {
+    let start = ptr as usize;
+    let end = start.checked_add((len as usize).checked_mul(4)?)?;
+    if end > data.len() {
+        return None
+    }
+    let mut vec = vec![0u32; len as usize];
+    for i in 0..len as usize {
+        let offset = start + i * 4;
+        vec[i] = u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap());
+    }
+    Some(vec)
+}
+
 /// writes a string from rust memory to wasm memory.
 pub fn write_wasm_string(
     pointer: u32,
