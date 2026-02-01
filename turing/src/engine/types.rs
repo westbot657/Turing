@@ -1,5 +1,6 @@
 use crate::interop::params::{DataType, FfiParam, FfiParamArray};
 use anyhow::anyhow;
+use convert_case::{Case, Casing};
 
 pub type ScriptCallback = extern "C" fn(FfiParamArray) -> FfiParam;
 
@@ -91,6 +92,26 @@ impl ScriptFnMetadata {
         }
         self.return_type.push((r, type_name));
         Ok(self)
+    }
+
+    /// Determines if function is an instance method
+    pub fn is_instance_method(fn_name: &str) -> bool {
+        fn_name.contains(".")
+    }
+
+    /// Determines if function is a static method
+    pub fn is_static_method(fn_name: &str) -> bool {
+        fn_name.contains("::")
+    }
+
+    /// Converts function name to internal representation
+    /// e.g. `Class::functionName` becomes `capability_class_function_name`
+    pub fn as_internal_name(&self, fn_name: &str) -> String {
+        format!(
+            "_{}_{}",
+            self.capability.to_case(Case::Snake),
+            fn_name.to_case(Case::Snake).replace("::", "__").replace(".", "__")
+        )
     }
 }
 

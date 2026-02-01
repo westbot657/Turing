@@ -609,10 +609,15 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         for (name, metadata) in wasm_fns.iter() {
 
             // Convert from `ClassName::functionName` to `_class_name_function_name`
-            let mut name = name.replace("::", "__").replace(".", "__").to_case(Case::Snake);
-            name.insert(0, '_');
+            let mut internal_name = name.replace("::", "__").replace(".", "__").to_case(Case::Snake);
+            internal_name.insert(0, '_');
 
-            let p_types = metadata.param_types.iter().map(|d| d.data_type.to_val_type()).collect::<Result<Vec<ValType>>>()?;
+            let mut p_types = metadata.param_types.iter().map(|d| d.data_type.to_val_type()).collect::<Result<Vec<ValType>>>()?;
+
+            if ScriptFnMetadata::is_instance_method(name) {
+                // instance methods get an extra first parameter for the instance pointer
+                p_types.insert(0, DataType::Object.to_val_type().unwrap());
+            }
 
             // if the only return type is void, we treat it as no return types
             let r_types = if metadata.return_type.len() == 1 && metadata.return_type.first().cloned().map(|r| r.0) == Some(DataType::Void) {
@@ -627,11 +632,11 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
 
             let data2 = Arc::clone(&data);
 
-            Ext::log_debug(format!("Registered wasm function: env::{name}"));
+            Ext::log_debug(format!("Registered wasm function: env::{internal_name} {}", ft));
 
             linker.func_new(
                 "env",
-                name.as_str(),
+                internal_name.as_str(),
                 ft,
                 move |caller, ps, rs| {
                     wasm_bind_env::<Ext>(&data2, caller, &cap, ps, rs, pts.as_slice(), &callback)
