@@ -96,10 +96,9 @@ impl DataType {
             | DataType::RustQuat
             | DataType::ExtQuat
             | DataType::RustMat4
-            | DataType::ExtMat4
-            | DataType::Object => Ok(ValType::I32),
+            | DataType::ExtMat4 => Ok(ValType::I32),
 
-            DataType::I64 | DataType::U64 => Ok(ValType::I64),
+            DataType::I64 | DataType::U64 | DataType::Object => Ok(ValType::I64),
 
             DataType::F32 => Ok(ValType::F32),
             DataType::F64 => Ok(ValType::F64),
