@@ -71,7 +71,7 @@ fn generate_spec(api: &str, ver: Semver, metadata: &FxHashMap<String, ScriptFnMe
             }
             let (is_opaque, map) = classes.get_mut(&class_name).unwrap();
             *is_opaque = true;
-            map.push(data.generate_signature(Some(&class_name), &func_name, FnType::Method))
+            map.push(data.generate_signature(&func_name, FnType::Method, &data.as_internal_name(name)))
         } else if name.contains("::") { // functions
             let names = name.splitn(2, "::").collect::<Vec<&str>>();
             let class_name = names[0].to_case(Case::Pascal);
@@ -80,9 +80,9 @@ fn generate_spec(api: &str, ver: Semver, metadata: &FxHashMap<String, ScriptFnMe
                 classes.insert(class_name.to_string(), (false, Vec::new()));
             }
             let (_, map) = classes.get_mut(&class_name).unwrap();
-            map.push(data.generate_signature(Some(&class_name), &func_name, FnType::Function))
+            map.push(data.generate_signature(&func_name, FnType::Function, &data.as_internal_name(name)))
         } else { // globals
-            globals.push(data.generate_signature(None, name, FnType::Global))
+            globals.push(data.generate_signature(name, FnType::Global, &data.as_internal_name(name)))
         }
     }
 
@@ -117,12 +117,9 @@ enum FnType {
 }
 
 impl ScriptFnMetadata {
-    fn generate_signature(&self, class_name: Option<&str>, func_name: &str, ty: FnType) -> String {
+    fn generate_signature(&self, func_name: &str, ty: FnType, binding: &str) -> String {
         let mut out = String::new();
 
-        let binding = "_".to_string()
-            + &if let Some(cn) = class_name { cn.to_case(Case::Snake) + "__" } else { String::new() }
-            + &func_name.to_case(Case::Snake);
 
         if matches!(ty, FnType::Function) {
             out += "::";
@@ -155,7 +152,7 @@ impl ScriptFnMetadata {
         out += self.return_type.first().map_or("void", |v| &v.1);
 
         out += " : ";
-        out += &binding;
+        out += binding;
 
         out
     }
