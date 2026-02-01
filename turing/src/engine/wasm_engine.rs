@@ -638,14 +638,13 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         for (name, metadata) in wasm_fns.iter() {
 
             // Convert from `ClassName::functionName` to `_class_name_function_name`
-            let mut internal_name = name.replace("::", "__").replace(".", "__").to_case(Case::Snake);
-            internal_name.insert(0, '_');
+            let internal_name = metadata.as_internal_name(name);
 
             let mut p_types = metadata.param_types.iter().map(|d| d.data_type.to_val_type()).collect::<Result<Vec<ValType>>>()?;
 
             if ScriptFnMetadata::is_instance_method(name) {
                 // instance methods get an extra first parameter for the instance pointer
-                p_types.insert(0, DataType::Object.to_val_type().unwrap());
+                p_types.insert(0, DataType::Object.to_val_type()?);
             }
 
             // if the only return type is void, we treat it as no return types
