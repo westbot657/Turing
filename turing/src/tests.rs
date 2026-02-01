@@ -3,6 +3,7 @@ use crate::interop::params::{DataType, FfiParam, FfiParamArray, FreeableDataType
 use crate::{ExternalFunctions, Turing};
 use anyhow::Result;
 use std::ffi::{CString, c_char, c_void};
+use crate::interop::types::U32Buffer;
 
 struct DirectExt {}
 impl ExternalFunctions for DirectExt {
@@ -32,6 +33,10 @@ impl ExternalFunctions for DirectExt {
 
     fn free_of_type(ptr: *mut c_void, typ: FreeableDataType) {
         unsafe { typ.free_ptr(ptr) }
+    }
+
+    fn free_u32_buffer(buf: U32Buffer) {
+        buf.from_rust();
     }
 }
 

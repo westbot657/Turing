@@ -119,6 +119,7 @@ impl DataType {
             DataType::RustVec4 | DataType::ExtVec4 => "Vec4",
             DataType::RustQuat | DataType::ExtQuat => "Quat",
             DataType::RustMat4 | DataType::ExtMat4 => "Mat4",
+            DataType::RustU32Buffer | DataType::ExtU32Buffer => "&Vu32"
         })
     }
 
@@ -146,6 +147,7 @@ impl DataType {
             DataType::RustVec4 | DataType::ExtVec4 => "Vec4",
             DataType::RustQuat | DataType::ExtQuat => "Quat",
             DataType::RustMat4 | DataType::ExtMat4 => "Mat4",
+            DataType::RustU32Buffer | DataType::ExtU32Buffer => "Vu32"
         })
     }
 }

@@ -191,12 +191,14 @@ impl Clone for U32Buffer {
 }
 
 impl U32Buffer {
+    /// Moves the data into a Vec<u32> and frees the underlying data directly
     pub fn from_rust(self) -> Vec<u32> {
         let slice = unsafe { Box::from_raw(slice::from_raw_parts_mut(self.array, self.size as usize)) };
         slice.into_vec()
 
     }
 
+    /// Copies the data into a Vec<u32> and asks the external code to free the underlying data
     pub fn from_ext<Ext: ExternalFunctions>(self) -> Vec<u32> {
         let slice = unsafe { slice::from_raw_parts(self.array, self.size as usize) };
         let v = slice.to_vec();
@@ -204,6 +206,7 @@ impl U32Buffer {
         v
     }
 
+    /// Copies the data into a Vec<u32> without freeing in any way
     pub fn borrow(&self) -> Vec<u32> {
         let slice = unsafe { slice::from_raw_parts(self.array, self.size as usize) };
         slice.to_vec()

@@ -170,7 +170,9 @@ impl Param {
             DataType::RustQuat | DataType::ExtQuat => dequeue!(Quat::from_slice; 4),
             DataType::RustMat4 | DataType::ExtMat4 => dequeue!(Mat4::from_cols_slice; 16),
             DataType::RustU32Buffer | DataType::ExtU32Buffer => {
-                let ptr = val.unwrap_i32() as usize;
+                let ptr = val.unwrap_i32() as u32;
+                let len = data.write().f32_queue.pop_front().unwrap().to_bits();
+                Param::U32Buffer(get_u32_vec(ptr, len, memory.data(caller)).unwrap())
             }
         }
     }

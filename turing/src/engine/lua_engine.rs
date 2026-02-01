@@ -17,6 +17,37 @@ use crate::interop::params::{DataType, Param, Params};
 use crate::interop::types::{ExtPointer, Semver};
 
 
+fn vec_u32_to_lua_list(lua: &Lua, vec: Vec<u32>) -> mlua::Result<Value> {
+    let table = lua.create_table_with_capacity(vec.len(), 0)?;
+
+    for (i, v) in vec.into_iter().enumerate() {
+        // Lua arrays are 1-indexed
+        table.set((i + 1) as i64, v)?;
+    }
+
+    Ok(Value::Table(table))
+}
+
+fn lua_list_to_vec_u32(table: &Table) -> mlua::Result<Vec<u32>> {
+
+    let len = table.len()? as usize;
+    let mut vec = Vec::with_capacity(len);
+
+    for i in 1..=len {
+        let v: u32 = table.get(i as i64).map_err(|e| {
+            mlua::Error::FromLuaConversionError {
+                from: "Lua value",
+                to: "u32".to_string(),
+                message: Some(format!("invalid value at index {}", i)),
+            }
+        })?;
+        vec.push(v);
+    }
+
+    Ok(vec)
+}
+
+
 impl DataType {
     pub fn to_lua_val_param(&self, val: &Value, data: &Arc<RwLock<EngineDataState>>) -> mlua::Result<Param> {
         match (self, val) {
@@ -44,6 +75,9 @@ impl DataType {
                 } else {
                     Err(mlua::Error::RuntimeError("opaque pointer does not correspond to a real pointer".to_string()))
                 }
+            }
+            (DataType::RustU32Buffer | DataType::ExtU32Buffer, Value::Table(t)) => {
+                Ok(Param::U32Buffer(lua_list_to_vec_u32(t)?))
             }
             _ => Err(mlua::Error::RuntimeError(format!("Mismatched parameter type: {self} with {val:?}")))
         }
@@ -91,6 +125,9 @@ impl Param {
             DataType::RustVec4 | DataType::ExtVec4 => lua_glam::unpack_vec4(val),
             DataType::RustQuat | DataType::ExtQuat => lua_glam::unpack_quat(val),
             DataType::RustMat4 | DataType::ExtMat4 => lua_glam::unpack_mat4(val),
+            DataType::RustU32Buffer | DataType::ExtU32Buffer => {
+                Param::U32Buffer(lua_list_to_vec_u32(val.as_table().unwrap()).unwrap())
+            }
         }
     }
 
@@ -128,6 +165,7 @@ impl Param {
             Param::Vec4(v) => lua_glam::create_vec4(v, lua).map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))?,
             Param::Quat(q) => lua_glam::create_quat(q, lua).map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))?,
             Param::Mat4(m) => lua_glam::create_mat4(m, lua).map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))?,
+            Param::U32Buffer(b) => vec_u32_to_lua_list(lua, b)?
         })
     }
 
@@ -172,6 +210,9 @@ impl Params {
                 Param::Vec4(v) => lua_glam::create_vec4(v, lua).map_err(|e| anyhow!("{e}")),
                 Param::Quat(q) => lua_glam::create_quat(q, lua).map_err(|e| anyhow!("{e}")),
                 Param::Mat4(m) => lua_glam::create_mat4(m, lua).map_err(|e| anyhow!("{e}")),
+                Param::U32Buffer(b) => {
+                    vec_u32_to_lua_list(lua, b).map_err(|e| anyhow!("{e}"))
+                }
             }
         ).collect::<Result<Vec<Value>>>()?;
 
