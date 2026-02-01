@@ -263,6 +263,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
             )
         }).map_err(|e| anyhow!("Failed to create function: {e}"))?;
 
+        Ext::log_debug(format!("Adding function '{name}' to table"));
         table.set(name, func).map_err(|e| anyhow!("Failed to set function: {e}"))?;
 
         Ok(())
@@ -272,6 +273,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
         if api.raw_get::<Table>(cname).is_err() {
             let cls_table = lua.create_table().map_err(|e| anyhow!("Failed to create table: {e}"))?;
             cls_table.raw_set("__index", cls_table.clone()).map_err(|e| anyhow!("Failed to set table as self's __index member: {e}"))?;
+            Ext::log_debug(format!("Created new table: '{cname}'"));
             api.raw_set(
                 cname,
                 cls_table
@@ -322,8 +324,8 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
 
                 let Ok(table) = api.raw_get::<Table>(cname.as_str()) else { return Err(anyhow!("table['{cname}'] is not a table")) };
                 self.generate_function(lua, &table, fname.as_str(), metadata)?;
-            } else if name.contains(":") {
-                let parts: Vec<&str> = name.splitn(2, ":").collect();
+            } else if name.contains("::") {
+                let parts: Vec<&str> = name.splitn(2, "::").collect();
                 let cname = parts[0].to_case(Case::Pascal);
                 let fname = parts[1].to_case(Case::Snake);
 

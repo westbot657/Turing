@@ -12,19 +12,19 @@ impl ExternalFunctions for DirectExt {
     }
 
     fn log_info(msg: impl ToString) {
-        println!("[info]: {}", msg.to_string())
+        println!("\x1b[38;2;50;200;50m[info]: {}\x1b[0m", msg.to_string())
     }
 
     fn log_warn(msg: impl ToString) {
-        println!("[warn]: {}", msg.to_string())
+        println!("\x1b[38;2;255;127;30m[warn]: {}\x1b[0m", msg.to_string())
     }
 
     fn log_debug(msg: impl ToString) {
-        println!("[debug]: {}", msg.to_string())
+        println!("\x1b[38;2;20;200;200m[debug]: {}\x1b[0m", msg.to_string())
     }
 
     fn log_critical(msg: impl ToString) {
-        println!("[critical]: {}", msg.to_string())
+        println!("\x1b[38;2;200;20;20m[critical]: {}\x1b[0m", msg.to_string())
     }
 
     fn free_string(ptr: *const c_char) {
@@ -51,7 +51,7 @@ extern "C" fn log_info_wasm(params: FfiParamArray) -> FfiParam {
 
     match msg {
         Param::String(s) => {
-            println!("[wasm/info]: {}", s);
+            println!("\x1b[38;2;20;200;20m[wasm/info]: {}\x1b[0m", s);
             Param::Void.to_ext_param()
         }
         _ => Param::Error(format!(
@@ -123,7 +123,7 @@ fn test_math(mut turing: Turing<DirectExt>) -> Result<()> {
 
     let res = turing.call_fn_by_name("math_ops_test", params, DataType::F32);
 
-    println!("[test/ext]: code multiplied 3.5 by 5.0 for {:#?}", res);
+    println!("\x1b[38;2;200;200;20m[test/ext]: code multiplied 3.5 by 5.0 for {:#?}\x1b[0m", res);
     assert!((res.to_result::<f32>()? - 17.5).abs() < f32::EPSILON);
 
     Ok(())
@@ -135,11 +135,11 @@ pub fn test_math_wasm() -> Result<()> {
     test_math(turing)
 }
 
-// #[test]
-// pub fn test_math_lua() -> Result<()> {
-//     let turing = common_setup_direct(LUA_SCRIPT)?;
-//     test_math(turing)
-// }
+#[test]
+pub fn test_math_lua() -> Result<()> {
+    let turing = common_setup_direct(LUA_SCRIPT)?;
+    test_math(turing)
+}
 
 #[test]
 pub fn test_stdin_fail() -> Result<()> {
@@ -159,17 +159,17 @@ pub fn test_string_fetch() -> Result<()> {
         .to_result::<()>()
 }
 
-// #[test]
-// pub fn test_lua_string_fetch() -> Result<()> {
-//     let mut turing = common_setup_direct(LUA_SCRIPT)?;
-//
-//     let mut s = Params::of_size(1);
-//     s.push(Param::String("Message from host".to_string()));
-//
-//     let res = turing
-//         .call_fn_by_name("string_test", s, DataType::ExtString)
-//         .to_result::<String>()?;
-//
-//     println!("Received message from lua: '{res}'");
-//     Ok(())
-// }
+#[test]
+pub fn test_lua_string_fetch() -> Result<()> {
+    let mut turing = common_setup_direct(LUA_SCRIPT)?;
+
+    let mut s = Params::of_size(1);
+    s.push(Param::String("Message from host".to_string()));
+
+    let res = turing
+        .call_fn_by_name("string_test", s, DataType::ExtString)
+        .to_result::<String>()?;
+
+    println!("\x1b[38;2;200;200;20mReceived message from lua: '{res}'\x1b[0m");
+    Ok(())
+}
