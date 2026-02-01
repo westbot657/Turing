@@ -293,8 +293,7 @@ pub struct WasmInterpreter<Ext: ExternalFunctions> {
     script_instance: Option<Instance>,
     memory: Option<Memory>,
 
-    func_cache: KeyVec<ScriptFnKey, (String, Func)>,
-    typed_cache: FxHashMap<ScriptFnKey, TypedFuncEntry>,
+    func_cache: KeyVec<ScriptFnKey, (String, Func, Option<TypedFuncEntry>)>,
     
     fast_calls: FastCalls,
     pub api_versions: FxHashMap<String, Semver>,
@@ -556,7 +555,6 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             script_instance: None,
             memory: None,
             func_cache: Default::default(),
-            typed_cache: Default::default(),
             fast_calls: FastCalls::default(),
             api_versions: Default::default(),
             _ext: PhantomData
@@ -664,24 +662,20 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         self.memory = Some(memory);
         // clear any previous function cache and cache exports lazily
         self.func_cache.clear();
-        self.typed_cache.clear();
 
         // Pre-create typed wrappers for exported functions where possible to avoid first-call overhead.
         // Try a small set of common signatures and cache the TypedFunc if creation succeeds.
         for export in module.exports() {
+
             let name = export.name();
             let Some(func) = instance.get_func(&mut self.store, name) else { continue };
             
 
-            // get or insert into func cache
-            let key = self.func_cache.key_of(|x| x.0 == name).unwrap_or_else(||{
-                self.func_cache.push((name.to_string(), func))
-            });
-
-            
-            if let Some(entry) = TypedFuncEntry::from_func(&mut self.store, func) {
-                self.typed_cache.insert(key, entry);
+            // ensure no duplicates
+            if self.func_cache.key_of(|x| x.0 == name).is_some() {
+                return Err(anyhow!("Duplicate exported function name in wasm module: {}", name));
             }
+            self.func_cache.push((name.to_string(), func, TypedFuncEntry::from_func(&mut self.store, func)));
 
             if name == "on_update" {
                 let Ok(f) = func.typed::<f32, ()>(&mut self.store) else { continue };
@@ -714,15 +708,14 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         ret_type: DataType,
         data: &Arc<RwLock<EngineDataState>>,
     ) -> Param {
-        // Fast-path: typed cache (common signatures). Falls back to dynamic call below.
-        if let Some(entry) = self.typed_cache.get(&cache_key) {
-            return entry.invoke(&mut self.store, params).unwrap_or_else(Param::Error)
-        }
-
         // Try cache first to avoid repeated name lookup and Val boxing/unboxing.
         // This shouldn't be necessary as all exported functions are indexed on load
-        let (_, f) = self.func_cache.get(&cache_key);
-
+        let (_, f, typed) = self.func_cache.get(&cache_key);
+        
+        // Fast-path: typed cache (common signatures). Falls back to dynamic call below.
+        if let Some(typed) = typed {
+            return typed.invoke(&mut self.store, params).unwrap_or_else(Param::Error)
+        }
 
         let args = params.to_wasm_args(data);
         if let Err(e) = args {
