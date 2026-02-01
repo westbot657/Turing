@@ -186,6 +186,11 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
                 "script file has no extension, must be either .wasm or .lua"
             ));
         };
+
+
+        for cap in &capabilities {
+            Ext::log_info(format!("Registered capability: {}", cap));
+        }
         match extension.to_string_lossy().as_ref() {
             #[cfg(feature = "wasm")]
             "wasm" => {
