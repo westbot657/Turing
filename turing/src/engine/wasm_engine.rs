@@ -625,7 +625,12 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             let ft = FuncType::new(engine, p_types, r_types);
             let cap = metadata.capability.clone();
             let callback = metadata.callback;
-            let pts = metadata.param_types.iter().map(|d| d.data_type).collect::<Vec<DataType>>();
+            let mut pts = metadata.param_types.iter().map(|d| d.data_type).collect::<Vec<DataType>>();
+
+            if ScriptFnMetadata::is_instance_method(name) {
+                // instance methods get an extra first parameter for the instance pointer
+                pts.insert(0, DataType::Object);
+            }
 
             let data2 = Arc::clone(&data);
 
@@ -636,6 +641,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
                 internal_name.clone().as_str(),
                 ft,
                 move |caller, ps, rs| {
+                    assert_eq!(ps.len(), pts.len(), "Parameter count mismatch in wasm function call to {}", internal_name);
                     wasm_bind_env::<Ext>(&data2, caller, &cap, ps, rs, pts.as_slice(), &callback)
                 }
             )?;
@@ -809,6 +815,10 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
     let res = func(ffi_params_struct).into_param::<Ext>()?;
 
     // Convert Param back to Val for return
+    if let Param::Error(e) = &res {
+        Ext::log_debug(format!("WASM host function returning: {:?}", res));
+    }
+
     let Some(rv) = res.into_wasm_val(data)? else {
         return Ok(())
     };
