@@ -509,6 +509,14 @@ impl<'a> FfiParamArray<'a> {
     pub fn as_slice(&'a self) -> &'a [FfiParam] {
         unsafe { std::slice::from_raw_parts(self.ptr, self.count as usize) }
     }
+
+    pub fn len(&self) -> u32 {
+        self.count
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.count == 0 || self.ptr.is_null()
+    }
 }
 
 impl FfiParam {

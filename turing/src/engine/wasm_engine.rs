@@ -709,7 +709,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
     ) -> Param {
         // Try cache first to avoid repeated name lookup and Val boxing/unboxing.
         // This shouldn't be necessary as all exported functions are indexed on load
-        let (_, f, typed) = self.func_cache.get(&cache_key);
+        let (f_name, f, typed) = self.func_cache.get(&cache_key);
         
         // Fast-path: typed cache (common signatures). Falls back to dynamic call below.
         if let Some(typed) = typed {
@@ -733,7 +733,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         };
 
         if let Err(e) = f.call(&mut self.store, &args, &mut res) {
-            return Param::Error(e.to_string());
+            return Param::Error(format!("Error calling wasm function: {}\n{}", f_name, e));
         }
         // Return void quickly
         if res.is_empty() {
@@ -776,7 +776,8 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
 
 }
 
-
+/// Wraps a call from wasm into the host environment, checking capability availability
+/// and converting parameters and return values as needed.
 fn wasm_bind_env<Ext: ExternalFunctions>(
     data: &Arc<RwLock<EngineDataState>>,
     mut caller: Caller<'_, WasiP1Ctx>,
