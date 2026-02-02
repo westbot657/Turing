@@ -724,11 +724,10 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         let (_, f) = self.func_cache.get(&cache_key);
 
 
-        let args = params.to_wasm_args(data);
-        if let Err(e) = args {
-            return Param::Error(format!("{e}"))
-        }
-        let args = args.unwrap();
+        let args = match params.to_wasm_args(data) {
+            Ok(a) => a,
+            Err(e) => return Param::Error(format!("{e}"))
+        };
 
         // Fallback dynamic path
         let mut res: SmallVec<[Val; 1]> = match ret_type {
