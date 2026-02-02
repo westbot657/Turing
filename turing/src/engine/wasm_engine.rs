@@ -636,7 +636,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
                 internal_name.clone().as_str(),
                 ft,
                 move |caller, ps, rs| {
-                    wasm_bind_env::<Ext>(&data2, caller, &cap, ps, rs, pts.as_slice(), &callback, internal_name.clone().as_str())
+                    wasm_bind_env::<Ext>(&data2, caller, &cap, ps, rs, pts.as_slice(), &callback)
                 }
             )?;
 
@@ -789,9 +789,7 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
     rs: &mut [Val],
     p: &[DataType],
     func: &ScriptCallback,
-    fn_name: &str,
 ) -> Result<()> {
-    Ext::log_debug(format!("Calling host capability WASM function '{}'", fn_name));
     if !data.read().active_capabilities.contains(cap) {
         Ext::log_critical(format!("Attempted to call mod capability '{}' which is not currently loaded", cap));
         return Err(anyhow!("Mod capability '{}' is not currently loaded", cap))
@@ -800,28 +798,23 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
     // pre-allocate params to avoid repeated reallocations
     let mut params = Params::of_size(p.len() as u32);
     for (exp_typ, value) in p.iter().zip(ps) {
-        Ext::log_debug(format!("WASM -> Host Param: {} {:?}", exp_typ, value));
         params.push(exp_typ.to_wasm_val_param(value, &mut caller, data)?)
     }
 
-    Ext::log_debug(format!("WASM -> Host Call: {} with {} params", cap, params.len()));
+
     let ffi_params= params.to_ffi::<Ext>();
     let ffi_params_struct = ffi_params.as_ffi_array();
 
     // Call to C#/rust's provided callback using a clone so we can still cleanup
-    Ext::log_debug(format!("Host -> WASM Call: {} with {} ffi params", cap, ffi_params_struct.len()));
     let res = func(ffi_params_struct).into_param::<Ext>()?;
 
     // Convert Param back to Val for return
-    Ext::log_debug(format!("Host -> WASM Result: {:?}", res));
-
-    
     let Some(rv) = res.into_wasm_val(data)? else {
         return Ok(())
     };
     rs[0] = rv;
 
-    Ext::log_debug(format!("WASM <- Host Result: {:?}", rv));
+
     Ok(())
 }
 
