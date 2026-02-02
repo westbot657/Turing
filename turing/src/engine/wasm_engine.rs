@@ -609,12 +609,14 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             // Convert from `ClassName::functionName` to `_class_name_function_name`
             let internal_name = metadata.as_internal_name(name);
 
-            let mut p_types = metadata.param_types.iter().map(|d| d.data_type.to_val_type()).collect::<Result<Vec<ValType>>>()?;
+            let mut param_types = metadata.param_types.iter().map(|d| d.data_type).collect::<Vec<DataType>>();
 
             if ScriptFnMetadata::is_instance_method(name) {
                 // instance methods get an extra first parameter for the instance pointer
-                p_types.insert(0, DataType::Object.to_val_type().unwrap());
+                param_types.insert(0, DataType::Object);
             }
+
+            let param_wasm_types = param_types.iter().map(|d| d.to_val_type()).collect::<Result<Vec<ValType>>>()?;
 
             // if the only return type is void, we treat it as no return types
             let r_types = if metadata.return_type.len() == 1 && metadata.return_type.first().cloned().map(|r| r.0) == Some(DataType::Void) {
@@ -622,15 +624,10 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             } else {
                 metadata.return_type.iter().map(|d| d.0.to_val_type()).collect::<Result<Vec<ValType>>>()?
             };
-            let ft = FuncType::new(engine, p_types, r_types);
+            let ft = FuncType::new(engine, param_wasm_types, r_types);
             let cap = metadata.capability.clone();
             let callback = metadata.callback;
-            let mut pts = metadata.param_types.iter().map(|d| d.data_type).collect::<Vec<DataType>>();
 
-            if ScriptFnMetadata::is_instance_method(name) {
-                // instance methods get an extra first parameter for the instance pointer
-                pts.insert(0, DataType::Object);
-            }
 
             let data2 = Arc::clone(&data);
 
@@ -641,7 +638,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
                 internal_name.clone().as_str(),
                 ft,
                 move |caller, ps, rs| {
-                    wasm_bind_env::<Ext>(&data2, caller, &cap, ps, rs, pts.as_slice(), &callback)
+                    wasm_bind_env::<Ext>(&data2, caller, &cap, ps, rs, param_types.as_slice(), &callback)
                 }
             )?;
 
