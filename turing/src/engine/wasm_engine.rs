@@ -732,6 +732,8 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             _ => SmallVec::from_buf([Val::I32(0)]),
         };
 
+        // this are errors raised by wasm execution
+        // e.g. stack overflow, out of bounds memory access, etc.
         if let Err(e) = f.call(&mut self.store, &args, &mut res) {
             return Param::Error(format!("Error calling wasm function: {}\n{}", f_name, e));
         }
@@ -747,6 +749,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         };
 
         // convert Val to Param
+        // if an error is returned from wasm, convert to Param::Error
         Param::from_wasm_type_val(ret_type, rt, data, memory, &self.store)
     }
 
