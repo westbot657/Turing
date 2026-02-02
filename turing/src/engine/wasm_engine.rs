@@ -641,7 +641,6 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
                 internal_name.clone().as_str(),
                 ft,
                 move |caller, ps, rs| {
-                    assert_eq!(ps.len(), pts.len(), "Parameter count mismatch in wasm function call to {}", internal_name);
                     wasm_bind_env::<Ext>(&data2, caller, &cap, ps, rs, pts.as_slice(), &callback)
                 }
             )?;
