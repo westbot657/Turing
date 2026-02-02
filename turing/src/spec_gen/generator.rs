@@ -61,19 +61,18 @@ fn generate_spec(api: &str, ver: Semver, metadata: &FxHashMap<String, ScriptFnMe
             let class_name = names[0].to_case(Case::Pascal);
             let func_name = names[1].to_case(Case::Snake);
             if !classes.contains_key(&class_name) {
-                classes.insert(class_name.to_string(), (true, Vec::new()));
+                classes.insert(class_name.to_string(), Vec::new());
             }
-            let (is_opaque, map) = classes.get_mut(&class_name).unwrap();
-            *is_opaque = true;
+            let map = classes.get_mut(&class_name).unwrap();
             map.push(data.generate_signature(Some(&class_name), &func_name, FnType::Method))
         } else if name.contains("::") { // functions
             let names = name.splitn(2, "::").collect::<Vec<&str>>();
             let class_name = names[0].to_case(Case::Pascal);
             let func_name = names[1].to_case(Case::Snake);
             if !classes.contains_key(&class_name) {
-                classes.insert(class_name.to_string(), (false, Vec::new()));
+                classes.insert(class_name.to_string(), Vec::new());
             }
-            let (_, map) = classes.get_mut(&class_name).unwrap();
+            let map = classes.get_mut(&class_name).unwrap();
             map.push(data.generate_signature(Some(&class_name), &func_name, FnType::Function))
         } else { // globals
             globals.push(data.generate_signature(None, name, FnType::Global))
@@ -81,7 +80,7 @@ fn generate_spec(api: &str, ver: Semver, metadata: &FxHashMap<String, ScriptFnMe
     }
 
     if !globals.is_empty() {
-        spec += ":Global:\n";
+        spec += "[Global]\n";
 
         for part in globals {
             spec += &part;
@@ -90,15 +89,8 @@ fn generate_spec(api: &str, ver: Semver, metadata: &FxHashMap<String, ScriptFnMe
 
     }
 
-    for (class, (is_opaque, functions)) in classes {
-        spec += ":";
-        spec += &class;
-        if is_opaque {
-            spec += " [opaque] "
-        }
-        spec += ":\n";
-        spec += &functions.join("\n");
-        spec += "\n";
+    for (class, functions) in classes {
+        spec += &format!("[{class}]\n{}\n", functions.join("\n"));
     }
 
     Ok(spec)
