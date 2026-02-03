@@ -10,7 +10,7 @@ use convert_case::{Case, Casing};
 use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
 use slotmap::KeyData;
-use smallvec::SmallVec;
+use smallvec::{ExtendFromSlice, SmallVec};
 use tokio::io::AsyncWrite;
 use wasmtime::{Caller, Config, Engine, FuncType, Func, Instance, Linker, Memory, MemoryAccessError, Module, Store, TypedFunc, Val, ValType};
 use wasmtime_wasi::WasiCtxBuilder;
@@ -530,7 +530,7 @@ fn get_u32_vec(ptr: u32, len: u32, data: &[u8]) -> Option<Vec<u32>> {
     let mut vec = vec![0u32; len as usize];
     for i in 0..len as usize {
         let offset = start + i * 4;
-        vec[i] = u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap());
+        vec[i] = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap());
     }
     Some(vec)
 }
@@ -544,6 +544,19 @@ pub fn write_wasm_string(
 ) -> Result<(), MemoryAccessError> {
     let c = CString::new(string).unwrap();
     let bytes = c.into_bytes_with_nul();
+    memory.write(caller, pointer as usize, &bytes)
+}
+
+pub fn write_u32_vec(
+    pointer: u32,
+    buf: &[u32],
+    memory: &Memory,
+    caller: Caller<'_, WasiP1Ctx>,
+) -> Result<(), MemoryAccessError> {
+    let mut bytes = Vec::with_capacity(buf.len() * 4);
+    for (i, num) in buf.iter().enumerate() {
+        bytes[i*4..i*4+4].copy_from_slice(&num.to_le_bytes())
+    }
     memory.write(caller, pointer as usize, &bytes)
 }
 
@@ -607,14 +620,25 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         //    failing to retrieve all param strings in the correct order will invalidate
         //    the strings with no way to recover.
         let data_strcpy = Arc::clone(&data);
+        let data_bufcpy = Arc::clone(&data);
         let data_enqueue = Arc::clone(&data);
         let data_dequeue = Arc::clone(&data);
+        let data_enqueue2 = Arc::clone(&data);
+        let data_dequeue2 = Arc::clone(&data);
         linker.func_new(
             "env",
             "_host_strcpy",
-            FuncType::new(engine, vec![ValType::I32, ValType::I32], vec![ValType::I32]),
-            move |caller, p, r| {
-                wasm_host_strcpy(&data_strcpy, caller, p, r)
+            FuncType::new(engine, vec![ValType::I32, ValType::I32], vec![]),
+            move |caller, p, _| {
+                wasm_host_strcpy(&data_strcpy, caller, p)
+            }
+        )?;
+        linker.func_new(
+            "env",
+            "_host_bufcpy",
+            FuncType::new(engine, vec![ValType::I32, ValType::I32], vec![]),
+            move |caller, p, _| {
+                wasm_host_bufcpy(&data_bufcpy, caller, p)
             }
         )?;
         linker.func_new(
@@ -631,6 +655,22 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             FuncType::new(engine, Vec::new(), vec![ValType::F32]),
             move |_, _, r| {
                 wasm_host_f32_dequeue(&data_dequeue, r)
+            }
+        )?;
+        linker.func_new(
+            "env",
+            "_host_u32_enqueue",
+            FuncType::new(engine, vec![ValType::I32], Vec::new()),
+            move |_, p, _| {
+                wasm_host_u32_enqueue(&data_enqueue2, p)
+            }
+        )?;
+        linker.func_new(
+            "env",
+            "_host_u32_dequeue",
+            FuncType::new(engine, Vec::new(), vec![ValType::I32]),
+            move |_, _, r| {
+                wasm_host_u32_dequeue(&data_dequeue2, r)
             }
         )?;
 
@@ -853,7 +893,6 @@ pub fn wasm_host_strcpy(
     data: &Arc<RwLock<EngineDataState>>,
     mut caller: Caller<'_, WasiP1Ctx>,
     ps: &[Val],
-    rs: &mut [Val],
 ) -> Result<(), anyhow::Error> {
     let ptr = ps[0].i32().unwrap();
     let size = ps[1].i32().unwrap();
@@ -863,12 +902,31 @@ pub fn wasm_host_strcpy(
     {
         if let Some(memory) = caller.get_export("memory").and_then(|m| m.into_memory()) {
             write_wasm_string(ptr as u32, &next_str, &memory, caller)?;
-            rs[0] = Val::I32(ptr);
+            return Ok(());
         }
-        return Ok(());
     }
 
-    Ok(())
+    Err(anyhow!("An error occurred whilst copying string to wasm memory"))
+}
+
+pub fn wasm_host_bufcpy(
+    data: &Arc<RwLock<EngineDataState>>,
+    mut caller: Caller<'_, WasiP1Ctx>,
+    ps: &[Val]
+) -> Result<(), anyhow::Error> {
+    let ptr = ps[0].i32().unwrap();
+    let size = ps[1].i32().unwrap();
+
+    if let Some(next_buf) = data.write().u32_buffer_queue.pop_front()
+        && next_buf.len() == size as usize
+    {
+        if let Some(memory) = caller.get_export("memory").and_then(|m| m.into_memory()) {
+            write_u32_vec(ptr as u32, &next_buf, &memory, caller)?;
+            return Ok(())
+        }
+    }
+
+    Err(anyhow!("An error occurred whilst copying a Vec<u32> to wasm memory"))
 }
 
 pub fn wasm_host_f32_dequeue(
@@ -893,6 +951,32 @@ pub fn wasm_host_f32_enqueue(
 
     let mut d = data.write();
     d.f32_queue.push_back(new);
+
+    Ok(())
+}
+
+pub fn wasm_host_u32_dequeue(
+    data: &Arc<RwLock<EngineDataState>>,
+    rs: &mut [Val],
+) -> Result<(), anyhow::Error> {
+    let mut d = data.write();
+    let Some(next) = d.f32_queue.pop_front() else {
+        return Err(anyhow!("f32 queue is empty"));
+    };
+    rs[0] = Val::I32(next.to_bits() as i32);
+    Ok(())
+}
+
+pub fn wasm_host_u32_enqueue(
+    data: &Arc<RwLock<EngineDataState>>,
+    ps: &[Val],
+) -> Result<(), anyhow::Error> {
+
+    let new = ps.first().ok_or_else(|| anyhow!("no first parameter provided"))?
+        .i32().ok_or_else(|| anyhow!("parameter is not u32"))?;
+
+    let mut d = data.write();
+    d.f32_queue.push_back(f32::from_bits(new as u32));
 
     Ok(())
 }
