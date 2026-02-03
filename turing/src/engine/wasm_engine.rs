@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::task::Poll;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow, bail};
 use convert_case::{Case, Casing};
 use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
@@ -330,64 +330,64 @@ enum TypedFuncEntry {
 }
 
 impl TypedFuncEntry {
-    fn invoke(&self, store: &mut Store<WasiP1Ctx>, args: Params) -> Result<Param, String> {
+    fn invoke(&self, store: &mut Store<WasiP1Ctx>, args: Params) -> Result<Param, wasmtime::Error> {
         match self {
-            TypedFuncEntry::NoParamsVoid(t) => t.call(store, ()).map(|_| Param::Void).map_err(|e| e.to_string()),
-            TypedFuncEntry::NoParamsI32(t) => t.call(store, ()).map(Param::I32).map_err(|e| e.to_string()),
-            TypedFuncEntry::NoParamsI64(t) => t.call(store, ()).map(Param::I64).map_err(|e| e.to_string()),
-            TypedFuncEntry::NoParamsF32(t) => t.call(store, ()).map(Param::F32).map_err(|e| e.to_string()),
-            TypedFuncEntry::NoParamsF64(t) => t.call(store, ()).map(Param::F64).map_err(|e| e.to_string()),
+            TypedFuncEntry::NoParamsVoid(t) => t.call(store, ()).map(|_| Param::Void),
+            TypedFuncEntry::NoParamsI32(t) => t.call(store, ()).map(Param::I32),
+            TypedFuncEntry::NoParamsI64(t) => t.call(store, ()).map(Param::I64),
+            TypedFuncEntry::NoParamsF32(t) => t.call(store, ()).map(Param::F32),
+            TypedFuncEntry::NoParamsF64(t) => t.call(store, ()).map(Param::F64),
             TypedFuncEntry::I32ToI32(t) => {
-                if args.len() != 1 { return Err("Arg mismatch".to_string()) }
+                if args.len() != 1 { bail!("Arg mismatch") }
                 let a0 = match &args[0] {
                     Param::I32(v) => *v,
-                    _ => return Err("Arg conversion".to_string()),
+                    _ => bail!("Arg conversion"),
                 };
-                t.call(store, a0).map(Param::I32).map_err(|e| e.to_string())
+                t.call(store, a0).map(Param::I32)
             }
             TypedFuncEntry::I64ToI64(t) => {
-                if args.len() != 1 { return Err("Arg mismatch".to_string()) }
+                if args.len() != 1 { bail!("Arg mismatch") }
                 let a0 = match &args[0] {
                     Param::I64(v) => *v,
-                    _ => return Err("Arg conversion".to_string()),
+                    _ => bail!("Arg conversion"),
                 };
-                t.call(store, a0).map(Param::I64).map_err(|e| e.to_string())
+                t.call(store, a0).map(Param::I64)
             }
             TypedFuncEntry::F32ToF32(t) => {
-                if args.len() != 1 { return Err("Arg mismatch".to_string()) }
+                if args.len() != 1 { bail!("Arg mismatch") }
                 let a0 = match &args[0] {
                     Param::F32(v) => *v,
-                    _ => return Err("Arg conversion".to_string()),
+                    _ => bail!("Arg conversion"),
                 };
-                t.call(store, a0).map(Param::F32).map_err(|e| e.to_string())
+                t.call(store, a0).map(Param::F32)
             }
             TypedFuncEntry::F32ToVoid(typed_func) => {
-                if args.len() != 1 { return Err("Arg mismatch".to_string()) }
+                if args.len() != 1 { bail!("Arg mismatch") }
                 let a0 = match &args[0] {
                     Param::F32(v) => *v,
-                    _ => return Err("Arg conversion".to_string()),
+                    _ => bail!("Arg conversion"),
                 };
-                typed_func.call(store, a0).map(|_| Param::Void).map_err(|e| e.to_string())
+                typed_func.call(store, a0).map(|_| Param::Void)
             },
             TypedFuncEntry::F64ToF64(t) => {
-                if args.len() != 1 { return Err("Arg mismatch".to_string()) }
+                if args.len() != 1 { bail!("Arg mismatch") }
                 let a0 = match &args[0] {
                     Param::F64(v) => *v,
-                    _ => return Err("Arg conversion".to_string()),
+                    _ => bail!("Arg conversion"),
                 };
-                t.call(store, a0).map(Param::F64).map_err(|e| e.to_string())
+                t.call(store, a0).map(Param::F64)
             }
             TypedFuncEntry::I32I32ToI32(t) => {
-                if args.len() != 2 { return Err("Arg mismatch".to_string()) }
+                if args.len() != 2 { bail!("Arg mismatch") }
                 let a0 = match &args[0] {
                     Param::I32(v) => *v,
-                    _ => return Err("Arg conversion".to_string()),
+                    _ => bail!("Arg conversion"),
                 };
                 let a1 = match &args[1] {
                     Param::I32(v) => *v,
-                    _ => return Err("Arg conversion".to_string()),
+                    _ => bail!("Arg conversion"),
                 };
-                t.call(store, (a0, a1)).map(Param::I32).map_err(|e| e.to_string())
+                t.call(store, (a0, a1)).map(Param::I32)
             }
 
         }
@@ -639,6 +639,11 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
                 ft,
                 move |caller, ps, rs| {
                     wasm_bind_env::<Ext>(&data2, caller, &cap, ps, rs, param_types.as_slice(), &callback)
+                    // we handle Error returns specially by logging them
+                    // since wasmtime doesn't propagate them with their messages
+                    .inspect_err(|e| {
+                        Ext::log_debug(format!("WASM function {internal_name} threw error: {e}"));
+                    })
                 }
             )?;
 
@@ -715,12 +720,13 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         
         // Fast-path: typed cache (common signatures). Falls back to dynamic call below.
         if let Some(typed) = typed {
-            return typed.invoke(&mut self.store, params).unwrap_or_else(Param::Error)
+            return typed.invoke(&mut self.store, params)
+                .unwrap_or_else(|e| Param::Error(format!("Error calling wasm function typed: {e}")));
         }
 
         let args = params.to_wasm_args(data);
         if let Err(e) = args {
-            return Param::Error(format!("{e}"))
+            return Param::Error(format!("Params error: {e}"))
         }
         let args = args.unwrap();
 
@@ -811,9 +817,8 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
     let res = func(ffi_params_struct).into_param::<Ext>()?;
 
     // Convert Param back to Val for return
-    if let Param::Error(e) = &res {
-        Ext::log_debug(format!("WASM host function returning: {:?}", res));
-    }
+    // TODO: Add mechanism for providing error messages to caller
+
 
     let Some(rv) = res.into_wasm_val(data)? else {
         return Ok(())

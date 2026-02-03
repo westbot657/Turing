@@ -4,8 +4,8 @@ use std::{fs, io};
 
 
 unsafe extern "C" {
-    fn _log__info(msg: *const c_char);
-    fn _fetch_string() -> u32;
+    fn _test_log__info(msg: *const c_char);
+    fn _test_fetch_string() -> u32;
     fn _host_strcpy(location: u32, size: u32) -> u32;
 }
 
@@ -13,7 +13,7 @@ macro_rules! println {
     ( $( $tok:expr ),* ) => {
         {
             let s = CString::new(format!($($tok),*)).unwrap();
-            unsafe { _log__info(s.as_ptr()) }
+            unsafe { _test_log__info(s.as_ptr()) }
         }
     };
 }
@@ -24,7 +24,7 @@ extern "C" fn on_load() {
         let s = CString::new("log info from wasm!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!").unwrap();
         let ptr = s.into_raw();
 
-        _log__info(ptr);
+        _test_log__info(ptr);
     }
 }
 
@@ -57,11 +57,16 @@ extern "C" fn test_stdin_fail() {
 
 #[unsafe(no_mangle)]
 extern "C" fn test_string_fetch() {
-    let sz = unsafe { _fetch_string() };
+    let sz = unsafe { _test_fetch_string() };
     let mut turing_str = vec![0; sz as usize];
     unsafe { _host_strcpy(turing_str.as_mut_ptr() as u32, sz) };
     let turing_str = unsafe { CStr::from_ptr(turing_str.as_ptr() as *const c_char) };
     let string = turing_str.to_string_lossy().into_owned();
 
     println!("Received string from host: '{}'", string)
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn test_panic() {
+    panic!("This is a panic from within wasm!");
 }

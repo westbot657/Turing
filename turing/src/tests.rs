@@ -61,24 +61,24 @@ extern "C" fn fetch_string(_params: FfiParamArray) -> FfiParam {
     Param::String("this is a host provided string!".to_string()).to_ext_param()
 }
 
+extern "C" fn log_info_panic(_params: FfiParamArray) -> FfiParam {
+    panic!("Host panic from log_info_panic");
+}
+
 fn common_setup_direct(source: &str) -> Result<Turing<DirectExt>> {
     let mut turing = Turing::new();
 
-    let mut metadata = ScriptFnMetadata::new(
-        "test".to_owned(),
-        log_info_wasm,
-        None,
-    );
+    let mut metadata = ScriptFnMetadata::new("test".to_owned(), log_info_wasm, None);
     metadata.add_param_type(DataType::RustString, "msg")?;
     turing.add_function("log::info", metadata)?;
 
-    let mut metadata = ScriptFnMetadata::new(
-        "test".to_owned(),
-        fetch_string,
-        None,
-    );
+    let mut metadata = ScriptFnMetadata::new("test".to_owned(), fetch_string, None);
     metadata.add_return_type(DataType::ExtString)?;
     turing.add_function("fetch_string", metadata)?;
+
+    let mut metadata = ScriptFnMetadata::new("test".to_owned(), log_info_panic, None);
+    metadata.add_param_type(DataType::RustString, "msg")?;
+    turing.add_function("do_panic", metadata)?;
 
     let mut turing = turing.build()?;
     setup_test_script(&mut turing, source)?;
@@ -166,5 +166,44 @@ pub fn test_lua_string_fetch() -> Result<()> {
         .to_result::<String>()?;
 
     println!("Received message from lua: '{res}'");
+    Ok(())
+}
+
+#[test]
+pub fn test_wasm_panic() -> Result<()> {
+    let mut turing = common_setup_direct(WASM_SCRIPT)?;
+
+    let res = turing
+        .call_fn_by_name("test_panic", Params::new(), DataType::Void)
+        .to_result::<()>();
+
+    assert!(res.is_err());
+
+    let err = res.unwrap_err().to_string();
+    assert!(err.contains("panic") || err.contains("unreachable") || err.contains("trap"));
+    Ok(())
+}
+
+/// Tests that a panic in a host function called from WASM is properly propagated
+/// to the caller when using the DirectExt external functions.
+#[test]
+#[ignore]
+pub fn test_host_wasm_host_panic() -> Result<()> {
+    let mut turing = common_setup_direct(WASM_SCRIPT)?;
+
+    // loading the WASM will call `on_load` which calls the host `log::info` and should panic
+    let caps = vec!["test"];
+    turing.load_script(WASM_SCRIPT, &caps)?;
+
+    let result = turing.call_fn_by_name("test_panic", Params::new(), DataType::Void);
+
+    let Param::Error(err) = result else {
+        panic!("Expected error from panic, got: {:#?}", result);
+    };
+
+    assert!(
+        err.contains("Host panic from log_info_panic"),
+        "Error did not contain expected panic message, got:\n{err}"
+    );
     Ok(())
 }
