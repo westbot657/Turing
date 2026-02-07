@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::fmt::Display;
@@ -12,7 +13,7 @@ use crate::interop::types::{ExtString, U32Buffer};
 
 
 #[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFromPrimitive)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFromPrimitive, Serialize, Deserialize)]
 pub enum DataType {
     I8              = 1,
     I16             = 2,
@@ -66,7 +67,7 @@ impl FreeableDataType {
     }
 }
 
-trait InnerFfiType {
+pub trait InnerFfiType {
     const STRING: DataType;
     const ERROR: DataType;
     const VEC4: DataType;
@@ -75,8 +76,8 @@ trait InnerFfiType {
     const U32BUFFER: DataType;
 }
 
-struct RustTypes;
-struct ExtTypes;
+pub struct RustTypes;
+pub struct ExtTypes;
 
 impl InnerFfiType for RustTypes {
     const STRING: DataType = DataType::RustString;
@@ -158,6 +159,44 @@ impl DataType {
 
 }
 
+/// Represents a unique identifier for an object in the engine. Opaque to the script, just a u64 under the hood.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ObjectId(u64);
+
+impl ObjectId {
+    pub fn is_null(&self) -> bool {
+        self.0 == Self::null().0
+    }
+    
+    pub fn null() -> ObjectId {
+       ObjectId(0) 
+    } 
+
+    pub fn as_ffi(&self) -> u64 {
+        self.0
+    }
+
+
+    /// This function is useful if the external environment expects a pointer type for objects. 
+    /// It allows us to treat the ObjectId as an opaque pointer.
+    /// 
+    /// # Safety
+    /// - This value is not guaranteed to be a valid pointer, and should only be used 
+    ///   in contexts where the external environment passes it to us as from a pointer.
+    pub unsafe fn as_ptr(self) -> *const c_void {
+        self.0 as *const c_void
+    }
+
+    pub fn new(id: u64) -> Self {
+        ObjectId(id)
+    }
+
+    pub fn from_ptr(ptr: *const c_void) -> Self {
+        ObjectId(ptr as u64)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Param {
     I8(i8),
@@ -172,7 +211,7 @@ pub enum Param {
     F64(f64),
     Bool(bool),
     String(String),
-    Object(*const c_void),
+    Object(ObjectId),
     Error(String),
     Void,
     Vec2(Vec2),
@@ -229,6 +268,32 @@ impl Param {
 
     pub fn to_result<T: FromParam>(self) -> Result<T> {
         T::from_param(self)
+    }
+    
+    pub fn data_type<T: InnerFfiType>(&self) -> DataType {
+        match self {
+            Param::I8(_) => DataType::I8,
+            Param::I16(_) => DataType::I16,
+            Param::I32(_) => DataType::I32,
+            Param::I64(_) => DataType::I64,
+            Param::U8(_) => DataType::U8,
+            Param::U16(_) => DataType::U16,
+            Param::U32(_) => DataType::U32,
+            Param::U64(_) => DataType::U64,
+            Param::F32(_) => DataType::F32,
+            Param::F64(_) => DataType::F64,
+            Param::Bool(_) => DataType::Bool,
+            Param::String(_) => T::STRING,
+            Param::Object(_) => DataType::Object,
+            Param::Error(_) => T::ERROR,
+            Param::Void => DataType::Void,
+            Param::Vec2(_) => DataType::Vec2,
+            Param::Vec3(_) => DataType::Vec3,
+            Param::Vec4(_) => T::VEC4,
+            Param::Quat(_) => T::QUAT,
+            Param::Mat4(_) => T::MAT4,
+            Param::U32Buffer(_) => T::U32BUFFER,
+        } 
     }
 
 }
@@ -362,7 +427,7 @@ pub union RawParam {
     f64: f64,
     bool: bool,
     string: *const c_char,
-    object: *const c_void,
+    object: ObjectId,
     error: *const c_char,
     void: (),
     vec2: Vec2,
@@ -525,6 +590,14 @@ impl<'a> FfiParamArray<'a> {
 
     pub fn as_slice(&'a self) -> &'a [FfiParam] {
         unsafe { std::slice::from_raw_parts(self.ptr, self.count as usize) }
+    }
+
+    pub fn len(&self) -> u32 {
+        self.count
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.count == 0 || self.ptr.is_null()
     }
 }
 

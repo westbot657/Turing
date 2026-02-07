@@ -5,9 +5,11 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::{ptr, slice};
+use serde::{Deserialize, Serialize};
+
 use crate::ExternalFunctions;
 
-#[derive(Default, Eq, Clone, Copy)]
+#[derive(Debug, Default, Eq, Clone, Copy, Serialize, Deserialize)]
 pub struct Semver {
     pub major: u32,
     pub minor: u16,
@@ -182,18 +184,13 @@ pub struct U32Buffer {
 }
 
 impl Clone for U32Buffer {
-    fn clone(&self) -> Self {
-        Self {
-            size: self.size,
-            array: self.array,
-        }
-    }
+    fn clone(&self) -> Self { *self }
 }
 
 impl U32Buffer {
     /// Moves the data into a Vec<u32> and frees the underlying data directly
     pub fn from_rust(self) -> Vec<u32> {
-        let slice = unsafe { Box::from_raw(slice::from_raw_parts_mut(self.array, self.size as usize)) };
+        let slice = unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(self.array, self.size as usize)) };
         slice.into_vec()
 
     }

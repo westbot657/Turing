@@ -84,6 +84,18 @@ fn build_windows() {
     fs::copy(&built, &output)
         .unwrap_or_else(|e| panic!("Failed to copy DLL: {}.dll {}", lib_name, e));
 
+    // copy to BEAT_SABER_DIR/Libs/Native/turing_rs.dll if BEAT_SABER_DIR is set
+    if let Ok(beat_saber_dir) = env::var("BEAT_SABER_DIR") {
+        let dest_dir = Path::new(&beat_saber_dir).join("Libs").join("Native");
+        fs::create_dir_all(&dest_dir).expect("Failed to create Beat Saber Libs/Native directory");
+        let dest_path = dest_dir.join(format!("{lib_name}.dll"));
+
+
+        fs::copy(&built, &dest_path)
+            .unwrap_or_else(|e| panic!("Failed to copy DLL to Beat Saber directory: {} {}", dest_path.display(), e));
+        println!("Copied dll to Beat Saber directory: {}", dest_path.display());
+    }
+
     println!("Windows dll generated in dist");
 
 }

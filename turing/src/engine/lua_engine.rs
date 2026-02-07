@@ -11,10 +11,10 @@ use rustc_hash::FxHashMap;
 use slotmap::KeyData;
 use crate::engine::types::{ScriptCallback, ScriptFnMetadata};
 use crate::key_vec::KeyVec;
-use crate::{EngineDataState, ExternalFunctions, OpaquePointerKey, ScriptFnKey};
+use crate::{EngineDataState, ExternalFunctions, ScriptFnKey};
 use crate::engine::runtime_modules::lua_glam;
-use crate::interop::params::{DataType, Param, Params};
-use crate::interop::types::{ExtPointer, Semver};
+use crate::interop::params::{DataType, ObjectId, Param, Params};
+use crate::interop::types::Semver;
 
 
 fn vec_u32_to_lua_list(lua: &Lua, vec: Vec<u32>) -> mlua::Result<Value> {
@@ -63,18 +63,9 @@ impl DataType {
             (DataType::F64, Value::Number(f)) => Ok(Param::F64(*f)),
             (DataType::Bool, Value::Boolean(b)) => Ok(Param::Bool(*b)),
             (DataType::RustString | DataType::ExtString, Value::String(s)) => Ok(Param::String(s.to_string_lossy())),
-            (DataType::Object, Value::Table(t)) => {
-                let key = t.raw_get::<Value>("opaqu")?;
-                let key = match key {
-                    Value::Integer(i) => i as u64,
-                    _ => return Err(mlua::Error::RuntimeError("Incorrect type for opaque handle".to_string()))
-                };
-                let pointer_key = OpaquePointerKey::from(KeyData::from_ffi(key));
-                if let Some(true_pointer) = data.read().opaque_pointers.get(pointer_key) {
-                    Ok(Param::Object(**true_pointer))
-                } else {
-                    Err(mlua::Error::RuntimeError("opaque pointer does not correspond to a real pointer".to_string()))
-                }
+            (DataType::Object, Value::Integer(t)) => {
+                let op = *t as u64;
+                Ok(Param::Object(ObjectId::new(op)))
             }
             (DataType::RustU32Buffer | DataType::ExtU32Buffer, Value::Table(t)) => {
                 Ok(Param::U32Buffer(lua_list_to_vec_u32(t)?))
@@ -106,18 +97,7 @@ impl Param {
             DataType::Bool => Param::Bool(val.as_boolean().unwrap()),
             // allocated externally, we copy the string
             DataType::RustString | DataType::ExtString => Param::String(val.as_string().unwrap().to_string_lossy()),
-            DataType::Object => {
-                let table = val.as_table().unwrap();
-                let op = table.get("opaqu").unwrap();
-                let key = OpaquePointerKey::from(KeyData::from_ffi(op));
-
-                let real = data.read()
-                    .opaque_pointers
-                    .get(key)
-                    .copied()
-                    .unwrap_or_default();
-                Param::Object(real.ptr)
-            }
+            DataType::Object => Param::Object(ObjectId::new(val.as_integer().unwrap() as u64)),
             DataType::RustError | DataType::ExtError => Param::Error(val.as_error().unwrap().to_string()),
             DataType::Void => Param::Void,
             DataType::Vec2 => lua_glam::unpack_vec2(val),
@@ -152,9 +132,7 @@ impl Param {
             Param::Bool(b) => Value::Boolean(b),
             Param::String(s) => Value::String(lua.create_string(&s)?),
             Param::Object(pointer) => {
-                let pointer = ExtPointer::from(pointer);
-                let opaque = s.get_opaque_pointer(pointer);
-                Value::Integer(opaque.0.as_ffi() as i64)
+                Value::Integer(pointer.as_ffi() as i64)
             }
             Param::Error(er) => {
                 return Err(mlua::Error::RuntimeError(format!("Error executing C# function: {er}")))
@@ -192,14 +170,7 @@ impl Params {
                 Param::Bool(b) => Ok(Value::Boolean(b)),
                 Param::String(s) => Ok(Value::String(lua.create_string(&s).unwrap())),
                 Param::Object(rp) => {
-                    let pointer = rp.into();
-                    Ok(if let Some(op) = s.pointer_backlink.get(&pointer) {
-                        Value::Integer(op.0.as_ffi() as i64)
-                    } else {
-                        let op = s.opaque_pointers.insert(pointer);
-                        s.pointer_backlink.insert(pointer, op);
-                        Value::Integer(op.0.as_ffi() as i64)
-                    })
+                    Ok(Value::Integer(rp.as_ffi() as i64))
                 }
                 Param::Error(st) => {
                     Err(anyhow!("{st}"))
@@ -315,7 +286,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
 
     fn bind_lua(&self, api: &Table, lua: &Lua) -> Result<()> {
         for (name, metadata) in self.lua_fns.iter() {
-            if name.contains(".") {
+            if ScriptFnMetadata::is_instance_method(name) {
                 let parts: Vec<&str> = name.splitn(2, ".").collect();
                 let cname = parts[0].to_case(Case::Pascal);
                 let fname = parts[1].to_case(Case::Snake);
@@ -324,8 +295,8 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
 
                 let Ok(table) = api.raw_get::<Table>(cname.as_str()) else { return Err(anyhow!("table['{cname}'] is not a table")) };
                 self.generate_function(lua, &table, fname.as_str(), metadata)?;
-            } else if name.contains("::") {
-                let parts: Vec<&str> = name.splitn(2, "::").collect();
+            } else if ScriptFnMetadata::is_static_method(name)  {
+                let parts: Vec<&str> = name.splitn(2, ":").collect();
                 let cname = parts[0].to_case(Case::Pascal);
                 let fname = parts[1].to_case(Case::Snake);
 

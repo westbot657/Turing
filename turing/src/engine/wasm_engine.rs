@@ -1,11 +1,13 @@
 use std::ffi::{CStr, CString};
 use std::fs;
 use std::marker::PhantomData;
+use std::panic::catch_unwind;
 use std::path::Path;
+use std::ptr::null;
 use std::sync::Arc;
 use std::task::Poll;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow, bail};
 use convert_case::{Case, Casing};
 use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
@@ -18,9 +20,9 @@ use wasmtime_wasi::cli::{IsTerminal, StdoutStream};
 use wasmtime_wasi::p1::WasiP1Ctx;
 use crate::engine::types::{ScriptCallback, ScriptFnMetadata};
 use crate::key_vec::KeyVec;
-use crate::{EngineDataState, ExternalFunctions, OpaquePointerKey, ScriptFnKey};
-use crate::interop::params::{DataType, Param, Params};
-use crate::interop::types::{ExtPointer, Semver};
+use crate::{EngineDataState, ExternalFunctions, ScriptFnKey};
+use crate::interop::params::{DataType, ExtTypes, ObjectId, Param, Params};
+use crate::interop::types::Semver;
 
 impl DataType {
     pub fn to_wasm_val_param(&self, val: &Val, caller: &mut Caller<'_, WasiP1Ctx>, data: &Arc<RwLock<EngineDataState>>) -> Result<Param> {
@@ -58,14 +60,14 @@ impl DataType {
                 Ok(Param::String(st))
             }
             (DataType::Object, Val::I64(pointer_id)) => {
-                let pointer_key =
-                    OpaquePointerKey::from(KeyData::from_ffi(*pointer_id as u64));
+                let pointer_id = *pointer_id as u64;
 
-                if let Some(true_pointer) = data.read().opaque_pointers.get(pointer_key) {
-                    Ok(Param::Object(**true_pointer))
-                } else {
-                    Err(anyhow!("opaque pointer does not correspond to a real pointer"))
+                if pointer_id == 0 {
+                    // reserved value for null pointers
+                    return Ok(Param::Object(ObjectId::null()));
                 }
+
+                Ok(Param::Object(ObjectId::new(pointer_id)))
 
             }
             (DataType::Vec2, Val::I32(2)) => dequeue!(Vec2::from_array; 2),
@@ -147,19 +149,13 @@ impl Param {
             }
             DataType::Object => {
                 let op = val.unwrap_i64() as u64;
-                let key = OpaquePointerKey::from(KeyData::from_ffi(op));
 
-                let real = data.read()
-                    .opaque_pointers
-                    .get(key)
-                    .copied()
-                    .unwrap_or_default();
-                Param::Object(real.ptr)
+                Param::Object(ObjectId::new(op))
             }
             DataType::RustError | DataType::ExtError => {
                 let ptr = val.unwrap_i32() as u32;
                 let st = get_wasm_string(ptr, memory.data(caller));
-                Param::Error(st)
+                Param::Error(format!("WASM Error: {}", st))
             }
             DataType::Void => Param::Void,
 
@@ -206,13 +202,17 @@ impl Param {
                 s.str_cache.push_back(st);
                 Val::I32(l as i32)
             }
-            Param::Object(pointer) => {
-                let pointer = ExtPointer::from(pointer);
-                let opaque = s.get_opaque_pointer(pointer);
-                Val::I64(opaque.0.as_ffi() as i64)
-            }
             Param::Error(er) => {
-                return Err(anyhow!("Error executing C# function: {}", er));
+                return Err(anyhow!("Error executing host function: {}", er));
+            }
+            Param::Object(pointer) => {
+                if pointer.is_null() {
+                    // reserved value for null pointers
+                    return Ok(Some(Val::I64(pointer.as_ffi() as i64)));
+                }
+
+
+                Val::I64(pointer.as_ffi() as i64)
             }
             Param::Void => return Ok(None),
             Param::Vec2(v) => enqueue!(v; 2),
@@ -271,14 +271,7 @@ impl Params {
                         Ok(Val::I32(l as i32))
                     }
                     Param::Object(rp) => {
-                        let pointer = rp.into();
-                        Ok(if let Some(op) = s.pointer_backlink.get(&pointer) {
-                            Val::I64(op.0.as_ffi() as i64)
-                        } else {
-                            let op = s.opaque_pointers.insert(pointer);
-                            s.pointer_backlink.insert(pointer, op);
-                            Val::I64(op.0.as_ffi() as i64)
-                        })
+                        Ok(Val::I64(rp.as_ffi() as i64))
                     }
                     Param::Error(st) => {
                         Err(anyhow!("{st}"))
@@ -301,6 +294,28 @@ impl Params {
 
 }
 
+impl DataType {
+    /// Returns true if this Param can be directly represented as a simple WASM value (i32, i64, f32, f64),
+    ///  meaning it can be passed to and from WASM without any special handling or conversion.
+    pub fn is_wasm_simple(&self) -> bool {
+        matches!(
+            self,
+            DataType::I8
+                | DataType::I16
+                | DataType::I32
+                | DataType::I64
+                | DataType::U8
+                | DataType::U16
+                | DataType::U32
+                | DataType::U64
+                | DataType::F32
+                | DataType::F64
+                | DataType::Bool
+        )
+    }
+
+}
+
 pub struct WasmInterpreter<Ext: ExternalFunctions> {
     engine: Engine,
     store: Store<WasiP1Ctx>,
@@ -308,8 +323,7 @@ pub struct WasmInterpreter<Ext: ExternalFunctions> {
     script_instance: Option<Instance>,
     memory: Option<Memory>,
 
-    func_cache: KeyVec<ScriptFnKey, (String, Func)>,
-    typed_cache: FxHashMap<ScriptFnKey, TypedFuncEntry>,
+    func_cache: KeyVec<ScriptFnKey, (String, Func, Option<TypedFuncEntry>)>,
     
     fast_calls: FastCalls,
     pub api_versions: FxHashMap<String, Semver>,
@@ -333,6 +347,7 @@ enum TypedFuncEntry {
     NoParamsVoid(TypedFunc<(), ()>),
     NoParamsI32(TypedFunc<(), i32>),
     NoParamsI64(TypedFunc<(), i64>),
+    NoParamsObject(TypedFunc<(), u64>),
     NoParamsF32(TypedFunc<(), f32>),
     NoParamsF64(TypedFunc<(), f64>),
     // update and fixed update
@@ -346,64 +361,69 @@ enum TypedFuncEntry {
 }
 
 impl TypedFuncEntry {
-    fn invoke(&self, store: &mut Store<WasiP1Ctx>, args: Params) -> Result<Param, String> {
+    fn invoke(&self, store: &mut Store<WasiP1Ctx>, args: Params, data: &Arc<RwLock<EngineDataState>>) -> Result<Param, wasmtime::Error> {
+        let get_object = |id: u64| -> Result<Param> {
+            Ok(Param::Object(ObjectId::new(id)))
+        };
+
         match self {
-            TypedFuncEntry::NoParamsVoid(t) => t.call(store, ()).map(|_| Param::Void).map_err(|e| e.to_string()),
-            TypedFuncEntry::NoParamsI32(t) => t.call(store, ()).map(Param::I32).map_err(|e| e.to_string()),
-            TypedFuncEntry::NoParamsI64(t) => t.call(store, ()).map(Param::I64).map_err(|e| e.to_string()),
-            TypedFuncEntry::NoParamsF32(t) => t.call(store, ()).map(Param::F32).map_err(|e| e.to_string()),
-            TypedFuncEntry::NoParamsF64(t) => t.call(store, ()).map(Param::F64).map_err(|e| e.to_string()),
+            TypedFuncEntry::NoParamsVoid(t) => t.call(store, ()).map(|_| Param::Void),
+            TypedFuncEntry::NoParamsObject(t) => t.call(store, ()).and_then(|id| get_object(id as u64)),
+            TypedFuncEntry::NoParamsI32(t) => t.call(store, ()).map(Param::I32),
+            TypedFuncEntry::NoParamsI64(t) => t.call(store, ()).map(Param::I64),
+            TypedFuncEntry::NoParamsF32(t) => t.call(store, ()).map(Param::F32),
+            TypedFuncEntry::NoParamsF64(t) => t.call(store, ()).map(Param::F64),
             TypedFuncEntry::I32ToI32(t) => {
-                if args.len() != 1 { return Err("Arg mismatch".to_string()) }
+                if args.len() != 1 { bail!("Arg length `{}` != 1", args.len()) }
                 let a0 = match &args[0] {
                     Param::I32(v) => *v,
-                    _ => return Err("Arg conversion".to_string()),
+                    _ => bail!("Arg conversion {:?} -> i32 failed", args[0]),
                 };
-                t.call(store, a0).map(Param::I32).map_err(|e| e.to_string())
+                t.call(store, a0).map(Param::I32)
             }
             TypedFuncEntry::I64ToI64(t) => {
-                if args.len() != 1 { return Err("Arg mismatch".to_string()) }
+                if args.len() != 1 { bail!("Arg length `{}` != 1", args.len()) }
                 let a0 = match &args[0] {
                     Param::I64(v) => *v,
-                    _ => return Err("Arg conversion".to_string()),
+                    _ => bail!("Arg conversion {:?} -> i64 failed", args[0]),
                 };
-                t.call(store, a0).map(Param::I64).map_err(|e| e.to_string())
+                t.call(store, a0).map(Param::I64)
             }
             TypedFuncEntry::F32ToF32(t) => {
-                if args.len() != 1 { return Err("Arg mismatch".to_string()) }
+                if args.len() != 1 { bail!("Arg mismatch") }
                 let a0 = match &args[0] {
                     Param::F32(v) => *v,
-                    _ => return Err("Arg conversion".to_string()),
+                    _ => bail!("Arg conversion {:?} -> f32 failed", args[0]),
                 };
-                t.call(store, a0).map(Param::F32).map_err(|e| e.to_string())
+                t.call(store, a0).map(Param::F32)
             }
             TypedFuncEntry::F32ToVoid(typed_func) => {
-                if args.len() != 1 { return Err("Arg mismatch".to_string()) }
+                if args.len() != 1 { bail!("Arg mismatch") }
                 let a0 = match &args[0] {
                     Param::F32(v) => *v,
-                    _ => return Err("Arg conversion".to_string()),
+                    _ => bail!("Arg conversion {:?} -> f32 failed", args[0]),
                 };
-                typed_func.call(store, a0).map(|_| Param::Void).map_err(|e| e.to_string())
+                typed_func.call(store, a0).map(|_| Param::Void)
             },
             TypedFuncEntry::F64ToF64(t) => {
-                if args.len() != 1 { return Err("Arg mismatch".to_string()) }
+                if args.len() != 1 { bail!("Arg mismatch") }
                 let a0 = match &args[0] {
                     Param::F64(v) => *v,
-                    _ => return Err("Arg conversion".to_string()),
+                    _ => bail!("Arg conversion {:?} -> f64 failed", args[0]),
                 };
-                t.call(store, a0).map(Param::F64).map_err(|e| e.to_string())
+                t.call(store, a0).map(Param::F64)
             }
             TypedFuncEntry::I32I32ToI32(t) => {
-                if args.len() != 2 { return Err("Arg mismatch".to_string()) }
+                if args.len() != 2 { bail!("Arg mismatch") }
                 let a0 = match &args[0] {
                     Param::I32(v) => *v,
-                    _ => return Err("Arg conversion".to_string()),
+                    _ => bail!("Arg conversion {:?} -> i32 failed", args[0]),
                 };
                 let a1 = match &args[1] {
                     Param::I32(v) => *v,
-                    _ => return Err("Arg conversion".to_string()),
+                    _ => bail!("Arg conversion {:?} -> i32 failed", args[1]),
                 };
-                t.call(store, (a0, a1)).map(Param::I32).map_err(|e| e.to_string())
+                t.call(store, (a0, a1)).map(Param::I32)
             }
 
         }
@@ -598,7 +618,6 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             script_instance: None,
             memory: None,
             func_cache: Default::default(),
-            typed_cache: Default::default(),
             fast_calls: FastCalls::default(),
             api_versions: Default::default(),
             _ext: PhantomData
@@ -680,23 +699,34 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             // Convert from `ClassName::functionName` to `_class_name_function_name`
             let internal_name = metadata.as_internal_name(name);
 
-            let mut p_types = metadata.param_types.iter().map(|d| d.data_type.to_val_type()).collect::<Result<Vec<ValType>>>()?;
+            let mut param_types = metadata.param_types.iter().map(|d| d.data_type).collect::<Vec<DataType>>();
 
             if ScriptFnMetadata::is_instance_method(name) {
                 // instance methods get an extra first parameter for the instance pointer
-                p_types.insert(0, DataType::Object.to_val_type()?);
+                param_types.insert(0, DataType::Object);
             }
 
+            let param_wasm_types = param_types.iter().map(|d| d.to_val_type()).collect::<Result<Vec<ValType>>>()?;
+
             // if the only return type is void, we treat it as no return types
-            let r_types = if metadata.return_type.len() == 1 && metadata.return_type.first().cloned().map(|r| r.0) == Some(DataType::Void) {
+            let fn_return_type = metadata.return_type.first().cloned().map(|d| d.0).unwrap_or(DataType::Void);
+            
+            // WE ONLY SUPPORT SINGLE RETURN VALUES FOR NOW
+            if metadata.return_type.len() > 1 {
+                Ext::log_critical(format!("WASM functions with multiple return values are not supported: {}", name));
+                continue;
+            }
+
+            let r_types = if fn_return_type == DataType::Void {
                 Vec::new()
             } else {
-                metadata.return_type.iter().map(|d| d.0.to_val_type()).collect::<Result<Vec<ValType>>>()?
+                vec![fn_return_type.to_val_type()?]
+                // metadata.return_type.iter().map(|d| d.0.to_val_type()).collect::<Result<Vec<ValType>>>()?
             };
-            let ft = FuncType::new(engine, p_types, r_types);
+            let ft = FuncType::new(engine, param_wasm_types, r_types);
             let cap = metadata.capability.clone();
             let callback = metadata.callback;
-            let pts = metadata.param_types.iter().map(|d| d.data_type).collect::<Vec<DataType>>();
+
 
             let data2 = Arc::clone(&data);
 
@@ -704,10 +734,34 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
 
             linker.func_new(
                 "env",
-                internal_name.as_str(),
+                internal_name.clone().as_str(),
                 ft,
                 move |caller, ps, rs| {
-                    wasm_bind_env::<Ext>(&data2, caller, &cap, ps, rs, pts.as_slice(), &callback)
+                    match catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        wasm_bind_env::<Ext>(&data2, caller, &cap, ps, rs, param_types.as_slice(), fn_return_type, &callback)
+                    })) {
+                        Ok(Ok(())) => Ok(()),
+                        Ok(Err(e)) => {
+                            // log errors since wasmtime doesn't propagate them with messages
+                            Ext::log_critical(format!(
+                                "WASM function {internal_name} returned error: {e}"
+                            ));
+                            Err(e)
+                        }
+                        Err(panic) => {
+                            let msg = if let Some(s) = panic.downcast_ref::<&str>() {
+                                (*s).to_string()
+                            } else if let Some(s) = panic.downcast_ref::<String>() {
+                                s.clone()
+                            } else {
+                                "Unknown panic payload".to_string()
+                            };
+                            Ext::log_critical(format!(
+                                "WASM function {internal_name} panicked: {msg}"
+                            ));
+                            Err(anyhow!("WASM function panicked: {msg}"))
+                        }
+                    }
                 }
             )?;
 
@@ -732,24 +786,20 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         self.memory = Some(memory);
         // clear any previous function cache and cache exports lazily
         self.func_cache.clear();
-        self.typed_cache.clear();
 
         // Pre-create typed wrappers for exported functions where possible to avoid first-call overhead.
         // Try a small set of common signatures and cache the TypedFunc if creation succeeds.
         for export in module.exports() {
+
             let name = export.name();
             let Some(func) = instance.get_func(&mut self.store, name) else { continue };
             
 
-            // get or insert into func cache
-            let key = self.func_cache.key_of(|x| x.0 == name).unwrap_or_else(||{
-                self.func_cache.push((name.to_string(), func))
-            });
-
-            
-            if let Some(entry) = TypedFuncEntry::from_func(&mut self.store, func) {
-                self.typed_cache.insert(key, entry);
+            // ensure no duplicates
+            if self.func_cache.key_of(|x| x.0 == name).is_some() {
+                return Err(anyhow!("Duplicate exported function name in wasm module: {}", name));
             }
+            self.func_cache.push((name.to_string(), func, TypedFuncEntry::from_func(&mut self.store, func)));
 
             if name == "on_update" {
                 let Ok(f) = func.typed::<f32, ()>(&mut self.store) else { continue };
@@ -782,19 +832,22 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         ret_type: DataType,
         data: &Arc<RwLock<EngineDataState>>,
     ) -> Param {
-        // Fast-path: typed cache (common signatures). Falls back to dynamic call below.
-        if let Some(entry) = self.typed_cache.get(&cache_key) {
-            return entry.invoke(&mut self.store, params).unwrap_or_else(Param::Error)
-        }
-
         // Try cache first to avoid repeated name lookup and Val boxing/unboxing.
         // This shouldn't be necessary as all exported functions are indexed on load
-        let (_, f) = self.func_cache.get(&cache_key);
+        let (f_name, f, typed) = self.func_cache.get(&cache_key);
+        
+        // can only do a typed call if all parameters are simple and return type is simple or void, so if we have a cached typed func, we know it will work and skip the Val conversions.
+        let can_typed_call = ret_type.is_wasm_simple() && params.iter().all(|r| r.data_type::<ExtTypes>().is_wasm_simple());
 
+        // Fast-path: typed cache (common signatures). Falls back to dynamic call below.
+        if can_typed_call && let Some(typed) = typed {
+            return typed.invoke(&mut self.store, params, data)
+                .unwrap_or_else(|e| Param::Error(format!("Error calling wasm function typed: {e}")));
+        }
 
         let args = match params.to_wasm_args(data) {
             Ok(a) => a,
-            Err(e) => return Param::Error(format!("{e}"))
+            Err(e) => return Param::Error(format!("Params error: {e}"))
         };
 
         // Fallback dynamic path
@@ -802,13 +855,17 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             DataType::Void => SmallVec::new(),
             DataType::F32 => SmallVec::from_buf([Val::F32(0)]),
             DataType::F64 => SmallVec::from_buf([Val::F64(0)]),
-            DataType::I64
-            | DataType::U64 => SmallVec::from_buf([Val::I64(0)]),
+            DataType::ExtString | DataType::RustString => SmallVec::from_buf([Val::I32(0)]),
+            // We use i64 for opaque pointers since we need the full 64 bits to store the pointer
+            DataType::Object => SmallVec::from_buf([Val::I64(0)]),
+            DataType::I64 | DataType::U64 => SmallVec::from_buf([Val::I64(0)]),
             _ => SmallVec::from_buf([Val::I32(0)]),
         };
 
+        // this are errors raised by wasm execution
+        // e.g. stack overflow, out of bounds memory access, etc.
         if let Err(e) = f.call(&mut self.store, &args, &mut res) {
-            return Param::Error(e.to_string());
+            return Param::Error(format!("Error calling wasm function: {}\n{}", f_name, e));
         }
         // Return void quickly
         if res.is_empty() {
@@ -822,6 +879,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         };
 
         // convert Val to Param
+        // if an error is returned from wasm, convert to Param::Error
         Param::from_wasm_type_val(ret_type, rt, data, memory, &self.store)
     }
 
@@ -851,7 +909,8 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
 
 }
 
-
+/// Wraps a call from wasm into the host environment, checking capability availability
+/// and converting parameters and return values as needed.
 fn wasm_bind_env<Ext: ExternalFunctions>(
     data: &Arc<RwLock<EngineDataState>>,
     mut caller: Caller<'_, WasiP1Ctx>,
@@ -859,18 +918,21 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
     ps: &[Val],
     rs: &mut [Val],
     p: &[DataType],
+    expected_return_type: DataType,
     func: &ScriptCallback,
 ) -> Result<()> {
-
     if !data.read().active_capabilities.contains(cap) {
+        Ext::log_critical(format!("Attempted to call mod capability '{}' which is not currently loaded", cap));
         return Err(anyhow!("Mod capability '{}' is not currently loaded", cap))
     }
 
     // pre-allocate params to avoid repeated reallocations
     let mut params = Params::of_size(p.len() as u32);
     for (exp_typ, value) in p.iter().zip(ps) {
-        params.push(exp_typ.to_wasm_val_param(value, &mut caller, data)?)
+        let param = exp_typ.to_wasm_val_param(value, &mut caller, data)?;
+        params.push(param)
     }
+
 
     let ffi_params= params.to_ffi::<Ext>();
     let ffi_params_struct = ffi_params.as_ffi_array();
@@ -878,11 +940,22 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
     // Call to C#/rust's provided callback using a clone so we can still cleanup
     let res = func(ffi_params_struct).into_param::<Ext>()?;
 
+    let result_data_type = res.data_type::<ExtTypes>();
+    if result_data_type != expected_return_type {
+        return Err(anyhow!(
+            "WASM function returned unexpected type. Expected: {:?}, Got: {:?}",
+            expected_return_type,
+            result_data_type
+        ))
+    }
+
     // Convert Param back to Val for return
+    // TODO: Add mechanism for providing error messages to caller
     let Some(rv) = res.into_wasm_val(data)? else {
         return Ok(())
     };
     rs[0] = rv;
+
 
     Ok(())
 }
