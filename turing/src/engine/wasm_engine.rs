@@ -1,7 +1,9 @@
 use std::ffi::{CStr, CString};
 use std::fs;
 use std::marker::PhantomData;
+use std::panic::catch_unwind;
 use std::path::Path;
+use std::ptr::null;
 use std::sync::Arc;
 use std::task::Poll;
 
@@ -147,6 +149,12 @@ impl Param {
             }
             DataType::Object => {
                 let op = val.unwrap_i64() as u64;
+
+                if op == 0 {
+                    // reserved value for null pointers
+                    return Param::Object(null());
+                }
+
                 let key = OpaquePointerKey::from(KeyData::from_ffi(op));
 
                 let real = data.read()
@@ -205,6 +213,11 @@ impl Param {
                 return Err(anyhow!("Error executing host function: {}", er));
             }
             Param::Object(pointer) => {
+                if pointer.is_null() {
+                    // reserved value for null pointers
+                    return Ok(Some(Val::I64(0)));
+                }
+
                 let pointer = ExtPointer::from(pointer);
                 let opaque = s.get_opaque_pointer(pointer);
                 Val::I64(opaque.0.as_ffi() as i64)
@@ -651,10 +664,19 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             let param_wasm_types = param_types.iter().map(|d| d.to_val_type()).collect::<Result<Vec<ValType>>>()?;
 
             // if the only return type is void, we treat it as no return types
-            let r_types = if metadata.return_type.len() == 1 && metadata.return_type.first().cloned().map(|r| r.0) == Some(DataType::Void) {
+            let fn_return_type = metadata.return_type.first().cloned().map(|d| d.0).unwrap_or(DataType::Void);
+            
+            // WE ONLY SUPPORT SINGLE RETURN VALUES FOR NOW
+            if metadata.return_type.len() > 1 {
+                Ext::log_critical(format!("WASM functions with multiple return values are not supported: {}", name));
+                continue;
+            }
+
+            let r_types = if metadata.return_type.len() == 1 && fn_return_type == DataType::Void {
                 Vec::new()
             } else {
-                metadata.return_type.iter().map(|d| d.0.to_val_type()).collect::<Result<Vec<ValType>>>()?
+                vec![fn_return_type.to_val_type()?]
+                // metadata.return_type.iter().map(|d| d.0.to_val_type()).collect::<Result<Vec<ValType>>>()?
             };
             let ft = FuncType::new(engine, param_wasm_types, r_types);
             let cap = metadata.capability.clone();
@@ -670,12 +692,31 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
                 internal_name.clone().as_str(),
                 ft,
                 move |caller, ps, rs| {
-                    wasm_bind_env::<Ext>(&data2, caller, &cap, ps, rs, param_types.as_slice(), &callback)
-                    // we handle Error returns specially by logging them
-                    // since wasmtime doesn't propagate them with their messages
-                    .inspect_err(|e| {
-                        Ext::log_debug(format!("WASM function {internal_name} threw error: {e}"));
-                    })
+                    match catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        wasm_bind_env::<Ext>(&data2, caller, &cap, ps, rs, param_types.as_slice(), fn_return_type, &callback)
+                    })) {
+                        Ok(Ok(())) => Ok(()),
+                        Ok(Err(e)) => {
+                            // log errors since wasmtime doesn't propagate them with messages
+                            Ext::log_critical(format!(
+                                "WASM function {internal_name} returned error: {e}"
+                            ));
+                            Err(e)
+                        }
+                        Err(panic) => {
+                            let msg = if let Some(s) = panic.downcast_ref::<&str>() {
+                                (*s).to_string()
+                            } else if let Some(s) = panic.downcast_ref::<String>() {
+                                s.clone()
+                            } else {
+                                "Unknown panic payload".to_string()
+                            };
+                            Ext::log_critical(format!(
+                                "WASM function {internal_name} panicked: {msg}"
+                            ));
+                            Err(anyhow!("WASM function panicked: {msg}"))
+                        }
+                    }
                 }
             )?;
 
@@ -833,6 +874,7 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
     ps: &[Val],
     rs: &mut [Val],
     p: &[DataType],
+    expected_return_type: DataType,
     func: &ScriptCallback,
 ) -> Result<()> {
     if !data.read().active_capabilities.contains(cap) {
@@ -854,10 +896,17 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
     // Call to C#/rust's provided callback using a clone so we can still cleanup
     let res = func(ffi_params_struct).into_param::<Ext>()?;
 
+    let result_data_type = res.data_type::<ExtTypes>();
+    if result_data_type != expected_return_type {
+        return Err(anyhow!(
+            "WASM function returned unexpected type. Expected: {:?}, Got: {:?}",
+            expected_return_type,
+            result_data_type
+        ))
+    }
+
     // Convert Param back to Val for return
     // TODO: Add mechanism for providing error messages to caller
-
-
     let Some(rv) = res.into_wasm_val(data)? else {
         return Ok(())
     };
