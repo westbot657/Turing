@@ -37,6 +37,10 @@ impl ExternalFunctions for DirectExt {
     }
 }
 
+struct ObjectA {
+    value: u32,
+}
+
 extern "C" fn log_info_wasm(params: FfiParamArray) -> FfiParam {
     let Ok(local) = params.as_params::<DirectExt>() else {
         return Param::Error("Failed to unpack params".to_string()).to_ext_param();
@@ -67,6 +71,33 @@ extern "C" fn log_info_panic(_params: FfiParamArray) -> FfiParam {
     panic!("Host panic from log_info_panic");
 }
 
+extern "C" fn create_object_a(_params: FfiParamArray) -> FfiParam {
+    let obj = Box::new(ObjectA { value: 41 });
+    let ptr = Box::into_raw(obj) as *const c_void;
+    Param::Object(ptr).to_ext_param()
+}
+
+extern "C" fn object_a_foo(params: FfiParamArray) -> FfiParam {
+    let Ok(local) = params.as_params::<DirectExt>() else {
+        return Param::Error("Failed to unpack params".to_string()).to_ext_param();
+    };
+
+    let Some(obj) = local.get(0) else {
+        return Param::Error("Missing argument: self".to_string()).to_ext_param();
+    };
+
+    let Param::Object(ptr) = obj else {
+        return Param::Error(format!(
+            "Invalid argument type, expected Object, got {:?}",
+            obj
+        ))
+        .to_ext_param();
+    };
+
+    let obj = unsafe { &*(*ptr as *const ObjectA) };
+    Param::I32((obj.value + 1) as i32).to_ext_param()
+}
+
 fn common_setup_direct(source: &str) -> Result<Turing<DirectExt>> {
     let mut turing = Turing::new();
 
@@ -81,6 +112,14 @@ fn common_setup_direct(source: &str) -> Result<Turing<DirectExt>> {
     let mut metadata = ScriptFnMetadata::new("test".to_owned(), log_info_panic, None);
     metadata.add_param_type(DataType::RustString, "msg")?;
     turing.add_function("do_panic", metadata)?;
+
+    let mut metadata = ScriptFnMetadata::new("test".to_owned(), create_object_a, None);
+    metadata.add_return_type_named(DataType::Object, "ObjectA".to_string())?;
+    turing.add_function("create_ObjectA", metadata)?;
+
+    let mut metadata = ScriptFnMetadata::new("test".to_owned(), object_a_foo, None);
+    metadata.add_return_type(DataType::I32)?;
+    turing.add_function("ObjectA.foo", metadata)?;
 
     let mut turing = turing.build()?;
     setup_test_script(&mut turing, source)?;
@@ -205,6 +244,15 @@ pub fn test_wasm_object_call() -> Result<()> {
         other => panic!("Unexpected return from object_test: {:#?}", other),
     }
 
+    Ok(())
+}
+
+#[test]
+pub fn test_wasm_object_method_roundtrip() -> Result<()> {
+    let mut turing = common_setup_direct(WASM_SCRIPT)?;
+
+    let res = turing.call_fn_by_name("object_test2", Params::new(), DataType::I32);
+    assert_eq!(res.to_result::<i32>()?, 42);
     Ok(())
 }
 

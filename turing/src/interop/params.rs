@@ -64,7 +64,7 @@ impl FreeableDataType {
     }
 }
 
-trait InnerFfiType {
+pub trait InnerFfiType {
     const STRING: DataType;
     const ERROR: DataType;
     const VEC4: DataType;

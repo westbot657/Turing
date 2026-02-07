@@ -770,8 +770,8 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             DataType::Void => SmallVec::new(),
             DataType::F32 => SmallVec::from_buf([Val::F32(0)]),
             DataType::F64 => SmallVec::from_buf([Val::F64(0)]),
-            DataType::I64
-            | DataType::U64 => SmallVec::from_buf([Val::I64(0)]),
+            // We use i64 for opaque pointers since we need the full 64 bits to store the pointer
+            DataType::I64 | DataType::Object | DataType::U64 => SmallVec::from_buf([Val::I64(0)]),
             _ => SmallVec::from_buf([Val::I32(0)]),
         };
 
