@@ -20,9 +20,9 @@ use wasmtime_wasi::cli::{IsTerminal, StdoutStream};
 use wasmtime_wasi::p1::WasiP1Ctx;
 use crate::engine::types::{ScriptCallback, ScriptFnMetadata};
 use crate::key_vec::KeyVec;
-use crate::{EngineDataState, ExternalFunctions, OpaquePointerKey, ScriptFnKey};
-use crate::interop::params::{DataType, ExtTypes, Param, Params};
-use crate::interop::types::{ExtPointer, Semver};
+use crate::{EngineDataState, ExternalFunctions, ScriptFnKey};
+use crate::interop::params::{DataType, ExtTypes, ObjectId, Param, Params};
+use crate::interop::types::Semver;
 
 impl DataType {
     pub fn to_wasm_val_param(&self, val: &Val, caller: &mut Caller<'_, WasiP1Ctx>, data: &Arc<RwLock<EngineDataState>>) -> Result<Param> {
@@ -60,14 +60,14 @@ impl DataType {
                 Ok(Param::String(st))
             }
             (DataType::Object, Val::I64(pointer_id)) => {
-                let pointer_key =
-                    OpaquePointerKey::from(KeyData::from_ffi(*pointer_id as u64));
+                let pointer_id = *pointer_id as u64;
 
-                if let Some(true_pointer) = data.read().opaque_pointers.get(pointer_key) {
-                    Ok(Param::Object(**true_pointer))
-                } else {
-                    Err(anyhow!("opaque pointer does not correspond to a real pointer"))
+                if pointer_id == 0 {
+                    // reserved value for null pointers
+                    return Ok(Param::Object(ObjectId::null()));
                 }
+
+                Ok(Param::Object(ObjectId::new(pointer_id)))
 
             }
             (DataType::Vec2, Val::I32(2)) => dequeue!(Vec2::from_array; 2),
@@ -150,19 +150,7 @@ impl Param {
             DataType::Object => {
                 let op = val.unwrap_i64() as u64;
 
-                if op == 0 {
-                    // reserved value for null pointers
-                    return Param::Object(null());
-                }
-
-                let key = OpaquePointerKey::from(KeyData::from_ffi(op));
-
-                let real = data.read()
-                    .opaque_pointers
-                    .get(key)
-                    .copied()
-                    .unwrap_or_default();
-                Param::Object(real.ptr)
+                Param::Object(ObjectId::new(op))
             }
             DataType::RustError | DataType::ExtError => {
                 let ptr = val.unwrap_i32() as u32;
@@ -215,12 +203,11 @@ impl Param {
             Param::Object(pointer) => {
                 if pointer.is_null() {
                     // reserved value for null pointers
-                    return Ok(Some(Val::I64(0)));
+                    return Ok(Some(Val::I64(pointer.as_ffi() as i64)));
                 }
 
-                let pointer = ExtPointer::from(pointer);
-                let opaque = s.get_opaque_pointer(pointer);
-                Val::I64(opaque.0.as_ffi() as i64)
+
+                Val::I64(pointer.as_ffi() as i64)
             }
             Param::Void => return Ok(None),
             Param::Vec2(v) => enqueue!(v; 2),
@@ -274,14 +261,7 @@ impl Params {
                         Ok(Val::I32(l as i32))
                     }
                     Param::Object(rp) => {
-                        let pointer = rp.into();
-                        Ok(if let Some(op) = s.pointer_backlink.get(&pointer) {
-                            Val::I64(op.0.as_ffi() as i64)
-                        } else {
-                            let op = s.opaque_pointers.insert(pointer);
-                            s.pointer_backlink.insert(pointer, op);
-                            Val::I64(op.0.as_ffi() as i64)
-                        })
+                        Ok(Val::I64(rp.as_ffi() as i64))
                     }
                     Param::Error(st) => {
                         Err(anyhow!("{st}"))
@@ -368,11 +348,7 @@ enum TypedFuncEntry {
 impl TypedFuncEntry {
     fn invoke(&self, store: &mut Store<WasiP1Ctx>, args: Params, data: &Arc<RwLock<EngineDataState>>) -> Result<Param, wasmtime::Error> {
         let get_object = |id: u64| -> Result<Param> {
-            let key = OpaquePointerKey::from(KeyData::from_ffi(id));
-            match data.read().opaque_pointers.get(key) {
-                Some(true_pointer) => Ok(Param::Object(**true_pointer)),
-                None => Err(anyhow!("opaque pointer does not correspond to a real pointer")),
-            }
+            Ok(Param::Object(ObjectId::new(id)))
         };
 
         match self {

@@ -1,6 +1,6 @@
 use crate::engine::types::ScriptFnMetadata;
 use crate::interop::params::{
-    DataType, FfiParam, FfiParamArray, FfiParams, FreeableDataType, Param, Params,
+    DataType, FfiParam, FfiParamArray, FfiParams, FreeableDataType, ObjectId, Param, Params
 };
 use crate::{ExternalFunctions, Turing};
 use anyhow::Result;
@@ -74,7 +74,7 @@ extern "C" fn log_info_panic(_params: FfiParamArray) -> FfiParam {
 extern "C" fn create_object_a(_params: FfiParamArray) -> FfiParam {
     let obj = Box::new(ObjectA { value: 41 });
     let ptr = Box::into_raw(obj) as *const c_void;
-    Param::Object(ptr).to_ext_param()
+    Param::Object(ObjectId::from_ptr(ptr)).to_ext_param()
 }
 
 extern "C" fn object_a_foo(params: FfiParamArray) -> FfiParam {
@@ -94,7 +94,7 @@ extern "C" fn object_a_foo(params: FfiParamArray) -> FfiParam {
         .to_ext_param();
     };
 
-    let obj = unsafe { &*(*ptr as *const ObjectA) };
+    let obj = unsafe { &*(ptr.as_ptr() as *const ObjectA) };
     Param::I32((obj.value + 1) as i32).to_ext_param()
 }
 
@@ -235,12 +235,12 @@ pub fn test_wasm_object_call() -> Result<()> {
     let ptr = boxed.as_ref() as *const u64 as *const c_void;
 
     let mut params = Params::new();
-    params.push(Param::Object(ptr));
+    params.push(Param::Object(ObjectId::from_ptr(ptr)));
 
     let res = turing.call_fn_by_name("object_test", params, DataType::Object);
 
     match res {
-        Param::Object(p) => assert_eq!(p as usize, ptr as usize),
+        Param::Object(p) => assert_eq!(p.as_ffi() as usize, ptr as usize),
         other => panic!("Unexpected return from object_test: {:#?}", other),
     }
 

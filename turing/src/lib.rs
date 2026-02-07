@@ -36,10 +36,6 @@ pub trait ExternalFunctions {
     fn free_of_type(ptr: *mut c_void, typ: FreeableDataType);
 }
 
-new_key_type! {
-    pub struct OpaquePointerKey;
-}
-
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub struct ScriptFnKey(u32);
 
@@ -73,10 +69,6 @@ impl From<ScriptFnKey> for usize {
 
 #[derive(Default)]
 pub struct EngineDataState {
-    /// maps opaque pointer ids to real pointers
-    pub opaque_pointers: SlotMap<OpaquePointerKey, ExtPointer>,
-    /// maps real pointers back to their opaque pointer ids
-    pub pointer_backlink: FxHashMap<ExtPointer, OpaquePointerKey>,
     /// queue of strings for wasm to fetch (needed due to reentrancy limitations)
     pub str_cache: VecDeque<String>,
     /// which mods are currently active
@@ -86,15 +78,7 @@ pub struct EngineDataState {
 }
 
 impl EngineDataState {
-    pub fn get_opaque_pointer(&mut self, pointer: ExtPointer) -> OpaquePointerKey {
-        if let Some(opaque) = self.pointer_backlink.get(&pointer) {
-            *opaque
-        } else {
-            let op = self.opaque_pointers.insert(pointer);
-            self.pointer_backlink.insert(pointer, op);
-            op
-        }
-    }
+
 }
 
 

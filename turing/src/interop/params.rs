@@ -151,6 +151,44 @@ impl DataType {
 
 }
 
+/// Represents a unique identifier for an object in the engine. Opaque to the script, just a u64 under the hood.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ObjectId(u64);
+
+impl ObjectId {
+    pub fn is_null(&self) -> bool {
+        self.0 == Self::null().0
+    }
+    
+    pub fn null() -> ObjectId {
+       ObjectId(0) 
+    } 
+
+    pub fn as_ffi(&self) -> u64 {
+        self.0
+    }
+
+
+    /// This function is useful if the external environment expects a pointer type for objects. 
+    /// It allows us to treat the ObjectId as an opaque pointer.
+    /// 
+    /// # Safety
+    /// - This value is not guaranteed to be a valid pointer, and should only be used 
+    ///   in contexts where the external environment passes it to us as from a pointer.
+    pub unsafe fn as_ptr(self) -> *const c_void {
+        self.0 as *const c_void
+    }
+
+    pub fn new(id: u64) -> Self {
+        ObjectId(id)
+    }
+
+    pub fn from_ptr(ptr: *const c_void) -> Self {
+        ObjectId(ptr as u64)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Param {
     I8(i8),
@@ -165,7 +203,7 @@ pub enum Param {
     F64(f64),
     Bool(bool),
     String(String),
-    Object(*const c_void),
+    Object(ObjectId),
     Error(String),
     Void,
     Vec2(Vec2),
@@ -371,7 +409,7 @@ pub union RawParam {
     f64: f64,
     bool: bool,
     string: *const c_char,
-    object: *const c_void,
+    object: ObjectId,
     error: *const c_char,
     void: (),
     vec2: Vec2,
