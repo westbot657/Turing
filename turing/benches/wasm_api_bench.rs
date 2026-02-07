@@ -7,6 +7,7 @@ use std::hint::black_box;
 use std::io::Write;
 use turing_rs::interop::params::{DataType, FfiParam, FfiParamArray, FreeableDataType, Param, Params};
 use turing_rs::{ExternalFunctions, Turing};
+use turing_rs::interop::types::U32Buffer;
 
 struct DirectExt {}
 impl ExternalFunctions for DirectExt {
@@ -28,6 +29,10 @@ impl ExternalFunctions for DirectExt {
 
     fn free_of_type(ptr: *mut c_void, typ: FreeableDataType) {
         unsafe { typ.free_ptr(ptr) }
+    }
+
+    fn free_u32_buffer(buf: U32Buffer) {
+        buf.from_rust();
     }
 }
 

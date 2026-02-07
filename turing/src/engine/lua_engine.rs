@@ -17,6 +17,37 @@ use crate::interop::params::{DataType, ObjectId, Param, Params};
 use crate::interop::types::Semver;
 
 
+fn vec_u32_to_lua_list(lua: &Lua, vec: Vec<u32>) -> mlua::Result<Value> {
+    let table = lua.create_table_with_capacity(vec.len(), 0)?;
+
+    for (i, v) in vec.into_iter().enumerate() {
+        // Lua arrays are 1-indexed
+        table.set((i + 1) as i64, v)?;
+    }
+
+    Ok(Value::Table(table))
+}
+
+fn lua_list_to_vec_u32(table: &Table) -> mlua::Result<Vec<u32>> {
+
+    let len = table.len()? as usize;
+    let mut vec = Vec::with_capacity(len);
+
+    for i in 1..=len {
+        let v: u32 = table.get(i as i64).map_err(|e| {
+            mlua::Error::FromLuaConversionError {
+                from: "Lua value",
+                to: "u32".to_string(),
+                message: Some(format!("invalid value at index {}", i)),
+            }
+        })?;
+        vec.push(v);
+    }
+
+    Ok(vec)
+}
+
+
 impl DataType {
     pub fn to_lua_val_param(&self, val: &Value, data: &Arc<RwLock<EngineDataState>>) -> mlua::Result<Param> {
         match (self, val) {
@@ -35,6 +66,9 @@ impl DataType {
             (DataType::Object, Value::Integer(t)) => {
                 let op = *t as u64;
                 Ok(Param::Object(ObjectId::new(op)))
+            }
+            (DataType::RustU32Buffer | DataType::ExtU32Buffer, Value::Table(t)) => {
+                Ok(Param::U32Buffer(lua_list_to_vec_u32(t)?))
             }
             _ => Err(mlua::Error::RuntimeError(format!("Mismatched parameter type: {self} with {val:?}")))
         }
@@ -71,6 +105,9 @@ impl Param {
             DataType::RustVec4 | DataType::ExtVec4 => lua_glam::unpack_vec4(val),
             DataType::RustQuat | DataType::ExtQuat => lua_glam::unpack_quat(val),
             DataType::RustMat4 | DataType::ExtMat4 => lua_glam::unpack_mat4(val),
+            DataType::RustU32Buffer | DataType::ExtU32Buffer => {
+                Param::U32Buffer(lua_list_to_vec_u32(val.as_table().unwrap()).unwrap())
+            }
         }
     }
 
@@ -106,6 +143,7 @@ impl Param {
             Param::Vec4(v) => lua_glam::create_vec4(v, lua).map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))?,
             Param::Quat(q) => lua_glam::create_quat(q, lua).map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))?,
             Param::Mat4(m) => lua_glam::create_mat4(m, lua).map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))?,
+            Param::U32Buffer(b) => vec_u32_to_lua_list(lua, b)?
         })
     }
 
@@ -143,6 +181,9 @@ impl Params {
                 Param::Vec4(v) => lua_glam::create_vec4(v, lua).map_err(|e| anyhow!("{e}")),
                 Param::Quat(q) => lua_glam::create_quat(q, lua).map_err(|e| anyhow!("{e}")),
                 Param::Mat4(m) => lua_glam::create_mat4(m, lua).map_err(|e| anyhow!("{e}")),
+                Param::U32Buffer(b) => {
+                    vec_u32_to_lua_list(lua, b).map_err(|e| anyhow!("{e}"))
+                }
             }
         ).collect::<Result<Vec<Value>>>()?;
 
@@ -193,6 +234,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
             )
         }).map_err(|e| anyhow!("Failed to create function: {e}"))?;
 
+        Ext::log_debug(format!("Adding function '{name}' to table"));
         table.set(name, func).map_err(|e| anyhow!("Failed to set function: {e}"))?;
 
         Ok(())
@@ -202,6 +244,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
         if api.raw_get::<Table>(cname).is_err() {
             let cls_table = lua.create_table().map_err(|e| anyhow!("Failed to create table: {e}"))?;
             cls_table.raw_set("__index", cls_table.clone()).map_err(|e| anyhow!("Failed to set table as self's __index member: {e}"))?;
+            Ext::log_debug(format!("Created new table: '{cname}'"));
             api.raw_set(
                 cname,
                 cls_table

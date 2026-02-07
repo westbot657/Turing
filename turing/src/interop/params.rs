@@ -9,45 +9,48 @@ use anyhow::{anyhow, Result};
 use glam::{Mat2, Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
 use num_enum::TryFromPrimitive;
 use crate::ExternalFunctions;
-use crate::interop::types::ExtString;
+use crate::interop::types::{ExtString, U32Buffer};
 
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFromPrimitive, Serialize, Deserialize)]
 pub enum DataType {
-    I8 = 1,
-    I16 = 2,
-    I32 = 3,
-    I64 = 4,
-    U8 = 5,
-    U16 = 6,
-    U32 = 7,
-    U64 = 8,
-    F32 = 9,
-    F64 = 10,
-    Bool = 11,
-    RustString = 12,
-    ExtString  = 13,
-    Object = 14,
-    RustError = 15,
-    ExtError  = 16,
-    Void = 17,
-    Vec2 = 18,
-    Vec3 = 19,
-    RustVec4 = 20,
-    ExtVec4  = 21,
-    RustQuat = 22,
-    ExtQuat  = 23,
-    RustMat4 = 24,
-    ExtMat4  = 25,
+    I8              = 1,
+    I16             = 2,
+    I32             = 3,
+    I64             = 4,
+    U8              = 5,
+    U16             = 6,
+    U32             = 7,
+    U64             = 8,
+    F32             = 9,
+    F64             = 10,
+    Bool            = 11,
+    RustString      = 12,
+    ExtString       = 13,
+    Object          = 14,
+    RustError       = 15,
+    ExtError        = 16,
+    Void            = 17,
+    Vec2            = 18,
+    Vec3            = 19,
+    RustVec4        = 20,
+    ExtVec4         = 21,
+    RustQuat        = 22,
+    ExtQuat         = 23,
+    RustMat4        = 24,
+    ExtMat4         = 25,
+    RustU32Buffer   = 26,
+    ExtU32Buffer    = 27,
 }
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFromPrimitive)]
 pub enum FreeableDataType {
-    ExtVec4  = DataType::ExtVec4 as u32,
-    ExtQuat  = DataType::ExtQuat as u32,
-    ExtMat4  = DataType::ExtMat4 as u32,
+    ExtVec4      = DataType::ExtVec4      as u32,
+    ExtQuat      = DataType::ExtQuat      as u32,
+    ExtMat4      = DataType::ExtMat4      as u32,
+    // ExtU32BUFFER = DataType::ExtU32Buffer as u32,
 }
 
 impl FreeableDataType {
@@ -56,9 +59,9 @@ impl FreeableDataType {
     pub unsafe fn free_ptr(&self, ptr: *mut c_void) {
         unsafe {
             match self {
-                FreeableDataType::ExtVec4 => { drop(Box::from_raw(ptr as *mut Vec4)); }
-                FreeableDataType::ExtQuat => { drop(Box::from_raw(ptr as *mut Quat)); }
-                FreeableDataType::ExtMat4 => { drop(Box::from_raw(ptr as *mut Mat4)); }
+                Self::ExtVec4 => { drop(Box::from_raw(ptr as *mut Vec4)); }
+                Self::ExtQuat => { drop(Box::from_raw(ptr as *mut Quat)); }
+                Self::ExtMat4 => { drop(Box::from_raw(ptr as *mut Mat4)); }
             }
         }
     }
@@ -70,6 +73,7 @@ pub trait InnerFfiType {
     const VEC4: DataType;
     const QUAT: DataType;
     const MAT4: DataType;
+    const U32BUFFER: DataType;
 }
 
 pub struct RustTypes;
@@ -81,6 +85,7 @@ impl InnerFfiType for RustTypes {
     const VEC4: DataType = DataType::RustVec4;
     const QUAT: DataType = DataType::RustQuat;
     const MAT4: DataType = DataType::RustMat4;
+    const U32BUFFER: DataType = DataType::RustU32Buffer;
 }
 
 impl InnerFfiType for ExtTypes {
@@ -89,6 +94,7 @@ impl InnerFfiType for ExtTypes {
     const VEC4: DataType = DataType::ExtVec4;
     const QUAT: DataType = DataType::ExtQuat;
     const MAT4: DataType = DataType::ExtMat4;
+    const U32BUFFER: DataType = DataType::ExtU32Buffer;
 }
 
 
@@ -120,6 +126,8 @@ impl Display for DataType {
             DataType::ExtQuat => "EXT_QUAT",
             DataType::RustMat4 => "RUST_MAT4",
             DataType::ExtMat4 => "EXT_MAT4",
+            DataType::RustU32Buffer => "RUST_U32_BUFFER",
+            DataType::ExtU32Buffer => "EXT_U32_BUFFER",
         };
         write!(f, "{}", s)
     }
@@ -211,6 +219,7 @@ pub enum Param {
     Vec4(Vec4),
     Quat(Quat),
     Mat4(Mat4),
+    U32Buffer(Vec<u32>),
 }
 
 
@@ -247,6 +256,13 @@ impl Param {
             Param::Vec4(v) => FfiParam { type_id: T::VEC4, value: RawParam { vec4: Box::into_raw(Box::new(v)) } },
             Param::Quat(q) => FfiParam { type_id: T::QUAT, value: RawParam { quat: Box::into_raw(Box::new(q)) } },
             Param::Mat4(m) => FfiParam { type_id: T::MAT4, value: RawParam { mat4: Box::into_raw(Box::new(m)) } },
+            Param::U32Buffer(arr) => {
+                let len = arr.len() as u32;
+                let mut boxed = arr.into_boxed_slice();
+                let ptr = boxed.as_mut_ptr();
+                mem::forget(boxed);
+                FfiParam { type_id: T::U32BUFFER, value: RawParam { u32_buffer: U32Buffer { size: len, array: ptr } } }
+            }
         }
     }
 
@@ -394,6 +410,7 @@ impl DerefMut for Params {
     }
 }
 
+
 /// C repr of ffi data
 #[repr(C)]
 pub union RawParam {
@@ -419,6 +436,7 @@ pub union RawParam {
     mat2: *const Mat2,
     mat3: *const Mat3,
     mat4: *const Mat4,
+    u32_buffer: U32Buffer,
 }
 
 /// C tagged repr of ffi data
@@ -634,6 +652,8 @@ impl FfiParam {
             DataType::ExtQuat => Param::Quat(deref!(ExtQuat(quat))),
             DataType::RustMat4 => Param::Mat4(unbox!(mat4)),
             DataType::ExtMat4 => Param::Mat4(deref!(ExtMat4(mat4))),
+            DataType::RustU32Buffer => Param::U32Buffer(unsafe { self.value.u32_buffer }.from_rust()),
+            DataType::ExtU32Buffer => Param::U32Buffer(unsafe { self.value.u32_buffer }.from_ext::<Ext>()),
         })
     }
 
@@ -682,6 +702,7 @@ impl FfiParam {
             DataType::ExtQuat => Param::Quat(deref!(quat)),
             DataType::RustMat4 => Param::Mat4(unbox!(mat4)),
             DataType::ExtMat4 => Param::Mat4(deref!(mat4)),
+            DataType::RustU32Buffer | DataType::ExtU32Buffer => Param::U32Buffer(unsafe { self.value.u32_buffer }.borrow())
         })
     }
 

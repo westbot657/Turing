@@ -12,7 +12,7 @@ use parking_lot::RwLock;
 use rustc_hash::{FxHashMap, FxHashSet};
 use slotmap::{new_key_type, SlotMap};
 use crate::interop::params::{DataType, FreeableDataType, Param, Params};
-use crate::interop::types::{ExtPointer, Semver};
+use crate::interop::types::{ExtPointer, Semver, U32Buffer};
 use crate::spec_gen::generator::generate_specs;
 
 pub mod engine;
@@ -34,6 +34,7 @@ pub trait ExternalFunctions {
     fn log_critical(msg: impl ToString);
     fn free_string(ptr: *const c_char);
     fn free_of_type(ptr: *mut c_void, typ: FreeableDataType);
+    fn free_u32_buffer(buf: U32Buffer);
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
@@ -75,6 +76,8 @@ pub struct EngineDataState {
     pub active_capabilities: FxHashSet<String>,
     /// queue for algebraic type's data
     pub f32_queue: VecDeque<f32>,
+    /// queue for Vec<u32>s
+    pub u32_buffer_queue: VecDeque<Vec<u32>>
 }
 
 impl EngineDataState {

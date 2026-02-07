@@ -5,6 +5,7 @@ use crate::interop::params::{
 use crate::{ExternalFunctions, Turing};
 use anyhow::Result;
 use std::ffi::{CString, c_char, c_void};
+use crate::interop::types::U32Buffer;
 
 struct DirectExt {}
 impl ExternalFunctions for DirectExt {
@@ -13,19 +14,19 @@ impl ExternalFunctions for DirectExt {
     }
 
     fn log_info(msg: impl ToString) {
-        println!("[info]: {}", msg.to_string())
+        println!("\x1b[38;2;50;200;50m[info]: {}\x1b[0m", msg.to_string())
     }
 
     fn log_warn(msg: impl ToString) {
-        println!("[warn]: {}", msg.to_string())
+        println!("\x1b[38;2;255;127;30m[warn]: {}\x1b[0m", msg.to_string())
     }
 
     fn log_debug(msg: impl ToString) {
-        println!("[debug]: {}", msg.to_string())
+        println!("\x1b[38;2;20;200;200m[debug]: {}\x1b[0m", msg.to_string())
     }
 
     fn log_critical(msg: impl ToString) {
-        println!("[critical]: {}", msg.to_string())
+        println!("\x1b[38;2;200;20;20m[critical]: {}\x1b[0m", msg.to_string())
     }
 
     fn free_string(ptr: *const c_char) {
@@ -34,6 +35,10 @@ impl ExternalFunctions for DirectExt {
 
     fn free_of_type(ptr: *mut c_void, typ: FreeableDataType) {
         unsafe { typ.free_ptr(ptr) }
+    }
+
+    fn free_u32_buffer(buf: U32Buffer) {
+        buf.from_rust();
     }
 }
 
@@ -52,7 +57,7 @@ extern "C" fn log_info_wasm(params: FfiParamArray) -> FfiParam {
 
     match msg {
         Param::String(s) => {
-            println!("[wasm/info]: {}", s);
+            println!("\x1b[38;2;20;200;20m[wasm/info]: {}\x1b[0m", s);
             Param::Void.to_ext_param()
         }
         _ => Param::Error(format!(
@@ -159,7 +164,7 @@ fn test_math(mut turing: Turing<DirectExt>) -> Result<()> {
 
     let res = turing.call_fn_by_name("math_ops_test", params, DataType::F32);
 
-    println!("[test/ext]: code multiplied 3.5 by 5.0 for {:#?}", res);
+    println!("\x1b[38;2;200;200;20m[test/ext]: code multiplied 3.5 by 5.0 for {:#?}\x1b[0m", res);
     assert!((res.to_result::<f32>()? - 17.5).abs() < f32::EPSILON);
 
     Ok(())
@@ -206,7 +211,7 @@ pub fn test_lua_string_fetch() -> Result<()> {
         .call_fn_by_name("string_test", s, DataType::ExtString)
         .to_result::<String>()?;
 
-    println!("Received message from lua: '{res}'");
+    println!("\x1b[38;2;200;200;20mReceived message from lua: '{res}'\x1b[0m");
     Ok(())
 }
 

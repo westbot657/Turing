@@ -4,10 +4,13 @@ use std::ffi::{c_char, c_void, CString};
 use std::mem;
 use crate::ExternalFunctions;
 use crate::interop::params::FreeableDataType;
+use crate::interop::types::U32Buffer;
 
 pub type CsAbort = extern "C" fn(*const c_char, *const c_char);
 pub type CsLog = extern "C" fn(*const c_char);
 pub type CsFree = extern "C" fn(*const c_char);
+pub type CsFreeOfType = extern "C" fn(*const c_void, u32);
+pub type CsFreeBuffer = extern "C" fn(U32Buffer);
 
 pub struct CsFns {
     pub abort: CsAbort,
@@ -16,6 +19,8 @@ pub struct CsFns {
     pub log_critical: CsLog,
     pub log_debug: CsLog,
     pub free_cs_string: CsFree,
+    pub free_of_type: CsFreeOfType,
+    pub free_u32_buffer: CsFreeBuffer,
 }
 
 extern "C" fn null_abort(_: *const c_char, _: *const c_char) {
@@ -25,6 +30,14 @@ extern "C" fn null_abort(_: *const c_char, _: *const c_char) {
 extern "C" fn null_log(_: *const c_char) {}
 extern "C" fn null_free(_: *const c_char) {
     eprintln!("null free called, exiting process.");
+    std::process::abort()
+}
+extern "C" fn null_free_of_type(_: *const c_void, _: u32) {
+    eprintln!("null free_of_type called, exiting process.");
+    std::process::abort()
+}
+extern "C" fn null_free_u32_buffer(_: U32Buffer) {
+    eprintln!("null free_u32_buffer called, exiting process.");
     std::process::abort()
 }
 
@@ -37,6 +50,8 @@ impl CsFns {
             log_critical: null_log,
             log_debug: null_log,
             free_cs_string: null_free,
+            free_of_type: null_free_of_type,
+            free_u32_buffer: null_free_u32_buffer,
         }
     }
 
@@ -55,6 +70,8 @@ impl CsFns {
                 "log_critical" => self.log_critical = mem::transmute::<*const c_void, CsLog>(ptr),
                 "log_debug" => self.log_debug = mem::transmute::<*const c_void, CsLog>(ptr),
                 "free_cs_string" => self.free_cs_string = mem::transmute::<*const c_void, CsFree>(ptr),
+                "free_of_type" => self.free_of_type = mem::transmute::<*const c_void, CsFreeOfType>(ptr),
+                "free_u32_buffer" => self.free_u32_buffer = mem::transmute::<*const c_void, CsFreeBuffer>(ptr),
                 _ => {
                     eprintln!("Invalid function name: '{}', process will abort.", fn_name);
                     std::process::abort()
@@ -111,7 +128,15 @@ impl ExternalFunctions for CsFns {
     }
 
     fn free_of_type(ptr: *mut c_void, typ: FreeableDataType) {
-        unsafe { typ.free_ptr(ptr) }
+        unsafe {
+            (CS_FNS.free_of_type)(ptr, typ as u32)
+        }
+    }
+
+    fn free_u32_buffer(buf: U32Buffer) {
+        unsafe {
+            (CS_FNS.free_u32_buffer)(buf)
+        }
     }
 
 }

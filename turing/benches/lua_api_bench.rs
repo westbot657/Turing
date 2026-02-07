@@ -4,6 +4,7 @@ use std::hint::black_box;
 use turing_rs::engine::types::ScriptFnMetadata;
 use turing_rs::interop::params::{DataType, FreeableDataType, Param, Params};
 use turing_rs::{ExternalFunctions, Turing};
+use turing_rs::interop::types::U32Buffer;
 
 struct DirectExt {}
 impl ExternalFunctions for DirectExt {
@@ -24,6 +25,10 @@ impl ExternalFunctions for DirectExt {
 
     fn free_of_type(ptr: *mut c_void, typ: FreeableDataType) {
         unsafe { typ.free_ptr(ptr) }
+    }
+
+    fn free_u32_buffer(buf: U32Buffer) {
+        buf.from_rust();
     }
 }
 
