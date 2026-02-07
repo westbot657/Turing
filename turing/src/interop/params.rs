@@ -292,6 +292,7 @@ impl Param {
             Param::Vec4(_) => T::VEC4,
             Param::Quat(_) => T::QUAT,
             Param::Mat4(_) => T::MAT4,
+            Param::U32Buffer(_) => T::U32BUFFER,
         } 
     }
 
