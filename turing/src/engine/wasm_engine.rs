@@ -672,7 +672,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
                 continue;
             }
 
-            let r_types = if metadata.return_type.len() == 1 && fn_return_type == DataType::Void {
+            let r_types = if fn_return_type == DataType::Void {
                 Vec::new()
             } else {
                 vec![fn_return_type.to_val_type()?]
