@@ -1,5 +1,7 @@
 use crate::engine::types::ScriptFnMetadata;
-use crate::interop::params::{DataType, FfiParam, FfiParamArray, FreeableDataType, Param, Params};
+use crate::interop::params::{
+    DataType, FfiParam, FfiParamArray, FfiParams, FreeableDataType, Param, Params,
+};
 use crate::{ExternalFunctions, Turing};
 use anyhow::Result;
 use std::ffi::{CString, c_char, c_void};
@@ -181,6 +183,28 @@ pub fn test_wasm_panic() -> Result<()> {
 
     let err = res.unwrap_err().to_string();
     assert!(err.contains("panic") || err.contains("unreachable") || err.contains("trap"));
+    Ok(())
+}
+
+#[test]
+pub fn test_wasm_object_call() -> Result<()> {
+    // Use the pre-built wasm_tests.wasm produced by the `tests` crate build.
+    let mut turing = common_setup_direct(WASM_SCRIPT)?;
+
+    // create a boxed value and take a pointer to it
+    let boxed = Box::new(0xCAFEBABEu64);
+    let ptr = boxed.as_ref() as *const u64 as *const c_void;
+
+    let mut params = Params::new();
+    params.push(Param::Object(ptr));
+
+    let res = turing.call_fn_by_name("object_test", params, DataType::Object);
+
+    match res {
+        Param::Object(p) => assert_eq!(p as usize, ptr as usize),
+        other => panic!("Unexpected return from object_test: {:#?}", other),
+    }
+
     Ok(())
 }
 

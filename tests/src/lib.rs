@@ -2,6 +2,7 @@ use std::ffi::{CString, c_char, CStr};
 use std::path::Path;
 use std::{fs, io};
 
+pub type ObjectHandle = u64;
 
 unsafe extern "C" {
     fn _test_log__info(msg: *const c_char);
@@ -69,4 +70,10 @@ extern "C" fn test_string_fetch() {
 #[unsafe(no_mangle)]
 extern "C" fn test_panic() {
     panic!("This is a panic from within wasm!");
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn object_test(val: ObjectHandle) -> ObjectHandle {
+    // Echo back the raw i64 value so host-side opaque pointer handling can be tested.
+    val
 }
