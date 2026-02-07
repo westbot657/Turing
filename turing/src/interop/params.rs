@@ -72,8 +72,8 @@ trait InnerFfiType {
     const MAT4: DataType;
 }
 
-struct RustTypes;
-struct ExtTypes;
+pub struct RustTypes;
+pub struct ExtTypes;
 
 impl InnerFfiType for RustTypes {
     const STRING: DataType = DataType::RustString;
@@ -214,6 +214,31 @@ impl Param {
 
     pub fn to_result<T: FromParam>(self) -> Result<T> {
         T::from_param(self)
+    }
+    
+    pub fn data_type<T: InnerFfiType>(&self) -> DataType {
+        match self {
+            Param::I8(_) => DataType::I8,
+            Param::I16(_) => DataType::I16,
+            Param::I32(_) => DataType::I32,
+            Param::I64(_) => DataType::I64,
+            Param::U8(_) => DataType::U8,
+            Param::U16(_) => DataType::U16,
+            Param::U32(_) => DataType::U32,
+            Param::U64(_) => DataType::U64,
+            Param::F32(_) => DataType::F32,
+            Param::F64(_) => DataType::F64,
+            Param::Bool(_) => DataType::Bool,
+            Param::String(_) => T::STRING,
+            Param::Object(_) => DataType::Object,
+            Param::Error(_) => T::ERROR,
+            Param::Void => DataType::Void,
+            Param::Vec2(_) => DataType::Vec2,
+            Param::Vec3(_) => DataType::Vec3,
+            Param::Vec4(_) => T::VEC4,
+            Param::Quat(_) => T::QUAT,
+            Param::Mat4(_) => T::MAT4,
+        } 
     }
 
 }
