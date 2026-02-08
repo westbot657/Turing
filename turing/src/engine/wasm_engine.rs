@@ -123,53 +123,52 @@ impl Param {
         macro_rules! dequeue {
             ($typ:tt :: $init:tt; $x:tt ) => {{
                 let mut s = data.write();
-                Param::$typ(glam::$typ::$init(
-                    s.f32_queue.make_contiguous(),
-                ))
+                Param::$typ(glam::$typ::$init(s.f32_queue.make_contiguous()))
             }};
         }
 
-        match typ {
-            DataType::I8 => Param::I8(val.unwrap_i32() as i8),
-            DataType::I16 => Param::I16(val.unwrap_i32() as i16),
-            DataType::I32 => Param::I32(val.unwrap_i32()),
-            DataType::I64 => Param::I64(val.unwrap_i64()),
-            DataType::U8 => Param::U8(val.unwrap_i32() as u8),
-            DataType::U16 => Param::U16(val.unwrap_i32() as u16),
-            DataType::U32 => Param::U32(val.unwrap_i32() as u32),
-            DataType::U64 => Param::U64(val.unwrap_i64() as u64),
-            DataType::F32 => Param::F32(val.unwrap_f32()),
-            DataType::F64 => Param::F64(val.unwrap_f64()),
-            DataType::Bool => Param::Bool(val.unwrap_i32() != 0),
-            DataType::RustString | DataType::ExtString => {
-
-                let ptr = val.unwrap_i32() as u32;
+        match (typ, val) {
+            (DataType::I8, Val::I32(i)) => Param::I8(i as i8),
+            (DataType::I16, Val::I32(i)) => Param::I16(i as i16),
+            (DataType::I32, Val::I32(i)) => Param::I32(i),
+            (DataType::I64, Val::I64(i)) => Param::I64(i),
+            (DataType::U8, Val::I32(u)) => Param::U8(u as u8),
+            (DataType::U16, Val::I32(u)) => Param::U16(u as u16),
+            (DataType::U32, Val::I32(u)) => Param::U32(u as u32),
+            (DataType::U64, Val::I64(u)) => Param::U64(u as u64),
+            (DataType::F32, Val::F32(f)) => Param::F32(f32::from_bits(f)),
+            (DataType::F64, Val::F64(f)) => Param::F64(f64::from_bits(f)),
+            (DataType::Bool, Val::I32(b)) => Param::Bool(b != 0),
+            (DataType::RustString | DataType::ExtString, Val::I32(ptr)) => {
+                let ptr = ptr as u32;
                 let st = get_wasm_string(ptr, memory.data(caller));
                 Param::String(st)
             }
-            DataType::Object => {
-                let op = val.unwrap_i64() as u64;
-
-                Param::Object(ObjectId::new(op))
-            }
-            DataType::RustError | DataType::ExtError => {
-                let ptr = val.unwrap_i32() as u32;
+            (DataType::Object, Val::I64(op)) => Param::Object(ObjectId::new(op as u64)),
+            (DataType::RustError | DataType::ExtError, Val::I32(ptr)) => {
+                let ptr = ptr as u32;
                 let st = get_wasm_string(ptr, memory.data(caller));
                 Param::Error(format!("WASM Error: {}", st))
             }
-            DataType::Void => Param::Void,
+            (DataType::Void, _) => Param::Void,
 
-
-            DataType::Vec2 => dequeue!(Vec2::from_slice; 2),
-            DataType::Vec3 => dequeue!(Vec3::from_slice; 3),
-            DataType::RustVec4 | DataType::ExtVec4 => dequeue!(Vec4::from_slice; 4),
-            DataType::RustQuat | DataType::ExtQuat => dequeue!(Quat::from_slice; 4),
-            DataType::RustMat4 | DataType::ExtMat4 => dequeue!(Mat4::from_cols_slice; 16),
-            DataType::RustU32Buffer | DataType::ExtU32Buffer => {
-                let ptr = val.unwrap_i32() as u32;
+            (DataType::Vec2, _) => dequeue!(Vec2::from_slice; 2),
+            (DataType::Vec3, _) => dequeue!(Vec3::from_slice; 3),
+            (DataType::RustVec4 | DataType::ExtVec4, _) => dequeue!(Vec4::from_slice; 4),
+            (DataType::RustQuat | DataType::ExtQuat, _) => dequeue!(Quat::from_slice; 4),
+            (DataType::RustMat4 | DataType::ExtMat4, _) => {
+                dequeue!(Mat4::from_cols_slice; 16)
+            }
+            (DataType::RustU32Buffer | DataType::ExtU32Buffer, Val::I32(ptr)) => {
+                let ptr = ptr as u32;
                 let len = data.write().f32_queue.pop_front().unwrap().to_bits();
                 Param::U32Buffer(get_u32_vec(ptr, len, memory.data(caller)).unwrap())
             }
+            // Fallback: if the Val doesn't match the expected variant, return an error Param
+            _ => Param::Error(format!(
+                "Type mismatch converting WASM value to Param: expected {:?}, got {:?}",
+                typ, val
+            )),
         }
     }
 
