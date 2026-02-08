@@ -293,7 +293,13 @@ where
     };
 
     let full_msg = format!("Panic occurred at {}: {}", location, msg);
+    // Capture a backtrace and include it in outputs
+    let backtrace = std::backtrace::Backtrace::force_capture();
+    let backtrace_str = format!("{}", backtrace);
 
+    let full_msg_with_bt = format!("{}\nBacktrace:\n{}", full_msg, backtrace_str);
+
+    Ext::log_critical(format!("Writing panic information to file and stderr: {:?}", file_out));
     if let Some(file_path) = file_out
         && let Ok(mut file) = std::fs::OpenOptions::new()
             .create(true)
@@ -301,11 +307,13 @@ where
             .open(file_path)
     {
         use std::io::Write;
-        let _ = writeln!(file, "{}", full_msg);
+        let _ = writeln!(file, "{}", full_msg_with_bt);
         let _ = file.flush();
     }
-    eprintln!("{}", full_msg);
 
-    // Log as critical error
-    Ext::log_critical(full_msg);
+    eprintln!("{}", full_msg);
+    eprintln!("Backtrace:\n{}", backtrace_str);
+
+    // Log as critical error (include backtrace)
+    Ext::log_critical(full_msg_with_bt);
 }
