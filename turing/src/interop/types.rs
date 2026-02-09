@@ -186,10 +186,7 @@ pub struct U32Buffer {
 
 impl Clone for U32Buffer {
     fn clone(&self) -> Self {
-        Self {
-            size: self.size,
-            array: self.array,
-        }
+        *self
     }
 }
 
@@ -197,7 +194,7 @@ impl U32Buffer {
     /// Moves the data into a Vec<u32> and frees the underlying data directly
     pub fn from_rust(self) -> Vec<u32> {
         let slice =
-            unsafe { Box::from_raw(slice::from_raw_parts_mut(self.array, self.size as usize)) };
+            unsafe { Box::from_raw(ptr::slice_from_raw_parts_mut(self.array, self.size as usize)) };
         slice.into_vec()
     }
 

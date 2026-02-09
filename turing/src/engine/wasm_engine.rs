@@ -11,11 +11,10 @@ use crate::interop::types::{ExtPointer, Semver};
 use crate::key_vec::KeyVec;
 use crate::{EngineDataState, ExternalFunctions, OpaquePointerKey, ScriptFnKey};
 use anyhow::{Result, anyhow};
-use convert_case::{Case, Casing};
 use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
 use slotmap::KeyData;
-use smallvec::{ExtendFromSlice, SmallVec};
+use smallvec::SmallVec;
 use tokio::io::AsyncWrite;
 use wasmtime::{
     Caller, Config, Engine, Func, FuncType, Instance, Linker, Memory, MemoryAccessError, Module,
@@ -578,9 +577,9 @@ fn get_u32_vec(ptr: u32, len: u32, data: &[u8]) -> Option<Vec<u32>> {
         return None;
     }
     let mut vec = vec![0u32; len as usize];
-    for i in 0..len as usize {
+    for (i, u) in vec.iter_mut().enumerate() {
         let offset = start + i * 4;
-        vec[i] = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap());
+        *u = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
     }
     Some(vec)
 }
@@ -972,12 +971,10 @@ pub fn wasm_host_strcpy(
 
     if let Some(next_str) = data.write().str_cache.pop_front()
         && next_str.len() + 1 == size as usize
-    {
-        if let Some(memory) = caller.get_export("memory").and_then(|m| m.into_memory()) {
+        && let Some(memory) = caller.get_export("memory").and_then(|m| m.into_memory()) {
             write_wasm_string(ptr as u32, &next_str, &memory, caller)?;
             return Ok(());
         }
-    }
 
     Err(anyhow!(
         "An error occurred whilst copying string to wasm memory"
@@ -994,12 +991,10 @@ pub fn wasm_host_bufcpy(
 
     if let Some(next_buf) = data.write().u32_buffer_queue.pop_front()
         && next_buf.len() == size as usize
-    {
-        if let Some(memory) = caller.get_export("memory").and_then(|m| m.into_memory()) {
+        && let Some(memory) = caller.get_export("memory").and_then(|m| m.into_memory()) {
             write_u32_vec(ptr as u32, &next_buf, &memory, caller)?;
             return Ok(());
         }
-    }
 
     Err(anyhow!(
         "An error occurred whilst copying a Vec<u32> to wasm memory"

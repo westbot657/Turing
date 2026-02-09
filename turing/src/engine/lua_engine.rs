@@ -34,7 +34,7 @@ fn lua_list_to_vec_u32(table: &Table) -> mlua::Result<Vec<u32>> {
     for i in 1..=len {
         let v: u32 = table
             .get(i as i64)
-            .map_err(|e| mlua::Error::FromLuaConversionError {
+            .map_err(|_| mlua::Error::FromLuaConversionError {
                 from: "Lua value",
                 to: "u32".to_string(),
                 message: Some(format!("invalid value at index {}", i)),
