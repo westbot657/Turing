@@ -7,7 +7,7 @@ pub type ObjectHandle = u64;
 unsafe extern "C" {
     fn _test_log__info(msg: *const c_char);
     fn _test_fetch_string() -> u32;
-    fn _host_strcpy(location: u32, size: u32) -> u32;
+    fn _host_strcpy(location: u32, size: u32);
     fn _test_create_object_a() -> ObjectHandle;
     fn _test_object_a__foo(handle: ObjectHandle) -> i32;
 }
