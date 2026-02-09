@@ -78,10 +78,17 @@ fn build_windows() {
         fs::create_dir_all(&dest_dir).expect("Failed to create Beat Saber Libs/Native directory");
         let dest_path = dest_dir.join(format!("{lib_name}.dll"));
 
-
-        fs::copy(&built, &dest_path)
-            .unwrap_or_else(|e| panic!("Failed to copy DLL to Beat Saber directory: {} {}", dest_path.display(), e));
-        println!("Copied dll to Beat Saber directory: {}", dest_path.display());
+        fs::copy(&built, &dest_path).unwrap_or_else(|e| {
+            panic!(
+                "Failed to copy DLL to Beat Saber directory: {} {}",
+                dest_path.display(),
+                e
+            )
+        });
+        println!(
+            "Copied dll to Beat Saber directory: {}",
+            dest_path.display()
+        );
     }
 
     println!("Windows dll generated in dist");

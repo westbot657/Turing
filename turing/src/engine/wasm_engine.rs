@@ -7,6 +7,11 @@ use std::ptr::null;
 use std::sync::Arc;
 use std::task::Poll;
 
+use crate::engine::types::{ScriptCallback, ScriptFnMetadata};
+use crate::interop::params::{DataType, ExtTypes, ObjectId, Param, Params};
+use crate::interop::types::Semver;
+use crate::key_vec::KeyVec;
+use crate::{EngineDataState, ExternalFunctions, ScriptFnKey};
 use anyhow::{Result, anyhow, bail};
 use convert_case::{Case, Casing};
 use parking_lot::RwLock;
@@ -14,27 +19,30 @@ use rustc_hash::FxHashMap;
 use slotmap::KeyData;
 use smallvec::{ExtendFromSlice, SmallVec};
 use tokio::io::AsyncWrite;
-use wasmtime::{Caller, Config, Engine, FuncType, Func, Instance, Linker, Memory, MemoryAccessError, Module, Store, TypedFunc, Val, ValType};
+use wasmtime::{
+    Caller, Config, Engine, Func, FuncType, Instance, Linker, Memory, MemoryAccessError, Module,
+    Store, TypedFunc, Val, ValType,
+};
 use wasmtime_wasi::WasiCtxBuilder;
 use wasmtime_wasi::cli::{IsTerminal, StdoutStream};
 use wasmtime_wasi::p1::WasiP1Ctx;
-use crate::engine::types::{ScriptCallback, ScriptFnMetadata};
-use crate::key_vec::KeyVec;
-use crate::{EngineDataState, ExternalFunctions, ScriptFnKey};
-use crate::interop::params::{DataType, ExtTypes, ObjectId, Param, Params};
-use crate::interop::types::Semver;
 
 impl DataType {
-    pub fn to_wasm_val_param(&self, val: &Val, caller: &mut Caller<'_, WasiP1Ctx>, data: &Arc<RwLock<EngineDataState>>) -> Result<Param> {
-        use wasmtime::Val;
+    pub fn to_wasm_val_param(
+        &self,
+        val: &Val,
+        caller: &mut Caller<'_, WasiP1Ctx>,
+        data: &Arc<RwLock<EngineDataState>>,
+    ) -> Result<Param> {
         use crate::engine::wasm_engine::get_wasm_string;
+        use wasmtime::Val;
 
         macro_rules! dequeue {
-            ($typ:tt :: $init:tt; $x:tt ) => {
-                { let mut s = data.write();
+            ($typ:tt :: $init:tt; $x:tt ) => {{
+                let mut s = data.write();
                 let arr = s.f32_queue.drain(..$x).collect::<Vec<f32>>();
-                Ok(Param::$typ(glam::$typ::$init(arr.as_slice().try_into()?))) }
-            };
+                Ok(Param::$typ(glam::$typ::$init(arr.as_slice().try_into()?)))
+            }};
         }
 
         match (self, val) {
@@ -50,11 +58,10 @@ impl DataType {
             (DataType::F64, Val::F64(f)) => Ok(Param::F64(f64::from_bits(*f))),
             (DataType::Bool, Val::I32(b)) => Ok(Param::Bool(*b != 0)),
             (DataType::RustString | DataType::ExtString, Val::I32(ptr)) => {
-
                 let ptr = *ptr as u32;
 
                 let Some(memory) = caller.get_export("memory").and_then(|e| e.into_memory()) else {
-                    return Err(anyhow!("wasm does not export memory"))
+                    return Err(anyhow!("wasm does not export memory"));
                 };
                 let st = get_wasm_string(ptr, memory.data(&caller));
                 Ok(Param::String(st))
@@ -68,14 +75,15 @@ impl DataType {
                 }
 
                 Ok(Param::Object(ObjectId::new(pointer_id)))
-
             }
             (DataType::Vec2, Val::I32(2)) => dequeue!(Vec2::from_array; 2),
             (DataType::Vec3, Val::I32(3)) => dequeue!(Vec3::from_array; 3),
             (DataType::RustVec4 | DataType::ExtVec4, Val::I32(4)) => dequeue!(Vec4::from_array; 4),
             (DataType::RustQuat | DataType::ExtQuat, Val::I32(4)) => dequeue!(Quat::from_array; 4),
-            (DataType::RustMat4 | DataType::ExtMat4, Val::I32(16)) => dequeue!(Mat4::from_cols_array; 16),
-            _ => Err(anyhow!("Mismatched parameter type"))
+            (DataType::RustMat4 | DataType::ExtMat4, Val::I32(16)) => {
+                dequeue!(Mat4::from_cols_array; 16)
+            }
+            _ => Err(anyhow!("Mismatched parameter type")),
         }
     }
 
@@ -104,12 +112,13 @@ impl DataType {
 
             DataType::F32 => Ok(ValType::F32),
             DataType::F64 => Ok(ValType::F64),
-            DataType::Void => Err(anyhow!("Void is only allowed as a singular return type for WASM.")), // voids are represented as i32 0
+            DataType::Void => Err(anyhow!(
+                "Void is only allowed as a singular return type for WASM."
+            )), // voids are represented as i32 0
 
             _ => Err(anyhow!("Invalid wasm value type: {}", self)),
         }
     }
-
 }
 
 impl Param {
@@ -210,7 +219,6 @@ impl Param {
                     return Ok(Some(Val::I64(pointer.as_ffi() as i64)));
                 }
 
-
                 Val::I64(pointer.as_ffi() as i64)
             }
             Param::Void => return Ok(None),
@@ -226,7 +234,6 @@ impl Param {
             }
         }))
     }
-
 }
 
 impl Params {
@@ -235,7 +242,7 @@ impl Params {
         // Acquire a single write lock for the duration of conversion to avoid
         // repeated locking/unlocking when pushing strings or registering objects.
         if self.is_empty() {
-            return Ok(SmallVec::default())
+            return Ok(SmallVec::default());
         }
 
         let mut s = data.write();
@@ -250,47 +257,41 @@ impl Params {
             }};
         }
 
-        self.params.into_iter().map(|p|
-            {
-                match p {
-                    Param::I8(i) => Ok(Val::I32(i as i32)),
-                    Param::I16(i) => Ok(Val::I32(i as i32)),
-                    Param::I32(i) => Ok(Val::I32(i)),
-                    Param::I64(i) => Ok(Val::I64(i)),
-                    Param::U8(u) => Ok(Val::I32(u as i32)),
-                    Param::U16(u) => Ok(Val::I32(u as i32)),
-                    Param::U32(u) => Ok(Val::I32(u as i32)),
-                    Param::U64(u) => Ok(Val::I64(u as i64)),
-                    Param::F32(f) => Ok(Val::F32(f.to_bits())),
-                    Param::F64(f) => Ok(Val::F64(f.to_bits())),
-                    Param::Bool(b) => Ok(Val::I32(if b { 1 } else { 0 })),
-                    Param::String(st) => {
-                        let l = st.len() + 1;
-                        s.str_cache.push_back(st);
-                        Ok(Val::I32(l as i32))
-                    }
-                    Param::Object(rp) => {
-                        Ok(Val::I64(rp.as_ffi() as i64))
-                    }
-                    Param::Error(st) => {
-                        Err(anyhow!("{st}"))
-                    }
-                    Param::Void => unreachable!("Void shouldn't ever be added as an arg"),
-                    Param::Vec2(v) => enqueue!(v; 2),
-                    Param::Vec3(v) => enqueue!(v; 3),
-                    Param::Vec4(v) => enqueue!(v; 4),
-                    Param::Quat(q) => enqueue!(q; 4),
-                    Param::Mat4(m) => enqueue!(m # 16),
-                    Param::U32Buffer(v) => {
-                        let l = v.len();
-                        s.u32_buffer_queue.push_back(v);
-                        Ok(Val::I32(l as i32))
-                    }
+        self.params
+            .into_iter()
+            .map(|p| match p {
+                Param::I8(i) => Ok(Val::I32(i as i32)),
+                Param::I16(i) => Ok(Val::I32(i as i32)),
+                Param::I32(i) => Ok(Val::I32(i)),
+                Param::I64(i) => Ok(Val::I64(i)),
+                Param::U8(u) => Ok(Val::I32(u as i32)),
+                Param::U16(u) => Ok(Val::I32(u as i32)),
+                Param::U32(u) => Ok(Val::I32(u as i32)),
+                Param::U64(u) => Ok(Val::I64(u as i64)),
+                Param::F32(f) => Ok(Val::F32(f.to_bits())),
+                Param::F64(f) => Ok(Val::F64(f.to_bits())),
+                Param::Bool(b) => Ok(Val::I32(if b { 1 } else { 0 })),
+                Param::String(st) => {
+                    let l = st.len() + 1;
+                    s.str_cache.push_back(st);
+                    Ok(Val::I32(l as i32))
                 }
-            }
-        ).collect()
+                Param::Object(rp) => Ok(Val::I64(rp.as_ffi() as i64)),
+                Param::Error(st) => Err(anyhow!("{st}")),
+                Param::Void => unreachable!("Void shouldn't ever be added as an arg"),
+                Param::Vec2(v) => enqueue!(v; 2),
+                Param::Vec3(v) => enqueue!(v; 3),
+                Param::Vec4(v) => enqueue!(v; 4),
+                Param::Quat(q) => enqueue!(q; 4),
+                Param::Mat4(m) => enqueue!(m # 16),
+                Param::U32Buffer(v) => {
+                    let l = v.len();
+                    s.u32_buffer_queue.push_back(v);
+                    Ok(Val::I32(l as i32))
+                }
+            })
+            .collect()
     }
-
 }
 
 impl DataType {
@@ -312,7 +313,6 @@ impl DataType {
                 | DataType::Bool
         )
     }
-
 }
 
 pub struct WasmInterpreter<Ext: ExternalFunctions> {
@@ -323,12 +323,11 @@ pub struct WasmInterpreter<Ext: ExternalFunctions> {
     memory: Option<Memory>,
 
     func_cache: KeyVec<ScriptFnKey, (String, Func, Option<TypedFuncEntry>)>,
-    
+
     fast_calls: FastCalls,
     pub api_versions: FxHashMap<String, Semver>,
     _ext: PhantomData<Ext>,
 }
-
 
 #[derive(Default)]
 struct FastCalls {
@@ -356,24 +355,31 @@ enum TypedFuncEntry {
     I64ToI64(TypedFunc<i64, i64>),
     F32ToF32(TypedFunc<f32, f32>),
     F64ToF64(TypedFunc<f64, f64>),
-    I32I32ToI32(TypedFunc<(i32,i32), i32>),
+    I32I32ToI32(TypedFunc<(i32, i32), i32>),
 }
 
 impl TypedFuncEntry {
-    fn invoke(&self, store: &mut Store<WasiP1Ctx>, args: Params, data: &Arc<RwLock<EngineDataState>>) -> Result<Param, wasmtime::Error> {
-        let get_object = |id: u64| -> Result<Param> {
-            Ok(Param::Object(ObjectId::new(id)))
-        };
+    fn invoke(
+        &self,
+        store: &mut Store<WasiP1Ctx>,
+        args: Params,
+        data: &Arc<RwLock<EngineDataState>>,
+    ) -> Result<Param, wasmtime::Error> {
+        let get_object = |id: u64| -> Result<Param> { Ok(Param::Object(ObjectId::new(id))) };
 
         match self {
             TypedFuncEntry::NoParamsVoid(t) => t.call(store, ()).map(|_| Param::Void),
-            TypedFuncEntry::NoParamsObject(t) => t.call(store, ()).and_then(|id| get_object(id as u64)),
+            TypedFuncEntry::NoParamsObject(t) => {
+                t.call(store, ()).and_then(|id| get_object(id as u64))
+            }
             TypedFuncEntry::NoParamsI32(t) => t.call(store, ()).map(Param::I32),
             TypedFuncEntry::NoParamsI64(t) => t.call(store, ()).map(Param::I64),
             TypedFuncEntry::NoParamsF32(t) => t.call(store, ()).map(Param::F32),
             TypedFuncEntry::NoParamsF64(t) => t.call(store, ()).map(Param::F64),
             TypedFuncEntry::I32ToI32(t) => {
-                if args.len() != 1 { bail!("Arg length `{}` != 1", args.len()) }
+                if args.len() != 1 {
+                    bail!("Arg length `{}` != 1", args.len())
+                }
                 let a0 = match &args[0] {
                     Param::I32(v) => *v,
                     _ => bail!("Arg conversion {:?} -> i32 failed", args[0]),
@@ -381,7 +387,9 @@ impl TypedFuncEntry {
                 t.call(store, a0).map(Param::I32)
             }
             TypedFuncEntry::I64ToI64(t) => {
-                if args.len() != 1 { bail!("Arg length `{}` != 1", args.len()) }
+                if args.len() != 1 {
+                    bail!("Arg length `{}` != 1", args.len())
+                }
                 let a0 = match &args[0] {
                     Param::I64(v) => *v,
                     _ => bail!("Arg conversion {:?} -> i64 failed", args[0]),
@@ -389,7 +397,9 @@ impl TypedFuncEntry {
                 t.call(store, a0).map(Param::I64)
             }
             TypedFuncEntry::F32ToF32(t) => {
-                if args.len() != 1 { bail!("Arg mismatch") }
+                if args.len() != 1 {
+                    bail!("Arg mismatch")
+                }
                 let a0 = match &args[0] {
                     Param::F32(v) => *v,
                     _ => bail!("Arg conversion {:?} -> f32 failed", args[0]),
@@ -397,15 +407,19 @@ impl TypedFuncEntry {
                 t.call(store, a0).map(Param::F32)
             }
             TypedFuncEntry::F32ToVoid(typed_func) => {
-                if args.len() != 1 { bail!("Arg mismatch") }
+                if args.len() != 1 {
+                    bail!("Arg mismatch")
+                }
                 let a0 = match &args[0] {
                     Param::F32(v) => *v,
                     _ => bail!("Arg conversion {:?} -> f32 failed", args[0]),
                 };
                 typed_func.call(store, a0).map(|_| Param::Void)
-            },
+            }
             TypedFuncEntry::F64ToF64(t) => {
-                if args.len() != 1 { bail!("Arg mismatch") }
+                if args.len() != 1 {
+                    bail!("Arg mismatch")
+                }
                 let a0 = match &args[0] {
                     Param::F64(v) => *v,
                     _ => bail!("Arg conversion {:?} -> f64 failed", args[0]),
@@ -413,7 +427,9 @@ impl TypedFuncEntry {
                 t.call(store, a0).map(Param::F64)
             }
             TypedFuncEntry::I32I32ToI32(t) => {
-                if args.len() != 2 { bail!("Arg mismatch") }
+                if args.len() != 2 {
+                    bail!("Arg mismatch")
+                }
                 let a0 = match &args[0] {
                     Param::I32(v) => *v,
                     _ => bail!("Arg conversion {:?} -> i32 failed", args[0]),
@@ -424,28 +440,49 @@ impl TypedFuncEntry {
                 };
                 t.call(store, (a0, a1)).map(Param::I32)
             }
-
         }
     }
 
     fn from_func(store: &mut Store<WasiP1Ctx>, func: Func) -> Option<Self> {
         // try 0 params
-        if let Ok(t) = func.typed::<(), ()>(&store) { return Some(TypedFuncEntry::NoParamsVoid(t)); }
-        if let Ok(t) = func.typed::<(), i32>(&store) { return Some(TypedFuncEntry::NoParamsI32(t)); }
-        if let Ok(t) = func.typed::<(), i64>(&store) { return Some(TypedFuncEntry::NoParamsI64(t)); }
-        if let Ok(t) = func.typed::<(), f32>(&store) { return Some(TypedFuncEntry::NoParamsF32(t)); }
-        if let Ok(t) = func.typed::<(), f64>(&store) { return Some(TypedFuncEntry::NoParamsF64(t)); }
+        if let Ok(t) = func.typed::<(), ()>(&store) {
+            return Some(TypedFuncEntry::NoParamsVoid(t));
+        }
+        if let Ok(t) = func.typed::<(), i32>(&store) {
+            return Some(TypedFuncEntry::NoParamsI32(t));
+        }
+        if let Ok(t) = func.typed::<(), i64>(&store) {
+            return Some(TypedFuncEntry::NoParamsI64(t));
+        }
+        if let Ok(t) = func.typed::<(), f32>(&store) {
+            return Some(TypedFuncEntry::NoParamsF32(t));
+        }
+        if let Ok(t) = func.typed::<(), f64>(&store) {
+            return Some(TypedFuncEntry::NoParamsF64(t));
+        }
 
         // 1 param -> same-typed returns
-        if let Ok(t) = func.typed::<f32, ()>(&store) { return Some(TypedFuncEntry::F32ToVoid(t)); }
+        if let Ok(t) = func.typed::<f32, ()>(&store) {
+            return Some(TypedFuncEntry::F32ToVoid(t));
+        }
 
-        if let Ok(t) = func.typed::<i32, i32>(&store) { return Some(TypedFuncEntry::I32ToI32(t)); }
-        if let Ok(t) = func.typed::<i64, i64>(&store) { return Some(TypedFuncEntry::I64ToI64(t)); }
-        if let Ok(t) = func.typed::<f32, f32>(&store) { return Some(TypedFuncEntry::F32ToF32(t)); }
-        if let Ok(t) = func.typed::<f64, f64>(&store) { return Some(TypedFuncEntry::F64ToF64(t)); }
+        if let Ok(t) = func.typed::<i32, i32>(&store) {
+            return Some(TypedFuncEntry::I32ToI32(t));
+        }
+        if let Ok(t) = func.typed::<i64, i64>(&store) {
+            return Some(TypedFuncEntry::I64ToI64(t));
+        }
+        if let Ok(t) = func.typed::<f32, f32>(&store) {
+            return Some(TypedFuncEntry::F32ToF32(t));
+        }
+        if let Ok(t) = func.typed::<f64, f64>(&store) {
+            return Some(TypedFuncEntry::F64ToF64(t));
+        }
 
         // 2 params (i32,i32)->i32
-        if let Ok(t) = func.typed::<(i32,i32), i32>(&store) { return Some(TypedFuncEntry::I32I32ToI32(t)); }
+        if let Ok(t) = func.typed::<(i32, i32), i32>(&store) {
+            return Some(TypedFuncEntry::I32I32ToI32(t));
+        }
 
         // Not a supported typed signature
         None
@@ -544,7 +581,7 @@ fn get_u32_vec(ptr: u32, len: u32, data: &[u8]) -> Option<Vec<u32>> {
     let start = ptr as usize;
     let end = start.checked_add((len as usize).checked_mul(4)?)?;
     if end > data.len() {
-        return None
+        return None;
     }
     let mut vec = vec![0u32; len as usize];
     for i in 0..len as usize {
@@ -574,14 +611,16 @@ pub fn write_u32_vec(
 ) -> Result<(), MemoryAccessError> {
     let mut bytes = Vec::with_capacity(buf.len() * 4);
     for (i, num) in buf.iter().enumerate() {
-        bytes[i*4..i*4+4].copy_from_slice(&num.to_le_bytes())
+        bytes[i * 4..i * 4 + 4].copy_from_slice(&num.to_le_bytes())
     }
     memory.write(caller, pointer as usize, &bytes)
 }
 
 impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
-
-    pub fn new(wasm_functions: &FxHashMap<String, ScriptFnMetadata>, data: Arc<RwLock<EngineDataState>>) -> Result<Self> {
+    pub fn new(
+        wasm_functions: &FxHashMap<String, ScriptFnMetadata>,
+        data: Arc<RwLock<EngineDataState>>,
+    ) -> Result<Self> {
         let mut config = Config::new();
         config.wasm_threads(false);
         // config.cranelift_pcc(true); // do sandbox verification checks
@@ -595,8 +634,16 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         config.consume_fuel(false);
 
         let wasi = WasiCtxBuilder::new()
-            .stdout(WriterInit::<Ext>(Arc::new(RwLock::new(Vec::new())), false, PhantomData))
-            .stderr(WriterInit::<Ext>(Arc::new(RwLock::new(Vec::new())), true, PhantomData))
+            .stdout(WriterInit::<Ext>(
+                Arc::new(RwLock::new(Vec::new())),
+                false,
+                PhantomData,
+            ))
+            .stderr(WriterInit::<Ext>(
+                Arc::new(RwLock::new(Vec::new())),
+                true,
+                PhantomData,
+            ))
             .allow_tcp(false)
             .allow_udp(false)
             .build_p1();
@@ -619,12 +666,16 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             func_cache: Default::default(),
             fast_calls: FastCalls::default(),
             api_versions: Default::default(),
-            _ext: PhantomData
+            _ext: PhantomData,
         })
     }
 
-    fn bind_wasm(engine: &Engine, linker: &mut Linker<WasiP1Ctx>, wasm_fns: &FxHashMap<String, ScriptFnMetadata>, data: Arc<RwLock<EngineDataState>>) -> Result<()> {
-
+    fn bind_wasm(
+        engine: &Engine,
+        linker: &mut Linker<WasiP1Ctx>,
+        wasm_fns: &FxHashMap<String, ScriptFnMetadata>,
+        data: Arc<RwLock<EngineDataState>>,
+    ) -> Result<()> {
         // Utility Functions
 
         // _host_strcpy(location: *const c_char, size: u32);
@@ -647,72 +698,74 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             "env",
             "_host_strcpy",
             FuncType::new(engine, vec![ValType::I32, ValType::I32], vec![]),
-            move |caller, p, _| {
-                wasm_host_strcpy(&data_strcpy, caller, p)
-            }
+            move |caller, p, _| wasm_host_strcpy(&data_strcpy, caller, p),
         )?;
         linker.func_new(
             "env",
             "_host_bufcpy",
             FuncType::new(engine, vec![ValType::I32, ValType::I32], vec![]),
-            move |caller, p, _| {
-                wasm_host_bufcpy(&data_bufcpy, caller, p)
-            }
+            move |caller, p, _| wasm_host_bufcpy(&data_bufcpy, caller, p),
         )?;
         linker.func_new(
             "env",
             "_host_f32_enqueue",
             FuncType::new(engine, vec![ValType::F32], Vec::new()),
-            move |_, p, _| {
-                wasm_host_f32_enqueue(&data_enqueue, p)
-            }
+            move |_, p, _| wasm_host_f32_enqueue(&data_enqueue, p),
         )?;
         linker.func_new(
             "env",
             "_host_f32_dequeue",
             FuncType::new(engine, Vec::new(), vec![ValType::F32]),
-            move |_, _, r| {
-                wasm_host_f32_dequeue(&data_dequeue, r)
-            }
+            move |_, _, r| wasm_host_f32_dequeue(&data_dequeue, r),
         )?;
         linker.func_new(
             "env",
             "_host_u32_enqueue",
             FuncType::new(engine, vec![ValType::I32], Vec::new()),
-            move |_, p, _| {
-                wasm_host_u32_enqueue(&data_enqueue2, p)
-            }
+            move |_, p, _| wasm_host_u32_enqueue(&data_enqueue2, p),
         )?;
         linker.func_new(
             "env",
             "_host_u32_dequeue",
             FuncType::new(engine, Vec::new(), vec![ValType::I32]),
-            move |_, _, r| {
-                wasm_host_u32_dequeue(&data_dequeue2, r)
-            }
+            move |_, _, r| wasm_host_u32_dequeue(&data_dequeue2, r),
         )?;
 
         // External functions
         for (name, metadata) in wasm_fns.iter() {
-
             // Convert from `ClassName::functionName` to `_class_name_function_name`
             let internal_name = metadata.as_internal_name(name);
 
-            let mut param_types = metadata.param_types.iter().map(|d| d.data_type).collect::<Vec<DataType>>();
+            let mut param_types = metadata
+                .param_types
+                .iter()
+                .map(|d| d.data_type)
+                .collect::<Vec<DataType>>();
 
             if ScriptFnMetadata::is_instance_method(name) {
                 // instance methods get an extra first parameter for the instance pointer
                 param_types.insert(0, DataType::Object);
             }
 
-            let param_wasm_types = param_types.iter().map(|d| d.to_val_type()).collect::<Result<Vec<ValType>>>()?;
+            let param_wasm_types = param_types
+                .iter()
+                .map(|d| d.to_val_type())
+                .collect::<Result<Vec<ValType>>>()?;
 
             // if the only return type is void, we treat it as no return types
-            let fn_return_type = metadata.return_type.first().cloned().map(|d| d.0).unwrap_or(DataType::Void);
-            
+            let fn_return_type = metadata
+                .return_type
+                .first()
+                .cloned()
+                .map(|d| d.0)
+                .unwrap_or(DataType::Void);
+
             // WE ONLY SUPPORT SINGLE RETURN VALUES FOR NOW
             if metadata.return_type.len() > 1 {
-                Ext::log_critical(format!("WASM functions with multiple return values are not supported: {}", name));
+                Ext::log_critical(format!(
+                    "WASM functions with multiple return values are not supported: {}",
+                    name
+                ));
                 continue;
             }
 
@@ -726,10 +779,12 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             let cap = metadata.capability.clone();
             let callback = metadata.callback;
 
-
             let data2 = Arc::clone(&data);
 
-            Ext::log_debug(format!("Registered wasm function: env::{internal_name} {}", ft));
+            Ext::log_debug(format!(
+                "Registered wasm function: env::{internal_name} {}",
+                ft
+            ));
 
             linker.func_new(
                 "env",
@@ -737,7 +792,16 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
                 ft,
                 move |caller, ps, rs| {
                     match catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        wasm_bind_env::<Ext>(&data2, caller, &cap, ps, rs, param_types.as_slice(), fn_return_type, &callback)
+                        wasm_bind_env::<Ext>(
+                            &data2,
+                            caller,
+                            &cap,
+                            ps,
+                            rs,
+                            param_types.as_slice(),
+                            fn_return_type,
+                            &callback,
+                        )
                     })) {
                         Ok(Ok(())) => Ok(()),
                         Ok(Err(e)) => {
@@ -761,9 +825,8 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
                             Err(anyhow!("WASM function panicked: {msg}"))
                         }
                     }
-                }
+                },
             )?;
-
         }
 
         Ok(())
@@ -789,36 +852,55 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         // Pre-create typed wrappers for exported functions where possible to avoid first-call overhead.
         // Try a small set of common signatures and cache the TypedFunc if creation succeeds.
         for export in module.exports() {
-
             let name = export.name();
-            let Some(func) = instance.get_func(&mut self.store, name) else { continue };
-            
+            let Some(func) = instance.get_func(&mut self.store, name) else {
+                continue;
+            };
 
             // ensure no duplicates
             if self.func_cache.key_of(|x| x.0 == name).is_some() {
-                return Err(anyhow!("Duplicate exported function name in wasm module: {}", name));
+                return Err(anyhow!(
+                    "Duplicate exported function name in wasm module: {}",
+                    name
+                ));
             }
-            self.func_cache.push((name.to_string(), func, TypedFuncEntry::from_func(&mut self.store, func)));
+            self.func_cache.push((
+                name.to_string(),
+                func,
+                TypedFuncEntry::from_func(&mut self.store, func),
+            ));
 
             if name == "on_update" {
-                let Ok(f) = func.typed::<f32, ()>(&mut self.store) else { continue };
+                let Ok(f) = func.typed::<f32, ()>(&mut self.store) else {
+                    continue;
+                };
                 self.fast_calls.update = Some(f);
             } else if name == "on_fixed_update" {
-                let Ok(f) = func.typed::<f32, ()>(&mut self.store) else { continue };
+                let Ok(f) = func.typed::<f32, ()>(&mut self.store) else {
+                    continue;
+                };
                 self.fast_calls.fixed_update = Some(f);
             }
 
             if name.starts_with("_") && name.ends_with("_semver") {
-                let Ok(f) = func.typed::<(), u64>(&mut self.store) else { continue };
-                let Ok(ver) = f.call(&mut self.store, ()) else { continue };
-                let loaded_mod = name.strip_prefix("_").unwrap().strip_suffix("_semver").unwrap().to_string();
+                let Ok(f) = func.typed::<(), u64>(&mut self.store) else {
+                    continue;
+                };
+                let Ok(ver) = f.call(&mut self.store, ()) else {
+                    continue;
+                };
+                let loaded_mod = name
+                    .strip_prefix("_")
+                    .unwrap()
+                    .strip_suffix("_semver")
+                    .unwrap()
+                    .to_string();
                 let version = Semver::from_u64(ver);
                 self.api_versions.insert(loaded_mod, version);
             }
         }
 
         self.script_instance = Some(instance);
-
 
         Ok(())
     }
@@ -834,19 +916,25 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
         // Try cache first to avoid repeated name lookup and Val boxing/unboxing.
         // This shouldn't be necessary as all exported functions are indexed on load
         let (f_name, f, typed) = self.func_cache.get(&cache_key);
-        
+
         // can only do a typed call if all parameters are simple and return type is simple or void, so if we have a cached typed func, we know it will work and skip the Val conversions.
-        let can_typed_call = ret_type.is_wasm_simple() && params.iter().all(|r| r.data_type::<ExtTypes>().is_wasm_simple());
+        let can_typed_call = ret_type.is_wasm_simple()
+            && params
+                .iter()
+                .all(|r| r.data_type::<ExtTypes>().is_wasm_simple());
 
         // Fast-path: typed cache (common signatures). Falls back to dynamic call below.
         if can_typed_call && let Some(typed) = typed {
-            return typed.invoke(&mut self.store, params, data)
-                .unwrap_or_else(|e| Param::Error(format!("Error calling wasm function typed: {e}")));
+            return typed
+                .invoke(&mut self.store, params, data)
+                .unwrap_or_else(|e| {
+                    Param::Error(format!("Error calling wasm function typed: {e}"))
+                });
         }
 
         let args = match params.to_wasm_args(data) {
             Ok(a) => a,
-            Err(e) => return Param::Error(format!("Params error: {e}"))
+            Err(e) => return Param::Error(format!("Params error: {e}")),
         };
 
         // Fallback dynamic path
@@ -884,28 +972,29 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
 
     pub fn fast_call_update(&mut self, delta_time: f32) -> std::result::Result<(), String> {
         if self.script_instance.is_none() {
-            return Err("No script is loaded".to_string())
+            return Err("No script is loaded".to_string());
         }
         let Some(f) = &self.fast_calls.update else {
-            return Ok(())
+            return Ok(());
         };
-        f.call(&mut self.store, delta_time).map_err(|e| e.to_string())
+        f.call(&mut self.store, delta_time)
+            .map_err(|e| e.to_string())
     }
 
     pub fn fast_call_fixed_update(&mut self, delta_time: f32) -> std::result::Result<(), String> {
         if self.script_instance.is_none() {
-            return Err("No script is loaded".to_string())
+            return Err("No script is loaded".to_string());
         }
         let Some(f) = &self.fast_calls.fixed_update else {
-            return Ok(())
+            return Ok(());
         };
-        f.call(&mut self.store, delta_time).map_err(|e| e.to_string())
-    }
-    
-    pub fn get_fn_key(&self, name: &str) -> Option<ScriptFnKey>{
-        self.func_cache.key_of(|x| x.0 == name)
+        f.call(&mut self.store, delta_time)
+            .map_err(|e| e.to_string())
     }
 
+    pub fn get_fn_key(&self, name: &str) -> Option<ScriptFnKey> {
+        self.func_cache.key_of(|x| x.0 == name)
+    }
 }
 
 /// Wraps a call from wasm into the host environment, checking capability availability
@@ -921,8 +1010,11 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
     func: &ScriptCallback,
 ) -> Result<()> {
     if !data.read().active_capabilities.contains(cap) {
-        Ext::log_critical(format!("Attempted to call mod capability '{}' which is not currently loaded", cap));
-        return Err(anyhow!("Mod capability '{}' is not currently loaded", cap))
+        Ext::log_critical(format!(
+            "Attempted to call mod capability '{}' which is not currently loaded",
+            cap
+        ));
+        return Err(anyhow!("Mod capability '{}' is not currently loaded", cap));
     }
 
     // pre-allocate params to avoid repeated reallocations
@@ -932,8 +1024,7 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
         params.push(param)
     }
 
-
-    let ffi_params= params.to_ffi::<Ext>();
+    let ffi_params = params.to_ffi::<Ext>();
     let ffi_params_struct = ffi_params.as_ffi_array();
 
     // Call to C#/rust's provided callback using a clone so we can still cleanup
@@ -945,20 +1036,18 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
             "WASM function returned unexpected type. Expected: {:?}, Got: {:?}",
             expected_return_type,
             result_data_type
-        ))
+        ));
     }
 
     // Convert Param back to Val for return
     // TODO: Add mechanism for providing error messages to caller
     let Some(rv) = res.into_wasm_val(data)? else {
-        return Ok(())
+        return Ok(());
     };
     rs[0] = rv;
 
-
     Ok(())
 }
-
 
 /// internal for use in the wasm engine only
 pub fn wasm_host_strcpy(
@@ -978,13 +1067,15 @@ pub fn wasm_host_strcpy(
         }
     }
 
-    Err(anyhow!("An error occurred whilst copying string to wasm memory"))
+    Err(anyhow!(
+        "An error occurred whilst copying string to wasm memory"
+    ))
 }
 
 pub fn wasm_host_bufcpy(
     data: &Arc<RwLock<EngineDataState>>,
     mut caller: Caller<'_, WasiP1Ctx>,
-    ps: &[Val]
+    ps: &[Val],
 ) -> Result<(), anyhow::Error> {
     let ptr = ps[0].i32().unwrap();
     let size = ps[1].i32().unwrap();
@@ -994,11 +1085,13 @@ pub fn wasm_host_bufcpy(
     {
         if let Some(memory) = caller.get_export("memory").and_then(|m| m.into_memory()) {
             write_u32_vec(ptr as u32, &next_buf, &memory, caller)?;
-            return Ok(())
+            return Ok(());
         }
     }
 
-    Err(anyhow!("An error occurred whilst copying a Vec<u32> to wasm memory"))
+    Err(anyhow!(
+        "An error occurred whilst copying a Vec<u32> to wasm memory"
+    ))
 }
 
 pub fn wasm_host_f32_dequeue(
@@ -1017,9 +1110,11 @@ pub fn wasm_host_f32_enqueue(
     data: &Arc<RwLock<EngineDataState>>,
     ps: &[Val],
 ) -> Result<(), anyhow::Error> {
-
-    let new = ps.first().ok_or_else(|| anyhow!("no first parameter provided"))?
-        .f32().ok_or_else(|| anyhow!("parameter is not f32"))?;
+    let new = ps
+        .first()
+        .ok_or_else(|| anyhow!("no first parameter provided"))?
+        .f32()
+        .ok_or_else(|| anyhow!("parameter is not f32"))?;
 
     let mut d = data.write();
     d.f32_queue.push_back(new);
@@ -1043,13 +1138,14 @@ pub fn wasm_host_u32_enqueue(
     data: &Arc<RwLock<EngineDataState>>,
     ps: &[Val],
 ) -> Result<(), anyhow::Error> {
-
-    let new = ps.first().ok_or_else(|| anyhow!("no first parameter provided"))?
-        .i32().ok_or_else(|| anyhow!("parameter is not u32"))?;
+    let new = ps
+        .first()
+        .ok_or_else(|| anyhow!("no first parameter provided"))?
+        .i32()
+        .ok_or_else(|| anyhow!("parameter is not u32"))?;
 
     let mut d = data.write();
     d.f32_queue.push_back(f32::from_bits(new as u32));
 
     Ok(())
 }
-

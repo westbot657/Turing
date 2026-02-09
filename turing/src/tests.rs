@@ -1,11 +1,11 @@
 use crate::engine::types::ScriptFnMetadata;
 use crate::interop::params::{
-    DataType, FfiParam, FfiParamArray, FfiParams, FreeableDataType, ObjectId, Param, Params
+    DataType, FfiParam, FfiParamArray, FfiParams, FreeableDataType, ObjectId, Param, Params,
 };
+use crate::interop::types::U32Buffer;
 use crate::{ExternalFunctions, Turing};
 use anyhow::Result;
 use std::ffi::{CString, c_char, c_void};
-use crate::interop::types::U32Buffer;
 
 struct DirectExt {}
 impl ExternalFunctions for DirectExt {
@@ -164,7 +164,10 @@ fn test_math(mut turing: Turing<DirectExt>) -> Result<()> {
 
     let res = turing.call_fn_by_name("math_ops_test", params, DataType::F32);
 
-    println!("\x1b[38;2;200;200;20m[test/ext]: code multiplied 3.5 by 5.0 for {:#?}\x1b[0m", res);
+    println!(
+        "\x1b[38;2;200;200;20m[test/ext]: code multiplied 3.5 by 5.0 for {:#?}\x1b[0m",
+        res
+    );
     assert!((res.to_result::<f32>()? - 17.5).abs() < f32::EPSILON);
 
     Ok(())

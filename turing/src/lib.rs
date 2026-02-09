@@ -79,9 +79,7 @@ pub struct EngineDataState {
     pub u32_buffer_queue: VecDeque<Vec<u32>>,
 }
 
-impl EngineDataState {
-
-}
+impl EngineDataState {}
 
 pub struct Turing<Ext: ExternalFunctions + Send + Sync + 'static> {
     pub engine: Option<Engine<Ext>>,
@@ -301,7 +299,10 @@ where
 
     let full_msg_with_bt = format!("{}\nBacktrace:\n{}", full_msg, backtrace_str);
 
-    Ext::log_critical(format!("Writing panic information to file and stderr: {:?}", file_out));
+    Ext::log_critical(format!(
+        "Writing panic information to file and stderr: {:?}",
+        file_out
+    ));
     if let Some(file_path) = file_out
         && let Ok(mut file) = std::fs::OpenOptions::new()
             .create(true)

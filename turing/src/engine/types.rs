@@ -121,7 +121,7 @@ impl ScriptFnMetadata {
 impl DataType {
     /// Returns the corresponding type name for a DataType when used as a parameter type in the function spec
     /// The function spec uses Rust type names for simplicity, but some DataTypes like String and Object require special handling
-    /// 
+    ///
     /// This is not the same type name used in the engine's internal type system. For example, both `RustString` and `ExtString` are represented as `&str` in the function spec,
     /// but they are handled uniquely in the engine's internal type system.
     fn as_spec_param_type(&self) -> anyhow::Result<&'static str> {
