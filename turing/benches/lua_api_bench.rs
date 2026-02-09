@@ -1,10 +1,10 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use std::ffi::{c_void, CString};
+use std::ffi::{CString, c_void};
 use std::hint::black_box;
 use turing_rs::engine::types::ScriptFnMetadata;
 use turing_rs::interop::params::{DataType, FreeableDataType, Param, Params};
-use turing_rs::{ExternalFunctions, Turing};
 use turing_rs::interop::types::U32Buffer;
+use turing_rs::{ExternalFunctions, Turing};
 
 struct DirectExt {}
 impl ExternalFunctions for DirectExt {
@@ -64,7 +64,9 @@ fn bench_turing_lua_math(c: &mut Criterion) {
     // load the test Lua module used by the repo
     let lua_path = "../tests/wasm/lua_test.lua";
     turing.load_script(lua_path, &["test"]).unwrap();
-    let math_ops_test = turing.get_fn_key("math_ops_test").expect("fn key not found");
+    let math_ops_test = turing
+        .get_fn_key("math_ops_test")
+        .expect("fn key not found");
 
     c.bench_function("turing_lua_math_ops", |b| {
         b.iter(|| {

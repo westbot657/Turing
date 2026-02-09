@@ -1,19 +1,19 @@
 extern crate core;
 
+use crate::engine::Engine;
+use crate::engine::types::ScriptFnMetadata;
+use crate::interop::params::{DataType, FreeableDataType, Param, Params};
+use crate::interop::types::{ExtPointer, Semver, U32Buffer};
+use crate::spec_gen::generator::generate_specs;
+use anyhow::{Result, anyhow};
+use parking_lot::RwLock;
+use rustc_hash::{FxHashMap, FxHashSet};
+use slotmap::{SlotMap, new_key_type};
 use std::collections::{HashMap, VecDeque};
 use std::ffi::{c_char, c_void};
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use crate::engine::Engine;
-use crate::engine::types::ScriptFnMetadata;
-use anyhow::{anyhow, Result};
-use parking_lot::RwLock;
-use rustc_hash::{FxHashMap, FxHashSet};
-use slotmap::{new_key_type, SlotMap};
-use crate::interop::params::{DataType, FreeableDataType, Param, Params};
-use crate::interop::types::{ExtPointer, Semver, U32Buffer};
-use crate::spec_gen::generator::generate_specs;
 
 pub mod engine;
 pub mod interop;
@@ -85,7 +85,7 @@ pub struct EngineDataState {
     /// queue for algebraic type's data
     pub f32_queue: VecDeque<f32>,
     /// queue for Vec<u32>s
-    pub u32_buffer_queue: VecDeque<Vec<u32>>
+    pub u32_buffer_queue: VecDeque<Vec<u32>>,
 }
 
 impl EngineDataState {
@@ -100,22 +100,19 @@ impl EngineDataState {
     }
 }
 
-
-
 pub struct Turing<Ext: ExternalFunctions + Send + Sync + 'static> {
     pub engine: Option<Engine<Ext>>,
     pub data: Arc<RwLock<EngineDataState>>,
     pub script_fns: FxHashMap<String, ScriptFnMetadata>,
-    _ext: PhantomData<Ext>
+    _ext: PhantomData<Ext>,
 }
 
 pub struct TuringSetup<Ext: ExternalFunctions + Send + Sync + 'static> {
     script_fns: FxHashMap<String, ScriptFnMetadata>,
-    _ext: PhantomData<Ext>
+    _ext: PhantomData<Ext>,
 }
 
 impl<Ext: ExternalFunctions + Send + Sync + 'static> TuringSetup<Ext> {
-
     pub fn build(self) -> Result<Turing<Ext>> {
         let data = Arc::new(RwLock::new(EngineDataState::default()));
         Ok(Turing::build(self.script_fns, data))
@@ -125,16 +122,17 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> TuringSetup<Ext> {
     pub fn add_function(&mut self, name: impl ToString, metadata: ScriptFnMetadata) -> Result<()> {
         let name = name.to_string();
         if self.script_fns.contains_key(&name) {
-            return Err(anyhow!("A function named '{}' has already been registered", name))
+            return Err(anyhow!(
+                "A function named '{}' has already been registered",
+                name
+            ));
         }
         self.script_fns.insert(name, metadata);
         Ok(())
     }
-
 }
 
 impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
-
     #[allow(clippy::new_ret_no_self)]
     pub fn new() -> TuringSetup<Ext> {
         TuringSetup {
@@ -143,7 +141,10 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
         }
     }
 
-    fn build(script_fns: FxHashMap<String, ScriptFnMetadata>, data: Arc<RwLock<EngineDataState>>) -> Self {
+    fn build(
+        script_fns: FxHashMap<String, ScriptFnMetadata>,
+        data: Arc<RwLock<EngineDataState>>,
+    ) -> Self {
         Self {
             engine: None,
             script_fns,
@@ -151,19 +152,20 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
             _ext: PhantomData,
         }
     }
-    
+
     /// Enables a capability for the currently loaded script
     pub fn register_capability(&mut self, name: impl ToString) {
-        self.data.write().active_capabilities.insert(name.to_string());
+        self.data
+            .write()
+            .active_capabilities
+            .insert(name.to_string());
     }
 
     /// Disables a capability for the currently loaded script
     pub fn unregister_capability(&mut self, name: impl AsRef<str>) {
         self.data.write().active_capabilities.remove(name.as_ref());
     }
-    
 
-    
     pub fn load_script(
         &mut self,
         source: impl ToString,
@@ -186,7 +188,6 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
                 "script file has no extension, must be either .wasm or .lua"
             ));
         };
-
 
         for cap in &capabilities {
             Ext::log_info(format!("Registered capability: {}", cap));
@@ -227,43 +228,48 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
         let Some(engine) = &self.engine else {
             panic!("Engine not initialized");
         };
-        
+
         engine.get_fn_key(arg)
     }
-    
-    pub fn call_fn_by_name(&mut self, name: impl ToString, params: Params, expected_return_type: DataType) -> Param {
+
+    pub fn call_fn_by_name(
+        &mut self,
+        name: impl ToString,
+        params: Params,
+        expected_return_type: DataType,
+    ) -> Param {
         let Some(engine) = &mut self.engine else {
-            return Param::Error("No code engine is active".to_string())
+            return Param::Error("No code engine is active".to_string());
         };
         let key = engine.get_fn_key(&name.to_string());
-        
+
         let Some(key) = key else {
             return Param::Error(format!("Function '{}' not found", name.to_string()));
         };
         self.call_fn(key, params, expected_return_type)
     }
-    
-    pub fn call_fn(&mut self, cache_key: ScriptFnKey, params: Params, expected_return_type: DataType) -> Param {
+
+    pub fn call_fn(
+        &mut self,
+        cache_key: ScriptFnKey,
+        params: Params,
+        expected_return_type: DataType,
+    ) -> Param {
         // let name = name.to_string();
         let Some(engine) = &mut self.engine else {
-            return Param::Error("No code engine is active".to_string())
+            return Param::Error("No code engine is active".to_string());
         };
 
         if !cache_key.is_valid() {
             return Param::Error("Invalid function key".to_string());
         }
 
-        engine.call_fn(
-            cache_key,
-            params,
-            expected_return_type,
-            &self.data
-        )
+        engine.call_fn(cache_key, params, expected_return_type, &self.data)
     }
 
     pub fn fast_call_update(&mut self, delta_time: f32) -> std::result::Result<(), String> {
         let Some(engine) = &mut self.engine else {
-            return Err("Engine not initialized".to_string())
+            return Err("Engine not initialized".to_string());
         };
 
         engine.fast_call_update(delta_time)
@@ -271,7 +277,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
 
     pub fn fast_call_fixed_update(&mut self, delta_time: f32) -> std::result::Result<(), String> {
         let Some(engine) = &mut self.engine else {
-            return Err("Engine not initialized".to_string())
+            return Err("Engine not initialized".to_string());
         };
 
         engine.fast_call_fixed_update(delta_time)
@@ -281,12 +287,9 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> Turing<Ext> {
         let Some(engine) = &self.engine else {
             return None;
         };
-        
+
         engine.get_api_versions()
     }
-    
-
-
 }
 
 /// Panic hook that logs panic information using the provided external functions.

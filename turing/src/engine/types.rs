@@ -21,11 +21,7 @@ pub struct ScriptFnMetadata {
 }
 
 impl ScriptFnMetadata {
-    pub fn new(
-        capability: String,
-        callback: ScriptCallback,
-        doc_comment: Option<String>,
-    ) -> Self {
+    pub fn new(capability: String, callback: ScriptCallback, doc_comment: Option<String>) -> Self {
         Self {
             capability,
             callback,
@@ -77,7 +73,8 @@ impl ScriptFnMetadata {
         if !r.is_valid_return_type() {
             return Err(anyhow!("DataType '{}' is not a valid return type", r));
         }
-        self.return_type.push((r, r.as_spec_return_type()?.to_string()));
+        self.return_type
+            .push((r, r.as_spec_return_type()?.to_string()));
         Ok(self)
     }
 
@@ -110,7 +107,10 @@ impl ScriptFnMetadata {
         format!(
             "_{}_{}",
             self.capability.to_case(Case::Snake),
-            fn_name.to_case(Case::Snake).replace("::", "__").replace(".", "__")
+            fn_name
+                .to_case(Case::Snake)
+                .replace("::", "__")
+                .replace(".", "__")
         )
     }
 }
@@ -140,7 +140,7 @@ impl DataType {
             DataType::RustVec4 | DataType::ExtVec4 => "Vec4",
             DataType::RustQuat | DataType::ExtQuat => "Quat",
             DataType::RustMat4 | DataType::ExtMat4 => "Mat4",
-            DataType::RustU32Buffer | DataType::ExtU32Buffer => "&Vu32"
+            DataType::RustU32Buffer | DataType::ExtU32Buffer => "&Vu32",
         })
     }
 
@@ -168,7 +168,7 @@ impl DataType {
             DataType::RustVec4 | DataType::ExtVec4 => "Vec4",
             DataType::RustQuat | DataType::ExtQuat => "Quat",
             DataType::RustMat4 | DataType::ExtMat4 => "Mat4",
-            DataType::RustU32Buffer | DataType::ExtU32Buffer => "Vu32"
+            DataType::RustU32Buffer | DataType::ExtU32Buffer => "Vu32",
         })
     }
 }

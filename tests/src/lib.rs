@@ -1,7 +1,6 @@
-use std::ffi::{CString, c_char, CStr};
+use std::ffi::{CStr, CString, c_char};
 use std::path::Path;
 use std::{fs, io};
-
 
 unsafe extern "C" {
     fn _test_log__info(msg: *const c_char);
@@ -21,7 +20,8 @@ macro_rules! println {
 #[unsafe(no_mangle)]
 extern "C" fn on_load() {
     unsafe {
-        let s = CString::new("log info from wasm!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!").unwrap();
+        let s =
+            CString::new("log info from wasm!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!").unwrap();
         let ptr = s.into_raw();
 
         _test_log__info(ptr);
@@ -30,7 +30,6 @@ extern "C" fn on_load() {
 
 #[unsafe(no_mangle)]
 extern "C" fn file_access_test() {
-
     let current_path = Path::new(env!("CARGO_MANIFEST_DIR"));
     let readme = current_path.parent().unwrap().join("README.md");
     let bytes = fs::read(readme).unwrap();
@@ -38,7 +37,6 @@ extern "C" fn file_access_test() {
     let content = String::from_utf8(bytes);
 
     println!("Wasm read file contents as:\n{:#?}", content);
-
 }
 
 #[unsafe(no_mangle)]
@@ -51,7 +49,9 @@ extern "C" fn math_ops_test(a: f32, b: f32) -> f32 {
 extern "C" fn test_stdin_fail() {
     println!("trying to read input");
     let mut input = String::new();
-    io::stdin().read_line(&mut input).expect("Failed to read line");
+    io::stdin()
+        .read_line(&mut input)
+        .expect("Failed to read line");
     println!("You typed: {}", input.trim());
 }
 

@@ -1,12 +1,12 @@
+use crate::engine::types::ScriptFnMetadata;
+use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use rustc_hash::FxHashMap;
-use crate::engine::types::ScriptFnMetadata;
 
+use crate::interop::types::Semver;
 use anyhow::{Result, anyhow};
 use convert_case::{Case, Casing};
-use crate::interop::types::Semver;
 
 /// This places txt files in the `output_folder` titled as `<capability>.txt`
 pub fn generate_specs(
@@ -14,12 +14,11 @@ pub fn generate_specs(
     api_versions: &FxHashMap<String, Semver>,
     output_directory: &Path,
 ) -> Result<()> {
-
     if !output_directory.exists() {
-        return Err(anyhow!("output directory must exist"))
+        return Err(anyhow!("output directory must exist"));
     }
     if !output_directory.is_dir() {
-        return Err(anyhow!("output directory must be a directory, not a file"))
+        return Err(anyhow!("output directory must be a directory, not a file"));
     }
 
     let mut output = Vec::new();
@@ -28,7 +27,6 @@ pub fn generate_specs(
     for (api, ver) in api_versions {
         output.push((api.clone(), generate_spec(api, *ver, metadata)?))
     }
-    
 
     for (name, contents) in output {
         let path = output_directory.join(format!("{}.txt", name));
@@ -38,7 +36,11 @@ pub fn generate_specs(
     Ok(())
 }
 
-fn generate_spec(api: &str, ver: Semver, metadata: &FxHashMap<String, ScriptFnMetadata>) -> Result<String> {
+fn generate_spec(
+    api: &str,
+    ver: Semver,
+    metadata: &FxHashMap<String, ScriptFnMetadata>,
+) -> Result<String> {
     let mut spec = String::new();
 
     spec += &format!("#api {}\n", api);
@@ -54,9 +56,12 @@ fn generate_spec(api: &str, ver: Semver, metadata: &FxHashMap<String, ScriptFnMe
     let mut classes = HashMap::new();
 
     for (name, data) in metadata {
-        if data.capability != api { continue };
-        
-        if name.contains(".") { // methods
+        if data.capability != api {
+            continue;
+        };
+
+        if name.contains(".") {
+            // methods
             let names = name.splitn(2, ".").collect::<Vec<&str>>();
             let class_name = names[0].to_case(Case::Pascal);
             let func_name = names[1].to_case(Case::Snake);
@@ -65,7 +70,8 @@ fn generate_spec(api: &str, ver: Semver, metadata: &FxHashMap<String, ScriptFnMe
             }
             let map = classes.get_mut(&class_name).unwrap();
             map.push(data.generate_signature(Some(&class_name), &func_name, FnType::Method))
-        } else if name.contains("::") { // functions
+        } else if name.contains("::") {
+            // functions
             let names = name.splitn(2, "::").collect::<Vec<&str>>();
             let class_name = names[0].to_case(Case::Pascal);
             let func_name = names[1].to_case(Case::Snake);
@@ -74,7 +80,8 @@ fn generate_spec(api: &str, ver: Semver, metadata: &FxHashMap<String, ScriptFnMe
             }
             let map = classes.get_mut(&class_name).unwrap();
             map.push(data.generate_signature(Some(&class_name), &func_name, FnType::Function))
-        } else { // globals
+        } else {
+            // globals
             globals.push(data.generate_signature(None, name, FnType::Global))
         }
     }
@@ -86,7 +93,6 @@ fn generate_spec(api: &str, ver: Semver, metadata: &FxHashMap<String, ScriptFnMe
             spec += &part;
             spec += "\n";
         }
-
     }
 
     for (class, functions) in classes {
@@ -107,7 +113,11 @@ impl ScriptFnMetadata {
         let mut out = String::new();
 
         let binding = "_".to_string()
-            + &if let Some(cn) = class_name { cn.to_case(Case::Snake) + "__" } else { String::new() }
+            + &if let Some(cn) = class_name {
+                cn.to_case(Case::Snake) + "__"
+            } else {
+                String::new()
+            }
             + &func_name.to_case(Case::Snake);
 
         if matches!(ty, FnType::Function) {
@@ -118,7 +128,10 @@ impl ScriptFnMetadata {
 
         out += "(";
 
-        let invalid_patterns = ["`", "'", "\"", "<", ">", ":", ".", ",", "/", "?", "!", "%", "$", "#", "-", "+", "=", "|", "[", "]", "{", "}"];
+        let invalid_patterns = [
+            "`", "'", "\"", "<", ">", ":", ".", ",", "/", "?", "!", "%", "$", "#", "-", "+", "=",
+            "|", "[", "]", "{", "}",
+        ];
 
         out += &self.param_types
             .iter()
@@ -147,18 +160,12 @@ impl ScriptFnMetadata {
     }
 }
 
-
 #[cfg(test)]
 mod generator_tests {
     use anyhow::Result;
 
     #[test]
     fn test_generator_turing() -> Result<()> {
-
-
-
         Ok(())
     }
-
 }
-

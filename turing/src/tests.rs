@@ -1,9 +1,9 @@
 use crate::engine::types::ScriptFnMetadata;
 use crate::interop::params::{DataType, FfiParam, FfiParamArray, FreeableDataType, Param, Params};
+use crate::interop::types::U32Buffer;
 use crate::{ExternalFunctions, Turing};
 use anyhow::Result;
 use std::ffi::{CString, c_char, c_void};
-use crate::interop::types::U32Buffer;
 
 struct DirectExt {}
 impl ExternalFunctions for DirectExt {
@@ -69,19 +69,11 @@ extern "C" fn fetch_string(_params: FfiParamArray) -> FfiParam {
 fn common_setup_direct(source: &str) -> Result<Turing<DirectExt>> {
     let mut turing = Turing::new();
 
-    let mut metadata = ScriptFnMetadata::new(
-        "test".to_owned(),
-        log_info_wasm,
-        None,
-    );
+    let mut metadata = ScriptFnMetadata::new("test".to_owned(), log_info_wasm, None);
     metadata.add_param_type(DataType::RustString, "msg")?;
     turing.add_function("log::info", metadata)?;
 
-    let mut metadata = ScriptFnMetadata::new(
-        "test".to_owned(),
-        fetch_string,
-        None,
-    );
+    let mut metadata = ScriptFnMetadata::new("test".to_owned(), fetch_string, None);
     metadata.add_return_type(DataType::ExtString)?;
     turing.add_function("fetch_string", metadata)?;
 
@@ -123,7 +115,10 @@ fn test_math(mut turing: Turing<DirectExt>) -> Result<()> {
 
     let res = turing.call_fn_by_name("math_ops_test", params, DataType::F32);
 
-    println!("\x1b[38;2;200;200;20m[test/ext]: code multiplied 3.5 by 5.0 for {:#?}\x1b[0m", res);
+    println!(
+        "\x1b[38;2;200;200;20m[test/ext]: code multiplied 3.5 by 5.0 for {:#?}\x1b[0m",
+        res
+    );
     assert!((res.to_result::<f32>()? - 17.5).abs() < f32::EPSILON);
 
     Ok(())

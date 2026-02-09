@@ -1,10 +1,10 @@
 #![allow(static_mut_refs, clippy::new_without_default)]
 
-use std::ffi::{c_char, c_void, CString};
-use std::mem;
 use crate::ExternalFunctions;
 use crate::interop::params::FreeableDataType;
 use crate::interop::types::U32Buffer;
+use std::ffi::{CString, c_char, c_void};
+use std::mem;
 
 pub type CsAbort = extern "C" fn(*const c_char, *const c_char);
 pub type CsLog = extern "C" fn(*const c_char);
@@ -69,9 +69,15 @@ impl CsFns {
                 "log_warn" => self.log_warn = mem::transmute::<*const c_void, CsLog>(ptr),
                 "log_critical" => self.log_critical = mem::transmute::<*const c_void, CsLog>(ptr),
                 "log_debug" => self.log_debug = mem::transmute::<*const c_void, CsLog>(ptr),
-                "free_cs_string" => self.free_cs_string = mem::transmute::<*const c_void, CsFree>(ptr),
-                "free_of_type" => self.free_of_type = mem::transmute::<*const c_void, CsFreeOfType>(ptr),
-                "free_u32_buffer" => self.free_u32_buffer = mem::transmute::<*const c_void, CsFreeBuffer>(ptr),
+                "free_cs_string" => {
+                    self.free_cs_string = mem::transmute::<*const c_void, CsFree>(ptr)
+                }
+                "free_of_type" => {
+                    self.free_of_type = mem::transmute::<*const c_void, CsFreeOfType>(ptr)
+                }
+                "free_u32_buffer" => {
+                    self.free_u32_buffer = mem::transmute::<*const c_void, CsFreeBuffer>(ptr)
+                }
                 _ => {
                     eprintln!("Invalid function name: '{}', process will abort.", fn_name);
                     std::process::abort()
@@ -122,21 +128,14 @@ impl ExternalFunctions for CsFns {
         }
     }
     fn free_string(ptr: *const c_char) {
-        unsafe {
-            (CS_FNS.free_cs_string)(ptr)
-        }
+        unsafe { (CS_FNS.free_cs_string)(ptr) }
     }
 
     fn free_of_type(ptr: *mut c_void, typ: FreeableDataType) {
-        unsafe {
-            (CS_FNS.free_of_type)(ptr, typ as u32)
-        }
+        unsafe { (CS_FNS.free_of_type)(ptr, typ as u32) }
     }
 
     fn free_u32_buffer(buf: U32Buffer) {
-        unsafe {
-            (CS_FNS.free_u32_buffer)(buf)
-        }
+        unsafe { (CS_FNS.free_u32_buffer)(buf) }
     }
-
 }

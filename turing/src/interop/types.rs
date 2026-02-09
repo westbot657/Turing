@@ -1,11 +1,11 @@
+use crate::ExternalFunctions;
 use std::cmp::Ordering;
-use std::ffi::{c_char, c_void, CStr};
+use std::ffi::{CStr, c_char, c_void};
 use std::fmt::{Display, Formatter};
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::{ptr, slice};
-use crate::ExternalFunctions;
 
 #[derive(Default, Eq, Clone, Copy)]
 pub struct Semver {
@@ -16,7 +16,11 @@ pub struct Semver {
 
 impl Semver {
     pub fn new(major: u32, minor: u16, patch: u16) -> Self {
-        Self { major, minor, patch }
+        Self {
+            major,
+            minor,
+            patch,
+        }
     }
 
     pub fn from_u64(ver: u64) -> Self {
@@ -34,7 +38,6 @@ impl Semver {
     pub fn into_u64(self) -> u64 {
         ((self.major as u64) << 32) | ((self.minor as u64) << 16) | (self.patch as u64)
     }
-
 }
 
 impl PartialEq for Semver {
@@ -61,16 +64,18 @@ impl Display for Semver {
     }
 }
 
-
 /// A string allocated externally, to be managed by the external environment.
 pub struct ExtString<Ext: ExternalFunctions> {
     pub ptr: *const c_char,
-    _ext: PhantomData<Ext>
+    _ext: PhantomData<Ext>,
 }
 
 impl<Ext: ExternalFunctions> ExtString<Ext> {
     pub fn new(ptr: *const c_char) -> Self {
-        ExtString { ptr, _ext: PhantomData }
+        ExtString {
+            ptr,
+            _ext: PhantomData,
+        }
     }
 }
 
@@ -86,7 +91,7 @@ impl<Ext: ExternalFunctions> From<&CStr> for ExtString<Ext> {
     fn from(s: &CStr) -> Self {
         ExtString {
             ptr: s.as_ptr() as *mut c_char,
-            _ext: PhantomData
+            _ext: PhantomData,
         }
     }
 }
@@ -95,7 +100,7 @@ impl<Ext: ExternalFunctions> From<*const c_char> for ExtString<Ext> {
     fn from(ptr: *const c_char) -> Self {
         ExtString {
             ptr: ptr as *mut c_char,
-            _ext: PhantomData
+            _ext: PhantomData,
         }
     }
 }
@@ -116,7 +121,7 @@ impl<Ext: ExternalFunctions> Display for ExtString<Ext> {
 
 #[derive(Debug, Copy, Clone)]
 pub struct ExtPointer {
-    pub ptr: *const c_void
+    pub ptr: *const c_void,
 }
 
 impl ExtPointer {
@@ -172,8 +177,6 @@ impl Default for ExtPointer {
     }
 }
 
-
-
 #[repr(C)]
 #[derive(Copy)]
 pub struct U32Buffer {
@@ -193,9 +196,9 @@ impl Clone for U32Buffer {
 impl U32Buffer {
     /// Moves the data into a Vec<u32> and frees the underlying data directly
     pub fn from_rust(self) -> Vec<u32> {
-        let slice = unsafe { Box::from_raw(slice::from_raw_parts_mut(self.array, self.size as usize)) };
+        let slice =
+            unsafe { Box::from_raw(slice::from_raw_parts_mut(self.array, self.size as usize)) };
         slice.into_vec()
-
     }
 
     /// Copies the data into a Vec<u32> and asks the external code to free the underlying data
@@ -211,6 +214,4 @@ impl U32Buffer {
         let slice = unsafe { slice::from_raw_parts(self.array, self.size as usize) };
         slice.to_vec()
     }
-
 }
-

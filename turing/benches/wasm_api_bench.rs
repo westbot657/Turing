@@ -1,13 +1,15 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use turing_rs::engine::types::ScriptFnMetadata;
 use std::env;
-use std::ffi::{c_void, CString};
+use std::ffi::{CString, c_void};
 use std::fs::File;
 use std::hint::black_box;
 use std::io::Write;
-use turing_rs::interop::params::{DataType, FfiParam, FfiParamArray, FreeableDataType, Param, Params};
-use turing_rs::{ExternalFunctions, Turing};
+use turing_rs::engine::types::ScriptFnMetadata;
+use turing_rs::interop::params::{
+    DataType, FfiParam, FfiParamArray, FreeableDataType, Param, Params,
+};
 use turing_rs::interop::types::U32Buffer;
+use turing_rs::{ExternalFunctions, Turing};
 
 struct DirectExt {}
 impl ExternalFunctions for DirectExt {
@@ -95,7 +97,9 @@ fn bench_call_tests_wasm_math(c: &mut Criterion) {
     turing
         .load_script("../tests/wasm/wasm_tests.wasm", &vec!["test"])
         .unwrap();
-    let math_ops_test = turing.get_fn_key("math_ops_test").expect("fn key not found");
+    let math_ops_test = turing
+        .get_fn_key("math_ops_test")
+        .expect("fn key not found");
 
     c.bench_function("turing_call_tests_wasm_math", |b| {
         b.iter(|| {
@@ -114,7 +118,9 @@ fn bench_fetch_string_from_wasm(c: &mut Criterion) {
     turing
         .load_script("../tests/wasm/wasm_tests.wasm", &vec!["test"])
         .unwrap();
-    let test_string_fetch = turing.get_fn_key("test_string_fetch").expect("fetch not found");
+    let test_string_fetch = turing
+        .get_fn_key("test_string_fetch")
+        .expect("fetch not found");
 
     c.bench_function("turing_fetch_string_from_wasm", |b| {
         b.iter(|| {
@@ -154,7 +160,6 @@ fn bench_call_wasm_update_and_fixed(c: &mut Criterion) {
         })
     });
 }
-
 
 criterion_group!(
     benches,

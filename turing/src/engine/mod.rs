@@ -1,9 +1,12 @@
 use std::sync::Arc;
 
+use crate::interop::types::Semver;
+use crate::{
+    EngineDataState, ExternalFunctions, ScriptFnKey,
+    interop::params::{DataType, Param, Params},
+};
 use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
-use crate::{EngineDataState, ExternalFunctions, ScriptFnKey, interop::params::{DataType, Param, Params}};
-use crate::interop::types::Semver;
 
 #[cfg(feature = "lua")]
 pub mod lua_engine;
@@ -30,10 +33,7 @@ impl<Ext> Engine<Ext>
 where
     Ext: ExternalFunctions + Send + Sync + 'static,
 {
-    pub fn get_fn_key(
-        &self,
-        name: &str,
-    ) -> Option<ScriptFnKey> {
+    pub fn get_fn_key(&self, name: &str) -> Option<ScriptFnKey> {
         #[allow(unreachable_patterns)]
         match self {
             #[cfg(feature = "wasm")]
@@ -92,11 +92,6 @@ where
             Engine::Lua(engine) => &engine.api_versions,
             _ => return None,
         };
-        if map.is_empty() {
-            None
-        } else {
-            Some(map)
-        }
+        if map.is_empty() { None } else { Some(map) }
     }
-
 }
