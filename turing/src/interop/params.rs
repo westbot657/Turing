@@ -309,7 +309,7 @@ macro_rules! deref_param {
     ( $param:expr, $case:tt ) => {
         match $param {
             Param::$case(v) => Ok(v),
-            Param::Error(e) => Err(anyhow!("{}", e)),
+            Param::Error(ref e) => Err(anyhow!("{}", e)),
             _ => Err(anyhow!("Incorrect data type")),
         }
     };

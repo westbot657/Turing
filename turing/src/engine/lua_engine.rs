@@ -333,7 +333,7 @@ impl<Ext: ExternalFunctions> LuaInterpreter<Ext> {
                 };
                 self.generate_function(lua, &table, fname.as_str(), metadata)?;
             } else if ScriptFnMetadata::is_static_method(name) {
-                let parts: Vec<&str> = name.splitn(2, ":").collect();
+                let parts: Vec<&str> = name.splitn(2, "::").collect();
                 let cname = parts[0].to_case(Case::Pascal);
                 let fname = parts[1].to_case(Case::Snake);
 
