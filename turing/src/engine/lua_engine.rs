@@ -10,7 +10,6 @@ use mlua::prelude::*;
 use mlua::{Function, MultiValue, Table, Value};
 use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
-use slotmap::KeyData;
 use std::fs;
 use std::marker::PhantomData;
 use std::path::Path;
@@ -34,7 +33,7 @@ fn lua_list_to_vec_u32(table: &Table) -> mlua::Result<Vec<u32>> {
     for i in 1..=len {
         let v: u32 = table
             .get(i as i64)
-            .map_err(|e| mlua::Error::FromLuaConversionError {
+            .map_err(|_e| mlua::Error::FromLuaConversionError {
                 from: "Lua value",
                 to: "u32".to_string(),
                 message: Some(format!("invalid value at index {}", i)),
@@ -49,7 +48,7 @@ impl DataType {
     pub fn to_lua_val_param(
         &self,
         val: &Value,
-        data: &Arc<RwLock<EngineDataState>>,
+        _data: &Arc<RwLock<EngineDataState>>,
     ) -> mlua::Result<Param> {
         match (self, val) {
             (DataType::I8, Value::Integer(i)) => Ok(Param::I8(*i as i8)),
@@ -84,7 +83,7 @@ impl Param {
     pub fn from_lua_type_val(
         typ: DataType,
         val: Value,
-        data: &Arc<RwLock<EngineDataState>>,
+        _data: &Arc<RwLock<EngineDataState>>,
         _lua: &Lua,
     ) -> Self {
         match typ {
@@ -124,7 +123,7 @@ impl Param {
         data: &Arc<RwLock<EngineDataState>>,
         lua: &Lua,
     ) -> mlua::Result<Value> {
-        let mut s = data.write();
+        let _s = data.write();
 
         Ok(match self {
             Param::I8(i) => Value::Integer(i as i64),
@@ -166,7 +165,7 @@ impl Params {
         if self.is_empty() {
             return Ok(MultiValue::new());
         }
-        let mut s = data.write();
+        let _s = data.write();
         let vals = self
             .params
             .into_iter()

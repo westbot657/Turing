@@ -3,7 +3,6 @@ use std::fs;
 use std::marker::PhantomData;
 use std::panic::catch_unwind;
 use std::path::Path;
-use std::ptr::null;
 use std::sync::Arc;
 use std::task::Poll;
 
@@ -13,11 +12,9 @@ use crate::interop::types::Semver;
 use crate::key_vec::KeyVec;
 use crate::{EngineDataState, ExternalFunctions, ScriptFnKey};
 use anyhow::{Result, anyhow, bail};
-use convert_case::{Case, Casing};
 use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
-use slotmap::KeyData;
-use smallvec::{ExtendFromSlice, SmallVec};
+use smallvec::SmallVec;
 use tokio::io::AsyncWrite;
 use wasmtime::{
     Caller, Config, Engine, Func, FuncType, Instance, Linker, Memory, MemoryAccessError, Module,
@@ -363,14 +360,14 @@ impl TypedFuncEntry {
         &self,
         store: &mut Store<WasiP1Ctx>,
         args: Params,
-        data: &Arc<RwLock<EngineDataState>>,
+        _data: &Arc<RwLock<EngineDataState>>,
     ) -> Result<Param, wasmtime::Error> {
         let get_object = |id: u64| -> Result<Param> { Ok(Param::Object(ObjectId::new(id))) };
 
         match self {
             TypedFuncEntry::NoParamsVoid(t) => t.call(store, ()).map(|_| Param::Void),
             TypedFuncEntry::NoParamsObject(t) => {
-                t.call(store, ()).and_then(|id| get_object(id as u64))
+                t.call(store, ()).and_then(get_object)
             }
             TypedFuncEntry::NoParamsI32(t) => t.call(store, ()).map(Param::I32),
             TypedFuncEntry::NoParamsI64(t) => t.call(store, ()).map(Param::I64),
@@ -1060,12 +1057,10 @@ pub fn wasm_host_strcpy(
 
     if let Some(next_str) = data.write().str_cache.pop_front()
         && next_str.len() + 1 == size as usize
-    {
-        if let Some(memory) = caller.get_export("memory").and_then(|m| m.into_memory()) {
+        && let Some(memory) = caller.get_export("memory").and_then(|m| m.into_memory()) {
             write_wasm_string(ptr as u32, &next_str, &memory, caller)?;
             return Ok(());
         }
-    }
 
     Err(anyhow!(
         "An error occurred whilst copying string to wasm memory"
@@ -1082,12 +1077,10 @@ pub fn wasm_host_bufcpy(
 
     if let Some(next_buf) = data.write().u32_buffer_queue.pop_front()
         && next_buf.len() == size as usize
-    {
-        if let Some(memory) = caller.get_export("memory").and_then(|m| m.into_memory()) {
+        && let Some(memory) = caller.get_export("memory").and_then(|m| m.into_memory()) {
             write_u32_vec(ptr as u32, &next_buf, &memory, caller)?;
             return Ok(());
         }
-    }
 
     Err(anyhow!(
         "An error occurred whilst copying a Vec<u32> to wasm memory"
