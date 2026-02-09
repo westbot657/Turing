@@ -581,9 +581,9 @@ fn get_u32_vec(ptr: u32, len: u32, data: &[u8]) -> Option<Vec<u32>> {
         return None;
     }
     let mut vec = vec![0u32; len as usize];
-    for i in 0..len as usize {
+    for (i, u) in &mut vec.iter_mut().enumerate() {
         let offset = start + i * 4;
-        vec[i] = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap());
+        *u = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
     }
     Some(vec)
 }
@@ -996,6 +996,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
 
 /// Wraps a call from wasm into the host environment, checking capability availability
 /// and converting parameters and return values as needed.
+#[allow(clippy::too_many_arguments)]
 fn wasm_bind_env<Ext: ExternalFunctions>(
     data: &Arc<RwLock<EngineDataState>>,
     mut caller: Caller<'_, WasiP1Ctx>,
