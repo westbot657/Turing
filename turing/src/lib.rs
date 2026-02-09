@@ -36,10 +36,6 @@ pub trait ExternalFunctions {
     fn free_u32_buffer(buf: U32Buffer);
 }
 
-new_key_type! {
-    pub struct OpaquePointerKey;
-}
-
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub struct ScriptFnKey(u32);
 
@@ -73,10 +69,6 @@ impl From<ScriptFnKey> for usize {
 
 #[derive(Default)]
 pub struct EngineDataState {
-    /// maps opaque pointer ids to real pointers
-    pub opaque_pointers: SlotMap<OpaquePointerKey, ExtPointer>,
-    /// maps real pointers back to their opaque pointer ids
-    pub pointer_backlink: FxHashMap<ExtPointer, OpaquePointerKey>,
     /// queue of strings for wasm to fetch (needed due to reentrancy limitations)
     pub str_cache: VecDeque<String>,
     /// which mods are currently active
@@ -88,15 +80,7 @@ pub struct EngineDataState {
 }
 
 impl EngineDataState {
-    pub fn get_opaque_pointer(&mut self, pointer: ExtPointer) -> OpaquePointerKey {
-        if let Some(opaque) = self.pointer_backlink.get(&pointer) {
-            *opaque
-        } else {
-            let op = self.opaque_pointers.insert(pointer);
-            self.pointer_backlink.insert(pointer, op);
-            op
-        }
-    }
+
 }
 
 pub struct Turing<Ext: ExternalFunctions + Send + Sync + 'static> {
@@ -311,7 +295,13 @@ where
     };
 
     let full_msg = format!("Panic occurred at {}: {}", location, msg);
+    // Capture a backtrace and include it in outputs
+    let backtrace = std::backtrace::Backtrace::force_capture();
+    let backtrace_str = format!("{}", backtrace);
 
+    let full_msg_with_bt = format!("{}\nBacktrace:\n{}", full_msg, backtrace_str);
+
+    Ext::log_critical(format!("Writing panic information to file and stderr: {:?}", file_out));
     if let Some(file_path) = file_out
         && let Ok(mut file) = std::fs::OpenOptions::new()
             .create(true)
@@ -319,11 +309,13 @@ where
             .open(file_path)
     {
         use std::io::Write;
-        let _ = writeln!(file, "{}", full_msg);
+        let _ = writeln!(file, "{}", full_msg_with_bt);
         let _ = file.flush();
     }
-    eprintln!("{}", full_msg);
 
-    // Log as critical error
-    Ext::log_critical(full_msg);
+    eprintln!("{}", full_msg);
+    eprintln!("Backtrace:\n{}", backtrace_str);
+
+    // Log as critical error (include backtrace)
+    Ext::log_critical(full_msg_with_bt);
 }

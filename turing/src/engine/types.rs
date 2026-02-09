@@ -4,11 +4,14 @@ use convert_case::{Case, Casing};
 
 pub type ScriptCallback = extern "C" fn(FfiParamArray) -> FfiParam;
 
+// Represents the name of a type used in parameter or return type lists
+pub type DataTypeName = String;
+
 #[derive(Clone)]
 pub struct ScriptFnParameter {
     pub name: String,
     pub data_type: DataType,
-    pub data_type_name: String,
+    pub data_type_name: DataTypeName,
 }
 
 #[derive(Clone)]
@@ -16,7 +19,7 @@ pub struct ScriptFnMetadata {
     pub capability: String,
     pub callback: ScriptCallback,
     pub param_types: Vec<ScriptFnParameter>,
-    pub return_type: Vec<(DataType, String)>,
+    pub return_type: Vec<(DataType, DataTypeName)>,
     pub doc_comment: Option<String>,
 }
 
@@ -98,7 +101,7 @@ impl ScriptFnMetadata {
 
     /// Determines if function is a static method
     pub fn is_static_method(fn_name: &str) -> bool {
-        fn_name.contains("::")
+        !Self::is_instance_method(fn_name) && fn_name.contains("::")
     }
 
     /// Converts function name to internal representation
@@ -116,6 +119,11 @@ impl ScriptFnMetadata {
 }
 
 impl DataType {
+    /// Returns the corresponding type name for a DataType when used as a parameter type in the function spec
+    /// The function spec uses Rust type names for simplicity, but some DataTypes like String and Object require special handling
+    /// 
+    /// This is not the same type name used in the engine's internal type system. For example, both `RustString` and `ExtString` are represented as `&str` in the function spec,
+    /// but they are handled uniquely in the engine's internal type system.
     fn as_spec_param_type(&self) -> anyhow::Result<&'static str> {
         Ok(match self {
             DataType::I8 => "i8",

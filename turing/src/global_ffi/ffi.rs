@@ -259,7 +259,7 @@ unsafe extern "C" fn turing_script_load(
     };
 
     if let Err(e) = turing.load_script(source, &capabilities) {
-        Param::Error(format!("{}\n{}", e, e.backtrace()))
+        Param::Error(format!("Error loading script: {}\n{}", e, e.backtrace()))
     } else {
         Param::Void
     }

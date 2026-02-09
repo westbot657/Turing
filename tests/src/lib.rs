@@ -2,10 +2,14 @@ use std::ffi::{CStr, CString, c_char};
 use std::path::Path;
 use std::{fs, io};
 
+pub type ObjectHandle = u64;
+
 unsafe extern "C" {
     fn _test_log__info(msg: *const c_char);
     fn _test_fetch_string() -> u32;
     fn _host_strcpy(location: u32, size: u32) -> u32;
+    fn _test_create_object_a() -> ObjectHandle;
+    fn _test_object_a__foo(handle: ObjectHandle) -> i32;
 }
 
 macro_rules! println {
@@ -32,7 +36,7 @@ extern "C" fn on_load() {
 extern "C" fn file_access_test() {
     let current_path = Path::new(env!("CARGO_MANIFEST_DIR"));
     let readme = current_path.parent().unwrap().join("README.md");
-    let bytes = fs::read(readme).unwrap();
+    let bytes = fs::read(readme).expect("Failed to read README.md");
 
     let content = String::from_utf8(bytes);
 
@@ -64,4 +68,24 @@ extern "C" fn test_string_fetch() {
     let string = turing_str.to_string_lossy().into_owned();
 
     println!("Received string from host: '{}'", string)
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn test_panic() {
+    panic!("This is a panic from within wasm!");
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn object_test(val: ObjectHandle) -> ObjectHandle {
+    // Echo back the raw i64 value so host-side opaque pointer handling can be tested.
+    val
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn object_test2() -> i32 {
+    let obj = unsafe { _test_create_object_a() };
+    println!("Created ObjectA with handle {}", obj);
+    let result = unsafe { _test_object_a__foo(obj) };
+    println!("Called ObjectA.foo(), got result {}", result);
+    result
 }

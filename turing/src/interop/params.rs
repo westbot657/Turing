@@ -1,53 +1,55 @@
-use crate::ExternalFunctions;
-use crate::interop::types::{ExtString, U32Buffer};
-use anyhow::{Result, anyhow};
-use glam::{Mat2, Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
-use num_enum::TryFromPrimitive;
+use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::fmt::Display;
 use std::marker::PhantomData;
 use std::mem;
 use std::ops::{Deref, DerefMut};
+use anyhow::{anyhow, Result};
+use glam::{Mat2, Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
+use num_enum::TryFromPrimitive;
+use crate::ExternalFunctions;
+use crate::interop::types::{ExtString, U32Buffer};
+
 
 #[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFromPrimitive)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFromPrimitive, Serialize, Deserialize)]
 pub enum DataType {
-    I8 = 1,
-    I16 = 2,
-    I32 = 3,
-    I64 = 4,
-    U8 = 5,
-    U16 = 6,
-    U32 = 7,
-    U64 = 8,
-    F32 = 9,
-    F64 = 10,
-    Bool = 11,
-    RustString = 12,
-    ExtString = 13,
-    Object = 14,
-    RustError = 15,
-    ExtError = 16,
-    Void = 17,
-    Vec2 = 18,
-    Vec3 = 19,
-    RustVec4 = 20,
-    ExtVec4 = 21,
-    RustQuat = 22,
-    ExtQuat = 23,
-    RustMat4 = 24,
-    ExtMat4 = 25,
-    RustU32Buffer = 26,
-    ExtU32Buffer = 27,
+    I8              = 1,
+    I16             = 2,
+    I32             = 3,
+    I64             = 4,
+    U8              = 5,
+    U16             = 6,
+    U32             = 7,
+    U64             = 8,
+    F32             = 9,
+    F64             = 10,
+    Bool            = 11,
+    RustString      = 12,
+    ExtString       = 13,
+    Object          = 14,
+    RustError       = 15,
+    ExtError        = 16,
+    Void            = 17,
+    Vec2            = 18,
+    Vec3            = 19,
+    RustVec4        = 20,
+    ExtVec4         = 21,
+    RustQuat        = 22,
+    ExtQuat         = 23,
+    RustMat4        = 24,
+    ExtMat4         = 25,
+    RustU32Buffer   = 26,
+    ExtU32Buffer    = 27,
 }
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFromPrimitive)]
 pub enum FreeableDataType {
-    ExtVec4 = DataType::ExtVec4 as u32,
-    ExtQuat = DataType::ExtQuat as u32,
-    ExtMat4 = DataType::ExtMat4 as u32,
+    ExtVec4      = DataType::ExtVec4      as u32,
+    ExtQuat      = DataType::ExtQuat      as u32,
+    ExtMat4      = DataType::ExtMat4      as u32,
     // ExtU32BUFFER = DataType::ExtU32Buffer as u32,
 }
 
@@ -57,21 +59,15 @@ impl FreeableDataType {
     pub unsafe fn free_ptr(&self, ptr: *mut c_void) {
         unsafe {
             match self {
-                Self::ExtVec4 => {
-                    drop(Box::from_raw(ptr as *mut Vec4));
-                }
-                Self::ExtQuat => {
-                    drop(Box::from_raw(ptr as *mut Quat));
-                }
-                Self::ExtMat4 => {
-                    drop(Box::from_raw(ptr as *mut Mat4));
-                }
+                Self::ExtVec4 => { drop(Box::from_raw(ptr as *mut Vec4)); }
+                Self::ExtQuat => { drop(Box::from_raw(ptr as *mut Quat)); }
+                Self::ExtMat4 => { drop(Box::from_raw(ptr as *mut Mat4)); }
             }
         }
     }
 }
 
-trait InnerFfiType {
+pub trait InnerFfiType {
     const STRING: DataType;
     const ERROR: DataType;
     const VEC4: DataType;
@@ -80,8 +76,8 @@ trait InnerFfiType {
     const U32BUFFER: DataType;
 }
 
-struct RustTypes;
-struct ExtTypes;
+pub struct RustTypes;
+pub struct ExtTypes;
 
 impl InnerFfiType for RustTypes {
     const STRING: DataType = DataType::RustString;
@@ -100,6 +96,7 @@ impl InnerFfiType for ExtTypes {
     const MAT4: DataType = DataType::ExtMat4;
     const U32BUFFER: DataType = DataType::ExtU32Buffer;
 }
+
 
 impl Display for DataType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -145,12 +142,58 @@ impl DataType {
     pub fn is_valid_param_type(&self) -> bool {
         !matches!(
             self,
-            DataType::RustError | DataType::ExtError | DataType::Void
+            DataType::RustError
+            | DataType::ExtError
+            | DataType::Void
         )
     }
 
     pub fn is_valid_return_type(&self) -> bool {
-        !matches!(self, DataType::RustError | DataType::ExtError)
+        !matches!(
+            self,
+            DataType::RustError
+            | DataType::ExtError
+        )
+    }
+
+
+}
+
+/// Represents a unique identifier for an object in the engine. Opaque to the script, just a u64 under the hood.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ObjectId(u64);
+
+impl ObjectId {
+    pub fn is_null(&self) -> bool {
+        self.0 == Self::null().0
+    }
+    
+    pub fn null() -> ObjectId {
+       ObjectId(0) 
+    } 
+
+    pub fn as_ffi(&self) -> u64 {
+        self.0
+    }
+
+
+    /// This function is useful if the external environment expects a pointer type for objects. 
+    /// It allows us to treat the ObjectId as an opaque pointer.
+    /// 
+    /// # Safety
+    /// - This value is not guaranteed to be a valid pointer, and should only be used 
+    ///   in contexts where the external environment passes it to us as from a pointer.
+    pub unsafe fn as_ptr(self) -> *const c_void {
+        self.0 as *const c_void
+    }
+
+    pub fn new(id: u64) -> Self {
+        ObjectId(id)
+    }
+
+    pub fn from_ptr(ptr: *const c_void) -> Self {
+        ObjectId(ptr as u64)
     }
 }
 
@@ -168,7 +211,7 @@ pub enum Param {
     F64(f64),
     Bool(bool),
     String(String),
-    Object(*const c_void),
+    Object(ObjectId),
     Error(String),
     Void,
     Vec2(Vec2),
@@ -179,15 +222,16 @@ pub enum Param {
     U32Buffer(Vec<u32>),
 }
 
+
 impl Param {
+
     pub fn to_rs_param(self) -> FfiParam {
         self.into_param_inner::<RustTypes>()
     }
-
     pub fn to_ext_param(self) -> FfiParam {
         self.into_param_inner::<ExtTypes>()
     }
-
+    
     #[rustfmt::skip]
     fn into_param_inner<T: InnerFfiType>(self) -> FfiParam {
         match self {
@@ -225,6 +269,33 @@ impl Param {
     pub fn to_result<T: FromParam>(self) -> Result<T> {
         T::from_param(self)
     }
+    
+    pub fn data_type<T: InnerFfiType>(&self) -> DataType {
+        match self {
+            Param::I8(_) => DataType::I8,
+            Param::I16(_) => DataType::I16,
+            Param::I32(_) => DataType::I32,
+            Param::I64(_) => DataType::I64,
+            Param::U8(_) => DataType::U8,
+            Param::U16(_) => DataType::U16,
+            Param::U32(_) => DataType::U32,
+            Param::U64(_) => DataType::U64,
+            Param::F32(_) => DataType::F32,
+            Param::F64(_) => DataType::F64,
+            Param::Bool(_) => DataType::Bool,
+            Param::String(_) => T::STRING,
+            Param::Object(_) => DataType::Object,
+            Param::Error(_) => T::ERROR,
+            Param::Void => DataType::Void,
+            Param::Vec2(_) => DataType::Vec2,
+            Param::Vec3(_) => DataType::Vec3,
+            Param::Vec4(_) => T::VEC4,
+            Param::Quat(_) => T::QUAT,
+            Param::Mat4(_) => T::MAT4,
+            Param::U32Buffer(_) => T::U32BUFFER,
+        } 
+    }
+
 }
 
 pub trait FromParam: Sized {
@@ -235,7 +306,7 @@ macro_rules! deref_param {
         match $param {
             Param::$case(v) => Ok(v),
             Param::Error(e) => Err(anyhow!("{}", e)),
-            _ => Err(anyhow!("Incorrect data type")),
+            _ => Err(anyhow!("Incorrect data type"))
         }
     };
     ( $tp:ty => $case:tt ) => {
@@ -244,7 +315,7 @@ macro_rules! deref_param {
                 deref_param!(param, $case)
             }
         }
-    };
+    }
 }
 deref_param! { i8     => I8     }
 deref_param! { i16    => I16    }
@@ -268,7 +339,7 @@ impl FromParam for () {
         match param {
             Param::Void => Ok(()),
             Param::Error(e) => Err(anyhow!("{}", e)),
-            _ => Err(anyhow!("Incorrect data type")),
+            _ => Err(anyhow!("Incorrect data type"))
         }
     }
 }
@@ -312,10 +383,7 @@ impl Params {
         self.params.is_empty()
     }
 
-    pub fn to_ffi<Ext>(self) -> FfiParams<Ext>
-    where
-        Ext: ExternalFunctions,
-    {
+    pub fn to_ffi<Ext>(self) -> FfiParams<Ext> where Ext: ExternalFunctions {
         FfiParams::from_params(self.params)
     }
 }
@@ -343,6 +411,7 @@ impl DerefMut for Params {
     }
 }
 
+
 /// C repr of ffi data
 #[repr(C)]
 pub union RawParam {
@@ -358,7 +427,7 @@ pub union RawParam {
     f64: f64,
     bool: bool,
     string: *const c_char,
-    object: *const c_void,
+    object: ObjectId,
     error: *const c_char,
     void: (),
     vec2: Vec2,
@@ -386,10 +455,8 @@ pub struct FfiParams<Ext: ExternalFunctions> {
     marker: PhantomData<Ext>,
 }
 
-impl<Ext> Drop for FfiParams<Ext>
-where
-    Ext: ExternalFunctions,
-{
+
+impl<Ext> Drop for FfiParams<Ext> where Ext: ExternalFunctions {
     fn drop(&mut self) {
         if self.params.is_empty() {
             return;
@@ -408,36 +475,21 @@ where
     }
 }
 
-impl<Ext> Default for FfiParams<Ext>
-where
-    Ext: ExternalFunctions,
-{
+impl<Ext> Default for FfiParams<Ext> where Ext: ExternalFunctions {
     fn default() -> Self {
         Self::empty()
     }
 }
 
-impl<Ext> FfiParams<Ext>
-where
-    Ext: ExternalFunctions,
-{
+impl<Ext> FfiParams<Ext> where Ext: ExternalFunctions {
     pub fn empty() -> Self {
-        Self {
-            params: SmallVec::new(),
-            marker: PhantomData,
-        }
+        Self { params: SmallVec::new(), marker: PhantomData }
     }
 
     /// Creates FfiParams from a vector of Params.
-    pub fn from_params<T>(params: T) -> Self
-    where
-        T: IntoIterator<Item = Param>,
-    {
+    pub fn from_params<T>(params: T) -> Self where T: IntoIterator<Item = Param> {
         let ffi_params = params.into_iter().map(|p| p.to_rs_param()).collect();
-        Self {
-            params: ffi_params,
-            marker: PhantomData,
-        }
+        Self { params: ffi_params, marker: PhantomData }
     }
 
     /// Creates FfiParams from an FfiParamArray with 'static lifetime.
@@ -446,14 +498,13 @@ where
             return Ok(Self::default());
         }
         unsafe {
-            let raw_vec = std::ptr::slice_from_raw_parts_mut(
-                array.ptr as *mut FfiParam,
-                array.count as usize,
-            );
+            let raw_vec =
+                std::ptr::slice_from_raw_parts_mut(array.ptr as *mut FfiParam, array.count as usize);
             let raw_vec = Box::from_raw(raw_vec);
 
             // take ownership of the raw_vec
             let owned = raw_vec.into_vec();
+
 
             Ok(Self {
                 params: SmallVec::from_vec(owned),
@@ -482,7 +533,7 @@ where
     }
 
     /// Leaks the FfiParams into an FfiParamArray with 'static lifetime.
-    /// Caller is responsible for freeing the memory.
+    /// Caller is responsible for freeing the memory. 
     /// Freeing is possible by converting back via FfiParams::from_ffi_array and dropping the FfiParams.
     pub fn leak(mut self) -> FfiParamArray<'static> {
         let boxed_slice = mem::take(&mut self.params).into_boxed_slice();
@@ -530,8 +581,7 @@ impl<'a> FfiParamArray<'a> {
                 std::ptr::slice_from_raw_parts(self.ptr as *mut FfiParam, self.count as usize);
             let slice = &*raw_slice;
 
-            let result = slice
-                .iter()
+            let result = slice.iter()
                 .map(|p| p.as_param::<Ext>())
                 .collect::<Result<_>>()?;
             Ok(Params { params: result })
@@ -541,23 +591,29 @@ impl<'a> FfiParamArray<'a> {
     pub fn as_slice(&'a self) -> &'a [FfiParam] {
         unsafe { std::slice::from_raw_parts(self.ptr, self.count as usize) }
     }
+
+    pub fn len(&self) -> u32 {
+        self.count
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.count == 0 || self.ptr.is_null()
+    }
 }
 
 impl FfiParam {
     pub fn into_param<Ext: ExternalFunctions>(self) -> Result<Param> {
         macro_rules! unbox {
-            ($tok:tt) => {
-                unsafe { *Box::from_raw(self.value.$tok as *mut _) }
-            };
+            ($tok:tt) => { unsafe { *Box::from_raw(self.value.$tok as *mut _) } };
         }
         macro_rules! deref {
-            ( $typ:tt ( $tok:tt ) ) => {{
-                let x = unsafe { &*self.value.$tok }.clone();
-                unsafe {
-                    <Ext>::free_of_type(self.value.$tok as *mut c_void, FreeableDataType::$typ)
-                };
-                x
-            }};
+            ( $typ:tt ( $tok:tt ) ) => {
+                {
+                    let x = unsafe { &*self.value.$tok }.clone();
+                    unsafe { <Ext>::free_of_type(self.value.$tok as *mut c_void, FreeableDataType::$typ) };
+                    x
+                }
+            };
         }
         Ok(match self.type_id {
             DataType::I8 => Param::I8(unsafe { self.value.i8 }),
@@ -597,25 +653,17 @@ impl FfiParam {
             DataType::ExtQuat => Param::Quat(deref!(ExtQuat(quat))),
             DataType::RustMat4 => Param::Mat4(unbox!(mat4)),
             DataType::ExtMat4 => Param::Mat4(deref!(ExtMat4(mat4))),
-            DataType::RustU32Buffer => {
-                Param::U32Buffer(unsafe { self.value.u32_buffer }.from_rust())
-            }
-            DataType::ExtU32Buffer => {
-                Param::U32Buffer(unsafe { self.value.u32_buffer }.from_ext::<Ext>())
-            }
+            DataType::RustU32Buffer => Param::U32Buffer(unsafe { self.value.u32_buffer }.from_rust()),
+            DataType::ExtU32Buffer => Param::U32Buffer(unsafe { self.value.u32_buffer }.from_ext::<Ext>()),
         })
     }
 
     pub fn as_param<Ext: ExternalFunctions>(&self) -> Result<Param> {
         macro_rules! unbox {
-            ($tok:tt) => {
-                deref!($tok)
-            };
+            ($tok:tt) => { deref!($tok) };
         }
         macro_rules! deref {
-            ($tok:tt) => {
-                unsafe { &*self.value.$tok }.clone()
-            };
+            ($tok:tt) => { unsafe { &*self.value.$tok }.clone() };
         }
         Ok(match self.type_id {
             DataType::I8 => Param::I8(unsafe { self.value.i8 }),
@@ -655,11 +703,10 @@ impl FfiParam {
             DataType::ExtQuat => Param::Quat(deref!(quat)),
             DataType::RustMat4 => Param::Mat4(unbox!(mat4)),
             DataType::ExtMat4 => Param::Mat4(deref!(mat4)),
-            DataType::RustU32Buffer | DataType::ExtU32Buffer => {
-                Param::U32Buffer(unsafe { self.value.u32_buffer }.borrow())
-            }
+            DataType::RustU32Buffer | DataType::ExtU32Buffer => Param::U32Buffer(unsafe { self.value.u32_buffer }.borrow())
         })
     }
+
 }
 
 impl From<Param> for FfiParam {
@@ -667,3 +714,4 @@ impl From<Param> for FfiParam {
         value.to_rs_param()
     }
 }
+

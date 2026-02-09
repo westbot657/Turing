@@ -1,12 +1,12 @@
-use crate::engine::types::ScriptFnMetadata;
-use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use rustc_hash::FxHashMap;
+use crate::{engine::types::ScriptFnMetadata, spec_gen::json_generator};
 
-use crate::interop::types::Semver;
 use anyhow::{Result, anyhow};
 use convert_case::{Case, Casing};
+use crate::interop::types::Semver;
 
 /// This places txt files in the `output_folder` titled as `<capability>.txt`
 pub fn generate_specs(
@@ -14,11 +14,12 @@ pub fn generate_specs(
     api_versions: &FxHashMap<String, Semver>,
     output_directory: &Path,
 ) -> Result<()> {
+
     if !output_directory.exists() {
-        return Err(anyhow!("output directory must exist"));
+        return Err(anyhow!("output directory must exist"))
     }
     if !output_directory.is_dir() {
-        return Err(anyhow!("output directory must be a directory, not a file"));
+        return Err(anyhow!("output directory must be a directory, not a file"))
     }
 
     let mut output = Vec::new();
@@ -27,20 +28,23 @@ pub fn generate_specs(
     for (api, ver) in api_versions {
         output.push((api.clone(), generate_spec(api, *ver, metadata)?))
     }
+    
 
     for (name, contents) in output {
         let path = output_directory.join(format!("{}.txt", name));
         fs::write(path, contents)?;
     }
 
+    let json = json_generator::generate_specs_json(metadata, api_versions)?;
+
+    let json_path = output_directory.join("specs.json");
+    let json_contents = serde_json::to_string_pretty(&json)?;
+    fs::write(json_path, json_contents)?;
+
     Ok(())
 }
 
-fn generate_spec(
-    api: &str,
-    ver: Semver,
-    metadata: &FxHashMap<String, ScriptFnMetadata>,
-) -> Result<String> {
+fn generate_spec(api: &str, ver: Semver, metadata: &FxHashMap<String, ScriptFnMetadata>) -> Result<String> {
     let mut spec = String::new();
 
     spec += &format!("#api {}\n", api);
@@ -56,12 +60,9 @@ fn generate_spec(
     let mut classes = HashMap::new();
 
     for (name, data) in metadata {
-        if data.capability != api {
-            continue;
-        };
-
-        if name.contains(".") {
-            // methods
+        if data.capability != api { continue };
+        
+        if name.contains(".") { // methods
             let names = name.splitn(2, ".").collect::<Vec<&str>>();
             let class_name = names[0].to_case(Case::Pascal);
             let func_name = names[1].to_case(Case::Snake);
@@ -69,9 +70,8 @@ fn generate_spec(
                 classes.insert(class_name.to_string(), Vec::new());
             }
             let map = classes.get_mut(&class_name).unwrap();
-            map.push(data.generate_signature(Some(&class_name), &func_name, FnType::Method))
-        } else if name.contains("::") {
-            // functions
+            map.push(data.generate_signature(&func_name, FnType::Method, &data.as_internal_name(name)))
+        } else if name.contains("::") { // functions
             let names = name.splitn(2, "::").collect::<Vec<&str>>();
             let class_name = names[0].to_case(Case::Pascal);
             let func_name = names[1].to_case(Case::Snake);
@@ -79,10 +79,9 @@ fn generate_spec(
                 classes.insert(class_name.to_string(), Vec::new());
             }
             let map = classes.get_mut(&class_name).unwrap();
-            map.push(data.generate_signature(Some(&class_name), &func_name, FnType::Function))
-        } else {
-            // globals
-            globals.push(data.generate_signature(None, name, FnType::Global))
+            map.push(data.generate_signature(&func_name, FnType::Function, &data.as_internal_name(name)))
+        } else { // globals
+            globals.push(data.generate_signature(name, FnType::Global, &data.as_internal_name(name)))
         }
     }
 
@@ -93,6 +92,7 @@ fn generate_spec(
             spec += &part;
             spec += "\n";
         }
+
     }
 
     for (class, functions) in classes {
@@ -109,16 +109,9 @@ enum FnType {
 }
 
 impl ScriptFnMetadata {
-    fn generate_signature(&self, class_name: Option<&str>, func_name: &str, ty: FnType) -> String {
+    fn generate_signature(&self, func_name: &str, ty: FnType, binding: &str) -> String {
         let mut out = String::new();
 
-        let binding = "_".to_string()
-            + &if let Some(cn) = class_name {
-                cn.to_case(Case::Snake) + "__"
-            } else {
-                String::new()
-            }
-            + &func_name.to_case(Case::Snake);
 
         if matches!(ty, FnType::Function) {
             out += "::";
@@ -128,10 +121,7 @@ impl ScriptFnMetadata {
 
         out += "(";
 
-        let invalid_patterns = [
-            "`", "'", "\"", "<", ">", ":", ".", ",", "/", "?", "!", "%", "$", "#", "-", "+", "=",
-            "|", "[", "]", "{", "}",
-        ];
+        let invalid_patterns = ["`", "'", "\"", "<", ">", ":", ".", ",", "/", "?", "!", "%", "$", "#", "-", "+", "=", "|", "[", "]", "{", "}"];
 
         out += &self.param_types
             .iter()
@@ -154,11 +144,12 @@ impl ScriptFnMetadata {
         out += self.return_type.first().map_or("void", |v| &v.1);
 
         out += " : ";
-        out += &binding;
+        out += binding;
 
         out
     }
 }
+
 
 #[cfg(test)]
 mod generator_tests {
@@ -166,6 +157,11 @@ mod generator_tests {
 
     #[test]
     fn test_generator_turing() -> Result<()> {
+
+
+
         Ok(())
     }
+
 }
+
