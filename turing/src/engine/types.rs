@@ -24,6 +24,10 @@ pub struct ScriptFnMetadata {
 }
 
 impl ScriptFnMetadata {
+    
+    pub const METHOD_SEPARATOR: &'static str = ".";
+    pub const STATIC_SEPARATOR: &'static str = "::";
+    
     pub fn new(capability: String, callback: ScriptCallback, doc_comment: Option<String>) -> Self {
         Self {
             capability,
@@ -96,12 +100,12 @@ impl ScriptFnMetadata {
 
     /// Determines if function is an instance method
     pub fn is_instance_method(fn_name: &str) -> bool {
-        fn_name.contains(".")
+        fn_name.contains(Self::METHOD_SEPARATOR)
     }
 
     /// Determines if function is a static method
     pub fn is_static_method(fn_name: &str) -> bool {
-        !Self::is_instance_method(fn_name) && fn_name.contains("::")
+        !Self::is_instance_method(fn_name) && fn_name.contains(Self::STATIC_SEPARATOR)
     }
 
     /// Converts function name to internal representation
@@ -112,8 +116,8 @@ impl ScriptFnMetadata {
             self.capability.to_case(Case::Snake),
             fn_name
                 .to_case(Case::Snake)
-                .replace("::", "__")
-                .replace(".", "__")
+                .replace(Self::STATIC_SEPARATOR, "__")
+                .replace(Self::METHOD_SEPARATOR, "__")
         )
     }
 }

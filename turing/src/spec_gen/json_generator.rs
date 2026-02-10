@@ -56,13 +56,13 @@ pub fn generate_specs_json(
 
         if ScriptFnMetadata::is_instance_method(name) {
             // methods
-            let names = name.splitn(2, ".").collect::<Vec<&str>>();
+            let names = name.splitn(2, ScriptFnMetadata::METHOD_SEPARATOR).collect::<Vec<&str>>();
             class_name = names[0].to_case(Case::Pascal);
             func_name = names[1].to_case(Case::Snake);
             is_opaque = true;
         } else if ScriptFnMetadata::is_static_method(name) {
             // functions
-            let names = name.splitn(2, "::").collect::<Vec<&str>>();
+            let names = name.splitn(2, ScriptFnMetadata::STATIC_SEPARATOR).collect::<Vec<&str>>();
             class_name = names[0].to_case(Case::Pascal);
             func_name = names[1].to_case(Case::Snake);
         } else {
@@ -77,7 +77,7 @@ pub fn generate_specs_json(
             capability: data.capability.clone(),
         });
 
-        if name.contains(".") {
+        if name.contains(ScriptFnMetadata::METHOD_SEPARATOR) {
             spec_class.is_opaque |= is_opaque;
         }
 
