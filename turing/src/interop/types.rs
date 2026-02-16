@@ -196,7 +196,7 @@ impl U32Buffer {
     /// Moves the data into a Vec<u32> and frees the underlying data directly
     pub fn from_rust(self) -> Vec<u32> {
         let slice = unsafe {
-            Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+            Box::from_raw(ptr::slice_from_raw_parts_mut(
                 self.array,
                 self.size as usize,
             ))

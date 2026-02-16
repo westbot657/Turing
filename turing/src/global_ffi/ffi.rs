@@ -3,7 +3,7 @@
 use crate::engine::types::{ScriptCallback, ScriptFnMetadata};
 use crate::global_ffi::wrappers::*;
 use crate::interop::params::{DataType, FfiParam, FreeableDataType, Param, Params};
-use crate::interop::types::Semver;
+use crate::interop::types::{Semver, U32Buffer};
 use crate::{Turing, panic_hook, spec_gen};
 use anyhow::{Result, anyhow};
 use core::slice;
@@ -66,6 +66,13 @@ unsafe extern "C" fn turing_free_string(ptr: *mut c_char) {
 /// `typ` must be a `FreeableDataType` compatible number, and must match the type the `ptr` points to.
 unsafe extern "C" fn turing_free_of_type(ptr: *mut c_void, typ: FreeableDataType) {
     unsafe { typ.free_ptr(ptr) }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `buf` must be a properly constructed U32Buffer instance
+unsafe extern "C" fn turing_free_u32_buffer(buf: U32Buffer) {
+    buf.from_rust();
 }
 
 #[unsafe(no_mangle)]
