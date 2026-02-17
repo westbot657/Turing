@@ -7,14 +7,14 @@ pub type ScriptCallback = extern "C" fn(FfiParamArray) -> FfiParam;
 // Represents the name of a type used in parameter or return type lists
 pub type DataTypeName = String;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ScriptFnParameter {
     pub name: String,
     pub data_type: DataType,
     pub data_type_name: DataTypeName,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ScriptFnMetadata {
     pub capability: String,
     pub callback: ScriptCallback,

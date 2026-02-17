@@ -11,7 +11,7 @@ use crate::interop::params::{DataType, ExtTypes, ObjectId, Param, Params};
 use crate::interop::types::Semver;
 use crate::key_vec::KeyVec;
 use crate::{EngineDataState, ExternalFunctions, ScriptFnKey};
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
@@ -103,7 +103,9 @@ impl DataType {
             | DataType::RustQuat
             | DataType::ExtQuat
             | DataType::RustMat4
-            | DataType::ExtMat4 => Ok(ValType::I32),
+            | DataType::ExtMat4
+            | DataType::ExtU32Buffer
+            | DataType::RustU32Buffer => Ok(ValType::I32),
 
             DataType::I64 | DataType::U64 | DataType::Object => Ok(ValType::I64),
 
@@ -730,102 +732,112 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
 
         // External functions
         for (name, metadata) in wasm_fns.iter() {
-            // Convert from `ClassName::functionName` to `_class_name_function_name`
-            let internal_name = metadata.as_internal_name(name);
-
-            let mut param_types = metadata
-                .param_types
-                .iter()
-                .map(|d| d.data_type)
-                .collect::<Vec<DataType>>();
-
-            if ScriptFnMetadata::is_instance_method(name) {
-                // instance methods get an extra first parameter for the instance pointer
-                param_types.insert(0, DataType::Object);
-            }
-
-            let param_wasm_types = param_types
-                .iter()
-                .map(|d| d.to_val_type())
-                .collect::<Result<Vec<ValType>>>()?;
-
-            // if the only return type is void, we treat it as no return types
-            let fn_return_type = metadata
-                .return_type
-                .first()
-                .cloned()
-                .map(|d| d.0)
-                .unwrap_or(DataType::Void);
-
-            // WE ONLY SUPPORT SINGLE RETURN VALUES FOR NOW
-            if metadata.return_type.len() > 1 {
-                Ext::log_critical(format!(
-                    "WASM functions with multiple return values are not supported: {}",
-                    name
-                ));
-                continue;
-            }
-
-            let r_types = if fn_return_type == DataType::Void {
-                Vec::new()
-            } else {
-                vec![fn_return_type.to_val_type()?]
-                // metadata.return_type.iter().map(|d| d.0.to_val_type()).collect::<Result<Vec<ValType>>>()?
-            };
-            let ft = FuncType::new(engine, param_wasm_types, r_types);
-            let cap = metadata.capability.clone();
-            let callback = metadata.callback;
-
-            let data2 = Arc::clone(&data);
-
-            Ext::log_debug(format!(
-                "Registered wasm function: env::{internal_name} {}",
-                ft
-            ));
-
-            linker.func_new(
-                "env",
-                internal_name.clone().as_str(),
-                ft,
-                move |caller, ps, rs| {
-                    match catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        wasm_bind_env::<Ext>(
-                            &data2,
-                            caller,
-                            &cap,
-                            ps,
-                            rs,
-                            param_types.as_slice(),
-                            fn_return_type,
-                            &callback,
-                        )
-                    })) {
-                        Ok(Ok(())) => Ok(()),
-                        Ok(Err(e)) => {
-                            // log errors since wasmtime doesn't propagate them with messages
-                            Ext::log_critical(format!(
-                                "WASM function {internal_name} returned error: {e}"
-                            ));
-                            Err(e)
-                        }
-                        Err(panic) => {
-                            let msg = if let Some(s) = panic.downcast_ref::<&str>() {
-                                (*s).to_string()
-                            } else if let Some(s) = panic.downcast_ref::<String>() {
-                                s.clone()
-                            } else {
-                                "Unknown panic payload".to_string()
-                            };
-                            Ext::log_critical(format!(
-                                "WASM function {internal_name} panicked: {msg}"
-                            ));
-                            Err(anyhow!("WASM function panicked: {msg}"))
-                        }
-                    }
-                },
-            )?;
+            Self::bind_wasm_fn(name, metadata, linker, engine, Arc::clone(&data))
+                .with_context(|| format!("Binding {name} script fn metadata {metadata:#?}"))?;
         }
 
+        Ok(())
+    }
+
+    fn bind_wasm_fn(
+        name: &str,
+        metadata: &ScriptFnMetadata,
+        linker: &mut Linker<WasiP1Ctx>,
+        engine: &Engine,
+        data: Arc<RwLock<EngineDataState>>,
+    ) -> Result<()> {
+        // Convert from `ClassName::functionName` to `_class_name_function_name`
+        let internal_name = metadata.as_internal_name(name);
+
+        let mut param_types = metadata
+            .param_types
+            .iter()
+            .map(|d| d.data_type)
+            .collect::<Vec<DataType>>();
+
+        if ScriptFnMetadata::is_instance_method(name) {
+            // instance methods get an extra first parameter for the instance pointer
+            param_types.insert(0, DataType::Object);
+        }
+
+        let param_wasm_types = param_types
+            .iter()
+            .map(|d| d.to_val_type())
+            .collect::<Result<Vec<ValType>>>()?;
+
+        // if the only return type is void, we treat it as no return types
+        let fn_return_type = metadata
+            .return_type
+            .first()
+            .cloned()
+            .map(|d| d.0)
+            .unwrap_or(DataType::Void);
+
+        // WE ONLY SUPPORT SINGLE RETURN VALUES FOR NOW
+        if metadata.return_type.len() > 1 {
+            Ext::log_critical(format!(
+                "WASM functions with multiple return values are not supported: {}",
+                name
+            ));
+            return Ok(());
+        }
+
+        let r_types = if fn_return_type == DataType::Void {
+            Vec::new()
+        } else {
+            vec![fn_return_type.to_val_type()?]
+            // metadata.return_type.iter().map(|d| d.0.to_val_type()).collect::<Result<Vec<ValType>>>()?
+        };
+        let ft = FuncType::new(engine, param_wasm_types, r_types);
+        let cap = metadata.capability.clone();
+        let callback = metadata.callback;
+
+        let data2 = Arc::clone(&data);
+
+        Ext::log_debug(format!(
+            "Registered wasm function: env::{internal_name} {}",
+            ft
+        ));
+
+        linker.func_new(
+            "env",
+            internal_name.clone().as_str(),
+            ft,
+            move |caller, ps, rs| {
+                match catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    wasm_bind_env::<Ext>(
+                        &data2,
+                        caller,
+                        &cap,
+                        ps,
+                        rs,
+                        param_types.as_slice(),
+                        fn_return_type,
+                        &callback,
+                    )
+                })) {
+                    Ok(Ok(())) => Ok(()),
+                    Ok(Err(e)) => {
+                        // log errors since wasmtime doesn't propagate them with messages
+                        Ext::log_critical(format!(
+                            "WASM function {internal_name} returned error: {e}"
+                        ));
+                        Err(e)
+                    }
+                    Err(panic) => {
+                        let msg = if let Some(s) = panic.downcast_ref::<&str>() {
+                            (*s).to_string()
+                        } else if let Some(s) = panic.downcast_ref::<String>() {
+                            s.clone()
+                        } else {
+                            "Unknown panic payload".to_string()
+                        };
+                        Ext::log_critical(format!("WASM function {internal_name} panicked: {msg}"));
+                        Err(anyhow!("WASM function panicked: {msg}"))
+                    }
+                }
+            },
+        )?;
         Ok(())
     }
 
