@@ -24,6 +24,9 @@ lua = ["dep:mlua"]
 # Enables registration of global-based FFI functions for all engines
 global_ffi = []
 
+[profile.bench]
+debug = true
+
 [[bench]]
 name = "wasm_api_bench"
 harness = false
@@ -36,27 +39,23 @@ harness = false
 [dependencies]
 anyhow = {version = "1.0", features = ["backtrace"] }
 serde_json = "1.0.149"
-glam = "0.30.10"
+glam = "0.32.0"
 
-wasmtime = { version = "40.0.1", optional = true }
-wasmtime-wasi = { version = "40.0.1", optional = true }
+wasmtime = { version = "41.0.3", optional = true }
+wasmtime-wasi = { version = "41.0.3", optional = true }
 mlua = { version = "0.11.5", features = ["lua54", "vendored"], optional = true }
 
-# todo: necessary?
 tokio = "1.49.0"
 
-slotmap = "1"
 num_enum = "0.7.5"
-smallvec = "1"
+smallvec = "1.15.1"
 parking_lot = "0.12.5"
-rustc-hash = "2"
-convert_case = "0.10.0"
+rustc-hash = "2.1.1"
+convert_case = "0.11.0"
 serde = { version = "1.0.228", features = ["derive"] }
 
 [dev-dependencies]
 # for testing with wasmtime
 wat = { version = "1.244.0" }
-wasmprinter = {version = "0.244.0" }
 
-serial_test = "3.2.0"
 criterion = "0.8"
