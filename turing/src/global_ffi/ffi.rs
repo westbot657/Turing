@@ -479,6 +479,19 @@ unsafe extern "C" fn turing_params_get_param(params: *mut Params, index: u32) ->
         Param::Error("index out of bounds".to_string()).to_rs_param()
     }
 }
+#[unsafe(no_mangle)]
+/// # Safety
+/// `params` must be a valid pointer to a `Params`.
+/// Sets the param at the specified index. 
+/// 
+unsafe extern "C" fn turing_params_set_param(params: *mut Params, index: u32, param: FfiParam) {
+    let params = unsafe { &mut *params };
+
+    let Some(p) = params.get_mut(index as usize) else { return };
+
+    let param = param.as_param::<CsFns>().unwrap();
+    *p = param;
+}
 
 #[unsafe(no_mangle)]
 /// This will correctly (probably) free an FfiParam including rust and ext strings
