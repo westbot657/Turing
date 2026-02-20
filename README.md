@@ -1,7 +1,6 @@
 # Turing.rs
-A wasm interpreter written in rust that interops with beat saber.  
+A scripting engine written in rust that interops with beat saber.  
 
-this library behaves similar to OpenGL in how functions are called
 
 # C# and rust interop specs
 
