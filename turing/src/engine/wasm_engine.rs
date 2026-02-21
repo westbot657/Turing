@@ -17,7 +17,8 @@ use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use tokio::io::AsyncWrite;
 use wasmtime::{
-    AsContext, Caller, Config, Engine, Func, FuncType, Instance, Linker, Memory, MemoryAccessError, Module, Store, StoreContext, TypedFunc, Val, ValType
+    AsContext, Caller, Config, Engine, Func, FuncType, Instance, Linker, Memory, MemoryAccessError,
+    Module, Store, StoreContext, TypedFunc, Val, ValType,
 };
 use wasmtime_wasi::WasiCtxBuilder;
 use wasmtime_wasi::cli::{IsTerminal, StdoutStream};
@@ -49,7 +50,6 @@ fn array_from_iter<const N: usize>(iter: impl IntoIterator<Item = f32>) -> [f32;
 }
 
 impl DataType {
-    #[cfg(feature = "wasm")]
     pub fn to_val_type(&self) -> Result<ValType> {
         match self {
             DataType::I8
@@ -1005,7 +1005,8 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
         .context("WASM memory not found")?;
 
     for (exp_typ, value) in p.iter().zip(ps) {
-        let param = Param::from_wasm_type_val(*exp_typ, *value, data, &memory, &caller.as_context());
+        let param =
+            Param::from_wasm_type_val(*exp_typ, *value, data, &memory, &caller.as_context());
         params.push(param)
     }
 
