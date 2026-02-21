@@ -236,7 +236,7 @@ impl Param {
     pub fn to_ext_param(self) -> FfiParam {
         self.into_param_inner::<ExtTypes>()
     }
-    
+
     #[rustfmt::skip]
     fn into_param_inner<T: InnerFfiType>(self) -> FfiParam {
         match self {

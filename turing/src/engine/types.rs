@@ -24,10 +24,9 @@ pub struct ScriptFnMetadata {
 }
 
 impl ScriptFnMetadata {
-    
     pub const METHOD_SEPARATOR: &'static str = ".";
     pub const STATIC_SEPARATOR: &'static str = "::";
-    
+
     pub fn new(capability: String, callback: ScriptCallback, doc_comment: Option<String>) -> Self {
         Self {
             capability,
