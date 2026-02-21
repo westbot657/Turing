@@ -277,7 +277,6 @@ pub fn panic_hook<Ext>(file_out: Option<PathBuf>, info: &std::panic::PanicHookIn
 where
     Ext: ExternalFunctions + Send + Sync + 'static,
 {
-    
     let msg = info.payload_as_str().unwrap_or("Unknown panic payload");
 
     let location = if let Some(location) = info.location() {

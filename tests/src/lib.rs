@@ -31,7 +31,7 @@ unsafe extern "C" {
 
 }
 
-//// Core Systems ////
+/// Core Systems ////
 pub mod alg {
     use super::*;
 

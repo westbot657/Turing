@@ -482,12 +482,14 @@ unsafe extern "C" fn turing_params_get_param(params: *mut Params, index: u32) ->
 #[unsafe(no_mangle)]
 /// # Safety
 /// `params` must be a valid pointer to a `Params`.
-/// Sets the param at the specified index. 
-/// 
+/// Sets the param at the specified index.
+///
 unsafe extern "C" fn turing_params_set_param(params: *mut Params, index: u32, param: FfiParam) {
     let params = unsafe { &mut *params };
 
-    let Some(p) = params.get_mut(index as usize) else { return };
+    let Some(p) = params.get_mut(index as usize) else {
+        return;
+    };
 
     let param = param.as_param::<CsFns>().unwrap();
     *p = param;

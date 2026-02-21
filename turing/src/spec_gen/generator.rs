@@ -68,7 +68,9 @@ fn generate_spec(
 
         if name.contains(ScriptFnMetadata::METHOD_SEPARATOR) {
             // methods
-            let names = name.splitn(2, ScriptFnMetadata::METHOD_SEPARATOR).collect::<Vec<&str>>();
+            let names = name
+                .splitn(2, ScriptFnMetadata::METHOD_SEPARATOR)
+                .collect::<Vec<&str>>();
             let class_name = names[0].to_case(Case::Pascal);
             let func_name = names[1].to_case(Case::Snake);
             if !classes.contains_key(&class_name) {
@@ -82,7 +84,9 @@ fn generate_spec(
             ))
         } else if name.contains(ScriptFnMetadata::STATIC_SEPARATOR) {
             // functions
-            let names = name.splitn(2, ScriptFnMetadata::STATIC_SEPARATOR).collect::<Vec<&str>>();
+            let names = name
+                .splitn(2, ScriptFnMetadata::STATIC_SEPARATOR)
+                .collect::<Vec<&str>>();
             let class_name = names[0].to_case(Case::Pascal);
             let func_name = names[1].to_case(Case::Snake);
             if !classes.contains_key(&class_name) {
