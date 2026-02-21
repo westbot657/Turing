@@ -17,73 +17,38 @@ use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use tokio::io::AsyncWrite;
 use wasmtime::{
-    Caller, Config, Engine, Func, FuncType, Instance, Linker, Memory, MemoryAccessError, Module,
-    Store, TypedFunc, Val, ValType,
+    AsContext, Caller, Config, Engine, Func, FuncType, Instance, Linker, Memory, MemoryAccessError, Module, Store, StoreContext, TypedFunc, Val, ValType
 };
 use wasmtime_wasi::WasiCtxBuilder;
 use wasmtime_wasi::cli::{IsTerminal, StdoutStream};
 use wasmtime_wasi::p1::WasiP1Ctx;
 
-impl DataType {
-    pub fn to_wasm_val_param(
-        &self,
-        val: &Val,
-        caller: &mut Caller<'_, WasiP1Ctx>,
-        data: &Arc<RwLock<EngineDataState>>,
-    ) -> Result<Param> {
-        use crate::engine::wasm_engine::get_wasm_string;
-        use wasmtime::Val;
+macro_rules! dequeue {
+    ($data:expr, $typ:tt :: $init:tt; $x:tt ) => {{
+        let mut s = $data.write();
 
-        macro_rules! dequeue {
-            ($typ:tt :: $init:tt; $x:tt ) => {{
-                let mut s = data.write();
-                let arr = s.f32_queue.drain(..$x).collect::<Vec<f32>>();
-                Ok(Param::$typ(glam::$typ::$init(arr.as_slice().try_into()?)))
-            }};
-        }
+        let arr = array_from_iter::<$x>(s.f32_queue.drain(..$x));
+        Param::$typ(glam::$typ::$init(arr))
+    }};
+}
+macro_rules! dequeue_ref {
+    ($data:expr, $typ:tt :: $init:tt; $x:tt ) => {{
+        let mut s = $data.write();
 
-        match (self, val) {
-            (DataType::I8, Val::I32(i)) => Ok(Param::I8(*i as i8)),
-            (DataType::I16, Val::I32(i)) => Ok(Param::I16(*i as i16)),
-            (DataType::I32, Val::I32(i)) => Ok(Param::I32(*i)),
-            (DataType::I64, Val::I64(i)) => Ok(Param::I64(*i)),
-            (DataType::U8, Val::I32(u)) => Ok(Param::U8(*u as u8)),
-            (DataType::U16, Val::I32(u)) => Ok(Param::U16(*u as u16)),
-            (DataType::U32, Val::I32(u)) => Ok(Param::U32(*u as u32)),
-            (DataType::U64, Val::I64(u)) => Ok(Param::U64(*u as u64)),
-            (DataType::F32, Val::F32(f)) => Ok(Param::F32(f32::from_bits(*f))),
-            (DataType::F64, Val::F64(f)) => Ok(Param::F64(f64::from_bits(*f))),
-            (DataType::Bool, Val::I32(b)) => Ok(Param::Bool(*b != 0)),
-            (DataType::RustString | DataType::ExtString, Val::I32(ptr)) => {
-                let ptr = *ptr as u32;
+        let arr = array_from_iter::<$x>(s.f32_queue.drain(..$x));
+        Param::$typ(glam::$typ::$init(&arr))
+    }};
+}
 
-                let Some(memory) = caller.get_export("memory").and_then(|e| e.into_memory()) else {
-                    return Err(anyhow!("wasm does not export memory"));
-                };
-                let st = get_wasm_string(ptr, memory.data(&caller));
-                Ok(Param::String(st))
-            }
-            (DataType::Object, Val::I64(pointer_id)) => {
-                let pointer_id = *pointer_id as u64;
-
-                if pointer_id == 0 {
-                    // reserved value for null pointers
-                    return Ok(Param::Object(ObjectId::null()));
-                }
-
-                Ok(Param::Object(ObjectId::new(pointer_id)))
-            }
-            (DataType::Vec2, Val::I32(2)) => dequeue!(Vec2::from_array; 2),
-            (DataType::Vec3, Val::I32(3)) => dequeue!(Vec3::from_array; 3),
-            (DataType::RustVec4 | DataType::ExtVec4, Val::I32(4)) => dequeue!(Vec4::from_array; 4),
-            (DataType::RustQuat | DataType::ExtQuat, Val::I32(4)) => dequeue!(Quat::from_array; 4),
-            (DataType::RustMat4 | DataType::ExtMat4, Val::I32(16)) => {
-                dequeue!(Mat4::from_cols_array; 16)
-            }
-            _ => Err(anyhow!("Mismatched parameter type")),
-        }
+fn array_from_iter<const N: usize>(iter: impl IntoIterator<Item = f32>) -> [f32; N] {
+    let mut arr = [0.0; N];
+    for (i, v) in iter.into_iter().take(N).enumerate() {
+        arr[i] = v;
     }
+    arr
+}
 
+impl DataType {
     #[cfg(feature = "wasm")]
     pub fn to_val_type(&self) -> Result<ValType> {
         match self {
@@ -126,15 +91,8 @@ impl Param {
         val: Val,
         data: &Arc<RwLock<EngineDataState>>,
         memory: &Memory,
-        caller: &Store<WasiP1Ctx>,
+        caller: &StoreContext<WasiP1Ctx>,
     ) -> Self {
-        macro_rules! dequeue {
-            ($typ:tt :: $init:tt; $x:tt ) => {{
-                let mut s = data.write();
-                Param::$typ(glam::$typ::$init(s.f32_queue.make_contiguous()))
-            }};
-        }
-
         match (typ, val) {
             (DataType::I8, Val::I32(i)) => Param::I8(i as i8),
             (DataType::I16, Val::I32(i)) => Param::I16(i as i16),
@@ -160,12 +118,12 @@ impl Param {
             }
             (DataType::Void, _) => Param::Void,
 
-            (DataType::Vec2, _) => dequeue!(Vec2::from_slice; 2),
-            (DataType::Vec3, _) => dequeue!(Vec3::from_slice; 3),
-            (DataType::RustVec4 | DataType::ExtVec4, _) => dequeue!(Vec4::from_slice; 4),
-            (DataType::RustQuat | DataType::ExtQuat, _) => dequeue!(Quat::from_slice; 4),
+            (DataType::Vec2, _) => dequeue!(data, Vec2::from_array; 2),
+            (DataType::Vec3, _) => dequeue!(data, Vec3::from_array; 3),
+            (DataType::RustVec4 | DataType::ExtVec4, _) => dequeue!(data, Vec4::from_array; 4),
+            (DataType::RustQuat | DataType::ExtQuat, _) => dequeue!(data, Quat::from_array; 4),
             (DataType::RustMat4 | DataType::ExtMat4, _) => {
-                dequeue!(Mat4::from_cols_slice; 16)
+                dequeue_ref!(data, Mat4::from_cols_array; 16)
             }
             (DataType::RustU32Buffer | DataType::ExtU32Buffer, Val::I32(ptr)) => {
                 let ptr = ptr as u32;
@@ -368,9 +326,7 @@ impl TypedFuncEntry {
 
         match self {
             TypedFuncEntry::NoParamsVoid(t) => t.call(store, ()).map(|_| Param::Void),
-            TypedFuncEntry::NoParamsObject(t) => {
-                t.call(store, ()).and_then(get_object)
-            }
+            TypedFuncEntry::NoParamsObject(t) => t.call(store, ()).and_then(get_object),
             TypedFuncEntry::NoParamsI32(t) => t.call(store, ()).map(Param::I32),
             TypedFuncEntry::NoParamsI64(t) => t.call(store, ()).map(Param::I64),
             TypedFuncEntry::NoParamsF32(t) => t.call(store, ()).map(Param::F32),
@@ -955,6 +911,20 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
             // We use i64 for opaque pointers since we need the full 64 bits to store the pointer
             DataType::Object => SmallVec::from_buf([Val::I64(0)]),
             DataType::I64 | DataType::U64 => SmallVec::from_buf([Val::I64(0)]),
+
+            DataType::ExtMat4
+            | DataType::ExtVec4
+            | DataType::ExtQuat
+            | DataType::RustMat4
+            | DataType::RustVec4
+            | DataType::RustQuat => {
+                // these are all passed as length to wasm, so we just need to reserve space for the pointer
+                SmallVec::from_buf([Val::I32(0)])
+            }
+
+            // u32 buffer
+            DataType::RustU32Buffer | DataType::ExtU32Buffer => SmallVec::from_buf([Val::I32(0)]),
+
             _ => SmallVec::from_buf([Val::I32(0)]),
         };
 
@@ -976,7 +946,7 @@ impl<Ext: ExternalFunctions + Send + Sync + 'static> WasmInterpreter<Ext> {
 
         // convert Val to Param
         // if an error is returned from wasm, convert to Param::Error
-        Param::from_wasm_type_val(ret_type, rt, data, memory, &self.store)
+        Param::from_wasm_type_val(ret_type, rt, data, memory, &self.store.as_context())
     }
 
     pub fn fast_call_update(&mut self, delta_time: f32) -> std::result::Result<(), String> {
@@ -1029,8 +999,13 @@ fn wasm_bind_env<Ext: ExternalFunctions>(
 
     // pre-allocate params to avoid repeated reallocations
     let mut params = Params::of_size(p.len() as u32);
+    let memory = caller
+        .get_export("memory")
+        .and_then(|m| m.into_memory())
+        .context("WASM memory not found")?;
+
     for (exp_typ, value) in p.iter().zip(ps) {
-        let param = exp_typ.to_wasm_val_param(value, &mut caller, data)?;
+        let param = Param::from_wasm_type_val(*exp_typ, *value, data, &memory, &caller.as_context());
         params.push(param)
     }
 
@@ -1070,10 +1045,11 @@ pub fn wasm_host_strcpy(
 
     if let Some(next_str) = data.write().str_cache.pop_front()
         && next_str.len() + 1 == size as usize
-        && let Some(memory) = caller.get_export("memory").and_then(|m| m.into_memory()) {
-            write_wasm_string(ptr as u32, &next_str, &memory, caller)?;
-            return Ok(());
-        }
+        && let Some(memory) = caller.get_export("memory").and_then(|m| m.into_memory())
+    {
+        write_wasm_string(ptr as u32, &next_str, &memory, caller)?;
+        return Ok(());
+    }
 
     Err(anyhow!(
         "An error occurred whilst copying string to wasm memory"
@@ -1090,10 +1066,11 @@ pub fn wasm_host_bufcpy(
 
     if let Some(next_buf) = data.write().u32_buffer_queue.pop_front()
         && next_buf.len() == size as usize
-        && let Some(memory) = caller.get_export("memory").and_then(|m| m.into_memory()) {
-            write_u32_vec(ptr as u32, &next_buf, &memory, caller)?;
-            return Ok(());
-        }
+        && let Some(memory) = caller.get_export("memory").and_then(|m| m.into_memory())
+    {
+        write_u32_vec(ptr as u32, &next_buf, &memory, caller)?;
+        return Ok(());
+    }
 
     Err(anyhow!(
         "An error occurred whilst copying a Vec<u32> to wasm memory"
