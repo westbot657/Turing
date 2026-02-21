@@ -162,3 +162,49 @@ Download the `mingw-64` package and compile using:
 ```
 cargo x w
 ```
+
+---
+
+**Linear Algebra Types (WASM usage)**
+
+- The engine supports passing common linear-algebra types via a small queue ABI: `Vec2`, `Vec3`, `Vec4`, `Quat`, and `Mat4`.
+- Hosts pass these types by pushing their float components into a shared f32 queue and calling the wasm function with one integer size argument per queued math parameter. Each size value indicates how many floats that parameter contains (e.g. `Vec2 = 2`, `Vec4 = 4`, `Mat4 = 16`).
+- WASM functions should accept one `u32` (or `u32`) per queued math param and return a `u32` size for the result. Use the provided `alg` helpers to dequeue/enqueue values. For example, a function taking two `Vec2` values will have signature `(u32, u32) -> u32` and should call `alg::dequeue_vec2()` twice in the same order the host enqueued them.
+
+Example wasm-side (Rust):
+
+```rust
+// Single Vec4 param: one u32 size argument
+#[unsafe(no_mangle)]
+extern "C" fn vec4_test(_size: u32) -> u32 {
+    let v = alg::dequeue_vec4(); // reads 4 f32 from the host queue
+    // ... do work on v ...
+    alg::enqueue_vec4(v) // enqueue 4 f32 to return to host and return size
+}
+
+// Two Vec2 params: two u32 size arguments in order
+#[unsafe(no_mangle)]
+extern "C" fn two_vec2s(_a_size: u32, _b_size: u32) -> u32 {
+    let a = alg::dequeue_vec2();
+    let b = alg::dequeue_vec2();
+    // ... do work on a and b ...
+    alg::enqueue_vec2(a)
+}
+```
+
+Host-side notes:
+
+- When calling from the host API, push `Param::Vec2`, `Param::Vec4`, or `Param::Mat4` into a `Params` value. The engine will enqueue the float components for each math param and pass a single integer size argument to wasm for each math param (in the same order they appear in `Params`).
+- The wasm function must return a `u32` size and enqueue the result floats; the engine converts the queued floats back into `Param` values for the caller.
+
+Host-side example (Rust):
+
+```rust
+let mut params = Params::new();
+params.push(Param::Vec4(Vec4::new(1.0, 2.0, 3.0, 4.0)));
+let res = turing.call_fn_by_name("vec4_test", params, DataType::Vec4);
+let v = res.to_result::<Vec4>()?;
+```
+
+If your function takes multiple math params, the wasm signature must include one `u32` size argument per param.
+```

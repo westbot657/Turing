@@ -5,6 +5,7 @@ use crate::interop::params::{
 use crate::interop::types::U32Buffer;
 use crate::{ExternalFunctions, Turing};
 use anyhow::Result;
+use glam::{Mat4, Vec2, Vec4};
 use std::ffi::{CString, c_char, c_void};
 
 struct DirectExt {}
@@ -285,5 +286,58 @@ pub fn test_host_wasm_host_panic() -> Result<()> {
         err.contains("Host panic from log_info_panic"),
         "Error did not contain expected panic message, got:\n{err}"
     );
+    Ok(())
+}
+
+#[test]
+pub fn test_vec2_wasm() -> Result<()> {
+    let mut turing = common_setup_direct(WASM_SCRIPT)?;
+
+    let mut params = Params::new();
+    params.push(Param::Vec2(Vec2::new(1.5, 2.5)));
+
+    let res = turing.call_fn_by_name("vec2_test", params, DataType::Vec2);
+    let v = res.to_result::<Vec2>()?;
+    assert!((v.x - 1.5).abs() < f32::EPSILON && (v.y - 2.5).abs() < f32::EPSILON);
+    Ok(())
+}
+
+#[test]
+pub fn test_vec4_wasm() -> Result<()> {
+    let mut turing = common_setup_direct(WASM_SCRIPT)?;
+
+    let mut params = Params::new();
+    params.push(Param::Vec4(Vec4::new(1.0, 2.0, 3.0, 4.0)));
+
+    let res = turing.call_fn_by_name("vec4_test", params, DataType::RustVec4);
+    let v = res.to_result::<Vec4>()?;
+    assert!(
+        (v.x - 1.0).abs() < f32::EPSILON
+            && (v.y - 2.0).abs() < f32::EPSILON
+            && (v.z - 3.0).abs() < f32::EPSILON
+            && (v.w - 4.0).abs() < f32::EPSILON
+    );
+    Ok(())
+}
+
+#[test]
+pub fn test_mat4_wasm() -> Result<()> {
+    let mut turing = common_setup_direct(WASM_SCRIPT)?;
+
+    let mut params = Params::new();
+    let m = Mat4::from_cols_array(&[
+        1.0, 0.0, 0.0, 0.0, // col0
+        0.0, 2.0, 0.0, 0.0, // col1
+        0.0, 0.0, 3.0, 0.0, // col2
+        0.0, 0.0, 0.0, 4.0, // col3
+    ]);
+    params.push(Param::Mat4(m));
+
+    let res = turing.call_fn_by_name("mat4_test", params, DataType::RustMat4);
+    let r = res.to_result::<Mat4>()?;
+    assert!((r.x_axis.x - 1.0).abs() < f32::EPSILON);
+    assert!((r.y_axis.y - 2.0).abs() < f32::EPSILON);
+    assert!((r.z_axis.z - 3.0).abs() < f32::EPSILON);
+    assert!((r.w_axis.w - 4.0).abs() < f32::EPSILON);
     Ok(())
 }
